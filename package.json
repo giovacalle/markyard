@@ -1,0 +1,19 @@
+{
+  "name": "markyard",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "build": "pnpm --dir web build && pnpm --dir bff check",
+    "check:web": "pnpm --dir web check",
+    "test:web": "pnpm --dir web test",
+    "check:bff": "pnpm --dir bff check",
+    "test:bff": "pnpm --dir bff test"
+  },
+  "devDependencies": {
+    "@alchemy.run/cloudflare": "2.0.0-beta.87",
+    "@effect/platform-node": "4.1.4",
+    "alchemy": "2.0.0-beta.87",
+    "effect": "4.1.4"
+  }
+}

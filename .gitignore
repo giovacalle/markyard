@@ -1,0 +1,8 @@
+node_modules/
+web/dist/
+.alchemy/
+.env
+.env.*
+!.env.example
+.DS_Store
+.worktrees/
