@@ -1,0 +1,95 @@
+{
+  "_comment": "Golden vectors for AES-256-GCM sealed session cookies: keys are [kid, hex32]; nonce is 12 copies of nonceByte.",
+  "vectors": [
+    {
+      "name": "v1_full",
+      "fn": "seal",
+      "keys": [
+        [
+          1,
+          "0707070707070707070707070707070707070707070707070707070707070707"
+        ]
+      ],
+      "nonceByte": 1,
+      "value": {
+        "rt": "1//rt-\"quoted\"-é-ünï",
+        "at": "ya29.access",
+        "exp": 1700003600,
+        "email": "owner@example.com"
+      },
+      "cookie": "AQEBAQEBAQEBAQEBAQ3D-8Oyhc4__vuuVV1rUkDdlGCRfMsZPpuYbqHa2vUU4J4q0egxv6InE3oy7x-N-utomiBxnJon0mCdOeEStaWZ1GgAPuAUSA45cAyJHiP3JOEGRUOvY0xBQXWUlvuwYy-hG-h3WN0OkG-CKX-3XfvLHg"
+    },
+    {
+      "name": "rotated_full",
+      "fn": "seal",
+      "keys": [
+        [
+          1,
+          "0707070707070707070707070707070707070707070707070707070707070707"
+        ],
+        [
+          2,
+          "0909090909090909090909090909090909090909090909090909090909090909"
+        ]
+      ],
+      "nonceByte": 2,
+      "value": {
+        "rt": "1//rt-\"quoted\"-é-ünï",
+        "at": "ya29.access",
+        "exp": 1700003600,
+        "email": "owner@example.com"
+      },
+      "cookie": "AgICAgICAgICAgICAoE2lAB8eLJ1wMxpRPvHWF5JXlEL_Mh17sN2UTJD5j51S6mmS6b8secjvPq5jpu6CkwXyBU21Abxic6DQU3o0MvIFCZFb2-WDceaelm5946foXA3d2wpXfumTDGIsNriOheLpcwcxyhHxpa70UvxVgP6rQ"
+    },
+    {
+      "name": "v1_bare",
+      "fn": "seal",
+      "keys": [
+        [
+          1,
+          "0707070707070707070707070707070707070707070707070707070707070707"
+        ]
+      ],
+      "nonceByte": 3,
+      "value": {
+        "rt": "1//rt-\"quoted\"-é-ünï",
+        "email": "Owner@Example.com"
+      },
+      "cookie": "AQMDAwMDAwMDAwMDA17c0Xd4EnxzVW8xKMYL3X2YU5SK0Mm2Xex3qnJfi4MXk4tfR_aazCzssmlK-qCCN2dha6Xk8lESAktBzhxRCPF-0aoMjm97mGJGDe5-pA"
+    },
+    {
+      "name": "state",
+      "fn": "seal",
+      "keys": [
+        [
+          1,
+          "0707070707070707070707070707070707070707070707070707070707070707"
+        ]
+      ],
+      "nonceByte": 0,
+      "value": {
+        "state": "00000000000000000000000000000000",
+        "verifier": "AAAA"
+      },
+      "cookie": "AQAAAAAAAAAAAAAAABr618aa5m7K2yW_VPRLe56N35nJQ-ybayYlsPh_2SpW3fl5ZLPCW870itpTutEt2C_mwSr73g7KiG_GXSRWzqCP8sa-AJUmpdLUb8ujdA"
+    },
+    {
+      "name": "oversized_session",
+      "fn": "seal_session",
+      "keys": [
+        [
+          1,
+          "0707070707070707070707070707070707070707070707070707070707070707"
+        ]
+      ],
+      "nonceByte": 5,
+      "value": {
+        "rt": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+        "at": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "exp": 1800000000,
+        "email": "owner@example.com"
+      },
+      "cookie": "AQUFBQUFBQUFBQUFBZnT9Vzzp11BkgUvAvcf-8YlNHpxgaww9VeC6jSOUNCkovMgCMAdz2PRYiigbsRRGuVAJUWwRqqkP3fXf0My6adYbViExXPV4MWqsNbC7EqtY3dz_2N-T1a0tZtKFjp2TXcLVXiZiF7MT9hXVJYUif5-WdRNFdzL7JqhgSMAp2VMNmONniDSJ-1RmsI91mCUHHmZ-9RhZ7L5i9Be5sZNlfC736bKbuG7S_oQsIoK58HslsI2YrAgIDfbHh-mADG881RJfef5ownI0S7fjM9ugWM1Un9JLp1Jr8zGWOVMrMmfysndXOBtkAUKD93uVvTgynWTlvfPpiOmLyjWt2d9Zv2YroQoxhoE4DbgD9jOoUgTUsqqZxjlsKEsSVYaR6IX4kK6ru2ZNsqJO8T22xmlQDNdX7XQFCbJKg3ODd-3Ge2_Xo5BQZeo4rQQLSqytA0lwWKBr98mNPODRGCNP1pffQSA4e_GXqdLCvWtHNWMnj8-kFoh6LwS21qSW8sDv6moQsgEpL4UOqfQewxBYXJ6WKZrTmKDAKKCuJ6Iez09k_M0w9CciD-FomWcwdbAduRUKBoYVHJOzxS_8HXWd8IJFH0Z5_mtRihssBdutM830ZkV7NpYss8TnMdZWNQmcZfJnE-F47v_6XK49oOiCxa-uW2TPkBfBORrl-Tt4X-HMsX1ezE08g8NhDfqUsCVy_8bDPOgYgrRpQSmQgRDedv_jPuVSvsT4Tjm_FfsuFvdQjMtv24iK2o"
+    }
+  ]
+}
