@@ -9,15 +9,17 @@ import {
   type TreeController,
 } from "@ui-sdk/react/tree";
 import { createContext, useContext, useEffect, useRef, useState } from "react";
-import { fetchChildren, type DriveNode } from "../api";
+import { fetchChildren, fetchVaultIndex, type DriveNode } from "../api";
 import { writeCachedFolder } from "../localCache";
 import {
   ancestorIdsFromPath,
   canMoveInto,
   childrenKey,
+  indexedAncestorIds,
   knownAncestorIds,
   knownFolders,
   relativePath,
+  VAULT_INDEX_KEY,
 } from "../treeCache";
 import {
   readExpandedFolders,
@@ -414,14 +416,36 @@ function RootTree({
         cancelled = true;
       };
     }
-    // No path to follow: wait for the listing that holds the note (e.g. cached folders hydrating).
-    const unsubscribe = queryClient.getQueryCache().subscribe(() => {
-      const found = knownAncestorIds(queryClient, rootFolderId, selectedId);
+    // No path to follow (a restored note, `?file=`): wait for the listing that holds the note
+    // (e.g. cached folders hydrating). Once the root listing is in and the note is still not
+    // found, it sits in a folder the tree never listed: ask the vault index for its folders.
+    let indexRequested = false;
+    let done = false;
+    const check = () => {
+      if (done) {
+        return;
+      }
+      const found = indexedAncestorIds(queryClient, rootFolderId, selectedId);
       if (found !== null) {
+        done = true;
         unsubscribe();
         reveal(found);
+        return;
       }
-    });
+      if (!indexRequested && queryClient.getQueryData(childrenKey(rootFolderId)) !== undefined) {
+        indexRequested = true;
+        queryClient
+          .fetchQuery({
+            queryKey: VAULT_INDEX_KEY,
+            queryFn: ({ signal }) => fetchVaultIndex(signal),
+            staleTime: 60_000,
+            retry: false,
+          })
+          .catch(() => undefined);
+      }
+    };
+    const unsubscribe = queryClient.getQueryCache().subscribe(check);
+    check();
     return () => {
       cancelled = true;
       unsubscribe();

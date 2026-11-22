@@ -233,6 +233,27 @@ function chainToRoot(
   return null;
 }
 
+/**
+ * Like `knownAncestorIds`, but also follows the vault index (when fetched), so it finds notes in
+ * folders the tree never listed; `null` while neither knows the chain.
+ */
+export function indexedAncestorIds(
+  queryClient: QueryClient,
+  rootId: string,
+  id: string,
+): string[] | null {
+  const known = knownAncestorIds(queryClient, rootId, id);
+  if (known !== null) {
+    return known;
+  }
+  const parentId = knownParentId(queryClient, id);
+  if (parentId === undefined) {
+    return null;
+  }
+  const chain = chainToRoot(knownFolders(queryClient), rootId, parentId);
+  return chain === null ? null : chain.slice(0, -1).reverse();
+}
+
 export interface MoveItem {
   id: string;
   kind: DriveNode["kind"];

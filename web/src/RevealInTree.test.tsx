@@ -134,6 +134,42 @@ describe("reveal the open note in the file tree", () => {
     await vi.waitFor(() => expect(scrolled).toContain(deep));
   });
 
+  it("expands the never-opened folders above the note restored at startup", async () => {
+    nestedDrive();
+    server.use(
+      http.get("/api/vault/index", () =>
+        HttpResponse.json({
+          rootId: "root-id",
+          folders: [
+            { id: "projects", name: "Projects", parentId: "root-id", modifiedTime: MODIFIED },
+            {
+              id: "drive-notes",
+              name: "drive-notes",
+              parentId: "projects",
+              modifiedTime: MODIFIED,
+            },
+          ],
+          files: [{ id: "deep", name: "deep.md", parentId: "drive-notes", modifiedTime: MODIFIED }],
+          truncated: false,
+        }),
+      ),
+    );
+    localStorage.setItem("markyard:last-open-file", "deep");
+    render(<App />);
+
+    const deep = await screen.findByRole("treeitem", { name: /deep\.md/ });
+    expect(screen.getByRole("treeitem", { name: /Projects/ })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    expect(screen.getByRole("treeitem", { name: /drive-notes/ })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    expect(deep).toHaveAttribute("aria-selected", "true");
+    await vi.waitFor(() => expect(scrolled).toContain(deep));
+  });
+
   it("does not scroll the tree when the note is picked in the tree itself", async () => {
     nestedDrive();
     render(<App />);
