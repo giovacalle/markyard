@@ -1,0 +1,211 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  color-scheme: light;
+  --cm-bg: transparent;
+  --cm-fg: #171717;
+  --cm-heading: #0a0a0a;
+  --cm-muted: #737373;
+  --cm-caret: #171717;
+  --cm-selection: rgba(37, 99, 235, 0.16);
+  --cm-code-bg: #f5f5f5;
+  --cm-code-fg: #171717;
+  --cm-link: #2563eb;
+  --cm-quote: #525252;
+  --cm-active-line: rgba(0, 0, 0, 0.025);
+}
+
+:root.dark {
+  color-scheme: dark;
+  --cm-bg: transparent;
+  --cm-fg: #e5e5e5;
+  --cm-heading: #fafafa;
+  --cm-muted: #737373;
+  --cm-caret: #fafafa;
+  --cm-selection: rgba(96, 165, 250, 0.25);
+  --cm-code-bg: #262626;
+  --cm-code-fg: #f5f5f5;
+  --cm-link: #60a5fa;
+  --cm-quote: #a3a3a3;
+  --cm-active-line: rgba(255, 255, 255, 0.03);
+}
+
+@layer components {
+  .markdown-preview {
+    @apply space-y-3 break-words leading-relaxed text-neutral-800 dark:text-neutral-200;
+  }
+  .markdown-preview h3 {
+    @apply mt-4 text-xl font-semibold text-neutral-900 dark:text-neutral-50;
+  }
+  .markdown-preview h4 {
+    @apply mt-4 text-lg font-semibold text-neutral-900 dark:text-neutral-50;
+  }
+  .markdown-preview h5 {
+    @apply mt-3 text-base font-semibold text-neutral-900 dark:text-neutral-50;
+  }
+  .markdown-preview h6 {
+    @apply mt-3 text-sm font-semibold text-neutral-900 dark:text-neutral-50;
+  }
+  .markdown-image-fallback {
+    @apply inline-flex items-center gap-1 rounded-md border border-dashed border-neutral-300 px-2 py-1 text-xs text-neutral-500 dark:border-neutral-700 dark:text-neutral-400;
+  }
+  .markdown-preview a {
+    @apply text-blue-600 underline underline-offset-2 dark:text-blue-400;
+  }
+  .markdown-preview .wikilink {
+    @apply cursor-pointer rounded-sm text-blue-700 no-underline decoration-blue-300 hover:underline focus-visible:outline-2 focus-visible:outline-blue-600 dark:text-blue-300 dark:decoration-blue-700;
+  }
+  .markdown-preview .wikilink-unresolved {
+    @apply border-b border-dashed border-neutral-400 text-neutral-500 hover:border-neutral-600 hover:text-neutral-800 hover:no-underline dark:border-neutral-600 dark:text-neutral-400 dark:hover:text-neutral-200;
+  }
+  .markdown-preview ul {
+    @apply list-disc pl-6;
+  }
+  .markdown-preview ol {
+    @apply list-decimal pl-6;
+  }
+  .markdown-preview ul.contains-task-list {
+    @apply list-none pl-2;
+  }
+  .markdown-preview table {
+    @apply block w-full border-collapse overflow-x-auto text-left;
+  }
+  .markdown-preview th,
+  .markdown-preview td {
+    @apply border border-neutral-300 px-2 py-1 dark:border-neutral-700;
+  }
+  .markdown-preview th {
+    @apply bg-neutral-50 font-semibold dark:bg-neutral-900;
+  }
+  .markdown-preview code {
+    @apply rounded bg-neutral-100 px-1 py-0.5 font-mono text-xs dark:bg-neutral-800 dark:text-neutral-100;
+  }
+  .markdown-preview pre {
+    @apply overflow-x-auto rounded bg-neutral-100 p-3 dark:bg-neutral-900;
+  }
+  .markdown-preview .code-block {
+    @apply overflow-hidden rounded-lg border border-neutral-200 bg-neutral-50 dark:border-neutral-800 dark:bg-neutral-900;
+  }
+  .markdown-preview .code-block pre {
+    @apply rounded-none bg-transparent dark:bg-transparent;
+  }
+  .markdown-preview .code-block-header {
+    @apply flex items-center justify-between gap-2 border-b border-neutral-200 px-3 py-1 text-xs text-neutral-500 dark:border-neutral-800 dark:text-neutral-400;
+  }
+  .markdown-preview .code-block-language {
+    @apply font-mono lowercase;
+  }
+  .markdown-preview .code-block-copy {
+    @apply inline-flex cursor-pointer items-center gap-1 rounded-md px-1.5 py-0.5 font-medium transition-colors hover:bg-neutral-200/70 hover:text-neutral-900 focus-visible:outline-2 focus-visible:outline-blue-600 dark:hover:bg-neutral-800 dark:hover:text-neutral-100;
+  }
+  .markdown-preview .mermaid-diagram {
+    @apply overflow-x-auto rounded-lg border border-neutral-200 bg-white p-3 dark:border-neutral-800 dark:bg-neutral-950;
+  }
+  .markdown-preview .mermaid-error {
+    @apply space-y-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/50 dark:text-red-300;
+  }
+  .markdown-preview .katex-display {
+    @apply overflow-x-auto overflow-y-hidden py-1;
+  }
+  .markdown-preview pre code {
+    @apply bg-transparent p-0;
+  }
+  .markdown-preview blockquote {
+    @apply border-l-2 border-neutral-300 pl-3 text-neutral-600 dark:border-neutral-700 dark:text-neutral-400;
+  }
+  .markdown-preview .callout {
+    @apply space-y-2 rounded-lg border-l-4 px-4 py-3;
+  }
+  .markdown-preview .callout-title {
+    @apply flex items-center gap-2 font-semibold;
+  }
+  .markdown-preview .callout-note {
+    @apply border-blue-500 bg-blue-50 dark:border-blue-400 dark:bg-blue-950/40;
+  }
+  .markdown-preview .callout-note .callout-title {
+    @apply text-blue-700 dark:text-blue-300;
+  }
+  .markdown-preview .callout-tip {
+    @apply border-emerald-500 bg-emerald-50 dark:border-emerald-400 dark:bg-emerald-950/40;
+  }
+  .markdown-preview .callout-tip .callout-title {
+    @apply text-emerald-700 dark:text-emerald-300;
+  }
+  .markdown-preview .callout-important {
+    @apply border-violet-500 bg-violet-50 dark:border-violet-400 dark:bg-violet-950/40;
+  }
+  .markdown-preview .callout-important .callout-title {
+    @apply text-violet-700 dark:text-violet-300;
+  }
+  .markdown-preview .callout-warning {
+    @apply border-amber-500 bg-amber-50 dark:border-amber-400 dark:bg-amber-950/40;
+  }
+  .markdown-preview .callout-warning .callout-title {
+    @apply text-amber-800 dark:text-amber-300;
+  }
+  .markdown-preview .callout-caution {
+    @apply border-red-500 bg-red-50 dark:border-red-400 dark:bg-red-950/40;
+  }
+  .markdown-preview .callout-caution .callout-title {
+    @apply text-red-700 dark:text-red-300;
+  }
+  .markdown-preview hr {
+    @apply border-neutral-200 dark:border-neutral-800;
+  }
+}
+
+/* highlight.js token colors (classes only, no inline styles). */
+.markdown-preview .hljs-comment,
+.markdown-preview .hljs-quote {
+  @apply text-neutral-500 italic dark:text-neutral-400;
+}
+.markdown-preview .hljs-keyword,
+.markdown-preview .hljs-selector-tag,
+.markdown-preview .hljs-meta .hljs-keyword,
+.markdown-preview .hljs-doctag {
+  @apply text-violet-700 dark:text-violet-300;
+}
+.markdown-preview .hljs-string,
+.markdown-preview .hljs-regexp,
+.markdown-preview .hljs-addition,
+.markdown-preview .hljs-meta .hljs-string {
+  @apply text-emerald-700 dark:text-emerald-300;
+}
+.markdown-preview .hljs-number,
+.markdown-preview .hljs-literal,
+.markdown-preview .hljs-symbol,
+.markdown-preview .hljs-bullet {
+  @apply text-amber-700 dark:text-amber-300;
+}
+.markdown-preview .hljs-title,
+.markdown-preview .hljs-section,
+.markdown-preview .hljs-function .hljs-title {
+  @apply text-blue-700 dark:text-blue-300;
+}
+.markdown-preview .hljs-attr,
+.markdown-preview .hljs-attribute,
+.markdown-preview .hljs-variable,
+.markdown-preview .hljs-template-variable,
+.markdown-preview .hljs-property {
+  @apply text-sky-700 dark:text-sky-300;
+}
+.markdown-preview .hljs-type,
+.markdown-preview .hljs-built_in,
+.markdown-preview .hljs-class .hljs-title,
+.markdown-preview .hljs-name,
+.markdown-preview .hljs-tag {
+  @apply text-rose-700 dark:text-rose-300;
+}
+.markdown-preview .hljs-deletion {
+  @apply text-red-700 dark:text-red-300;
+}
+.markdown-preview .hljs-meta {
+  @apply text-neutral-500 dark:text-neutral-400;
+}
+.markdown-preview .hljs-emphasis {
+  @apply italic;
+}
+.markdown-preview .hljs-strong {
+  @apply font-bold;
+}

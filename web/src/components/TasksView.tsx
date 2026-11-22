@@ -1,0 +1,266 @@
+import { type ReactNode, useMemo, useState } from "react";
+import { usePkm } from "../pkm";
+import { useSyncQueue } from "../syncQueue";
+import { filterTasks, type NoteTasks, parseTasks, type TaskStatusFilter } from "../tasks";
+import { toggleTaskAt } from "../taskToggle";
+import { useVaultDocuments } from "../useVaultDocuments";
+import { saveVaultDocument, type VaultDocument } from "../vaultDocuments";
+import { noteStem } from "../wikilinks";
+
+const STATUS_OPTIONS: { value: TaskStatusFilter; label: string }[] = [
+  { value: "open", label: "Open" },
+  { value: "completed", label: "Completed" },
+  { value: "all", label: "All" },
+];
+
+/** Folder `<select>` value for notes at the root (no real folder path starts with `/`). */
+const ROOT_ONLY = "/";
+
+interface IndexedNote extends NoteTasks {
+  doc: VaultDocument;
+}
+
+/** Every folder path holding a note with tasks, ancestors included, sorted. */
+function folderPaths(notes: readonly NoteTasks[]): string[] {
+  const out = new Set<string>();
+  for (const note of notes) {
+    for (let depth = 1; depth <= note.path.length; depth += 1) {
+      out.add(note.path.slice(0, depth).join("/"));
+    }
+  }
+  return [...out].sort((a, b) => a.localeCompare(b));
+}
+
+/** The Tasks dashboard over a given set of notes: filters, grouped list, live check-off. */
+export function TasksPanel({
+  docs,
+  vaultPinned,
+  onToggle,
+  onOpenNote,
+  header,
+}: {
+  docs: readonly VaultDocument[] | null;
+  vaultPinned: boolean;
+  /** Saves `text`, the note's content with one checkbox flipped. */
+  onToggle: (doc: VaultDocument, text: string) => void;
+  onOpenNote: (id: string) => void;
+  header?: ReactNode;
+}) {
+  const [status, setStatus] = useState<TaskStatusFilter>("open");
+  const [query, setQuery] = useState("");
+  const [folder, setFolder] = useState<string | null>(null);
+  const [tag, setTag] = useState<string | null>(null);
+  // Toggled text shows at once, before the vault re-read catches up.
+  const [overrides, setOverrides] = useState<ReadonlyMap<string, string>>(new Map());
+
+  const indexed = useMemo((): IndexedNote[] => {
+    if (docs === null) {
+      return [];
+    }
+    const out: IndexedNote[] = [];
+    for (const original of docs) {
+      const override = overrides.get(original.id);
+      const doc = override === undefined ? original : { ...original, text: override };
+      const tasks = parseTasks(doc.text);
+      if (tasks.length > 0) {
+        out.push({ id: doc.id, name: doc.name, path: doc.path, tasks, doc });
+      }
+    }
+    return out.sort(
+      (a, b) =>
+        noteStem(a.name).localeCompare(noteStem(b.name)) ||
+        a.path.join("/").localeCompare(b.path.join("/")),
+    );
+  }, [docs, overrides]);
+
+  const folders = useMemo(() => folderPaths(indexed), [indexed]);
+  const tags = useMemo(() => {
+    const all = new Set<string>();
+    for (const note of indexed) {
+      for (const task of note.tasks) {
+        for (const name of task.tags) {
+          all.add(name);
+        }
+      }
+    }
+    return [...all].sort((a, b) => a.localeCompare(b));
+  }, [indexed]);
+
+  const docsById = useMemo(() => new Map(indexed.map((note) => [note.id, note.doc])), [indexed]);
+  const visible = filterTasks(indexed, {
+    status,
+    query,
+    folder: folder ?? undefined,
+    tag: tag ?? undefined,
+  });
+
+  const toggle = (noteId: string, offset: number) => {
+    const doc = docsById.get(noteId);
+    const next = doc === undefined ? null : toggleTaskAt(doc.text, offset);
+    if (doc === undefined || next === null) {
+      return;
+    }
+    setOverrides((prev) => new Map(prev).set(noteId, next));
+    onToggle(doc, next);
+  };
+
+  const controlClass =
+    "rounded-md border border-neutral-200 bg-white px-2 py-1 text-sm text-neutral-800 focus-visible:outline-2 focus-visible:outline-blue-600 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200";
+
+  return (
+    <section aria-label="Tasks" className="flex min-h-0 flex-1 flex-col">
+      <header className="flex min-h-12 shrink-0 flex-wrap items-center gap-2 border-b border-neutral-200 px-4 py-2 sm:px-6 dark:border-neutral-800">
+        {header}
+        <h2 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Tasks</h2>
+        <div
+          role="radiogroup"
+          aria-label="Status"
+          className="ml-auto flex rounded-md border border-neutral-200 p-0.5 dark:border-neutral-700"
+        >
+          {STATUS_OPTIONS.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              role="radio"
+              aria-checked={status === option.value}
+              onClick={() => setStatus(option.value)}
+              className={`rounded px-2 py-0.5 text-xs font-medium transition-colors ${
+                status === option.value
+                  ? "bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900"
+                  : "text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-800"
+              }`}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      </header>
+
+      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-neutral-200 px-4 py-2 sm:px-6 dark:border-neutral-800">
+        <input
+          type="search"
+          aria-label="Search tasks"
+          placeholder="Search tasks…"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          className={`${controlClass} min-w-0 flex-1`}
+        />
+        <select
+          aria-label="Folder"
+          value={folder === null ? "" : folder === "" ? ROOT_ONLY : folder}
+          onChange={(event) => {
+            const value = event.target.value;
+            setFolder(value === "" ? null : value === ROOT_ONLY ? "" : value);
+          }}
+          className={controlClass}
+        >
+          <option value="">All folders</option>
+          <option value={ROOT_ONLY}>Root only</option>
+          {folders.map((path) => (
+            <option key={path} value={path}>
+              {path.split("/").join(" / ")}
+            </option>
+          ))}
+        </select>
+        {tags.length > 0 && (
+          <div className="flex w-full flex-wrap gap-1">
+            {tags.map((name) => (
+              <button
+                key={name}
+                type="button"
+                aria-pressed={tag === name}
+                onClick={() => setTag((prev) => (prev === name ? null : name))}
+                className={`rounded-full border px-2 py-0.5 text-xs transition-colors ${
+                  tag === name
+                    ? "border-blue-600 bg-blue-600 text-white"
+                    : "border-neutral-200 text-neutral-600 hover:border-neutral-400 dark:border-neutral-700 dark:text-neutral-400"
+                }`}
+              >
+                #{name}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3 sm:px-6">
+        {docs === null ? (
+          <p role="status" className="text-sm text-neutral-500 dark:text-neutral-400">
+            Scanning notes…
+          </p>
+        ) : visible.length === 0 ? (
+          <p className="text-sm text-neutral-500 dark:text-neutral-400">No tasks match.</p>
+        ) : (
+          <div className="mx-auto max-w-3xl space-y-4">
+            {visible.map((note) => (
+              <div role="group" aria-label={noteStem(note.name)} key={note.id}>
+                <button
+                  type="button"
+                  onClick={() => onOpenNote(note.id)}
+                  className="flex w-full items-baseline gap-2 rounded-md px-1 py-0.5 text-left hover:bg-neutral-100 dark:hover:bg-neutral-900"
+                >
+                  <span className="truncate text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+                    {noteStem(note.name)}
+                  </span>
+                  {note.path.length > 0 && (
+                    <span className="truncate text-xs text-neutral-400 dark:text-neutral-500">
+                      {note.path.join(" / ")}
+                    </span>
+                  )}
+                </button>
+                <ul className="mt-1 space-y-0.5">
+                  {note.tasks.map((task) => (
+                    <li key={task.offset} className="flex items-start gap-2 px-1 py-0.5">
+                      <input
+                        type="checkbox"
+                        aria-label={task.text}
+                        checked={task.done}
+                        onChange={() => toggle(note.id, task.offset)}
+                        className="mt-1 size-4 shrink-0 accent-blue-600"
+                      />
+                      <span
+                        className={`min-w-0 flex-1 break-words text-sm ${
+                          task.done
+                            ? "text-neutral-400 line-through dark:text-neutral-500"
+                            : "text-neutral-800 dark:text-neutral-200"
+                        }`}
+                      >
+                        {task.text}
+                      </span>
+                      {task.due !== undefined && (
+                        <span className="shrink-0 text-xs tabular-nums text-neutral-500 dark:text-neutral-400">
+                          {task.due}
+                        </span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        )}
+        {!vaultPinned && (
+          <p className="mx-auto mt-6 max-w-3xl text-xs text-neutral-400 dark:text-neutral-500">
+            Pin vault offline to include every note.
+          </p>
+        )}
+      </div>
+    </section>
+  );
+}
+
+/** The Tasks workspace over every locally cached note; check-offs save through the sync queue. */
+export function TasksView({ header }: { header?: ReactNode }) {
+  const pkm = usePkm();
+  const syncQueue = useSyncQueue();
+  const docs = useVaultDocuments();
+  return (
+    <TasksPanel
+      docs={docs}
+      vaultPinned={pkm?.vaultPinned ?? false}
+      header={header}
+      onToggle={(doc, text) => saveVaultDocument(syncQueue, doc, text)}
+      onOpenNote={(id) => pkm?.openNote(id)}
+    />
+  );
+}
