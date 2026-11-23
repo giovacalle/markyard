@@ -1,6 +1,6 @@
-// Multi-account vaults: each account picks its own Drive vault root (`PUT /api/vault/root`),
+// Per-account vaults: each account picks its own Drive vault root (`PUT /api/vault/root`),
 // browses its Drive to find one (`GET`/`POST /api/drive/folders`), and every vault route then
-// works under that root instead of the instance `ROOT_FOLDER_ID`.
+// works under that root (stored in the sealed session cookie and optionally synced via D1).
 
 import { describe, expect, it } from "vite-plus/test";
 
@@ -49,9 +49,6 @@ const lists = (parent: string, files: ReadonlyArray<unknown>): Route =>
 const cookieFor = (rootFolderId?: string, email: string = EMAIL) =>
   signedInCookie({ ...storedSession(NOW + 3600), email, rootFolderId });
 
-const noRootEnv = (overrides: Record<string, string | undefined> = {}) =>
-  testEnv({ ROOT_FOLDER_ID: undefined, ...overrides });
-
 const putRoot = async (folderId: unknown, cookie?: string): Promise<Request> =>
   request("PUT", "/api/vault/root", {
     cookie: cookie ?? (await cookieFor()),
@@ -69,22 +66,26 @@ const postFolder = async (body: unknown): Promise<Request> =>
 const sealedOf = async (res: Response) => unsealWith(KEYS_1, sessionCookieOf(res)!.value);
 
 describe("GET /api/session vault setup", () => {
-  it("omits_needs_vault_setup_with_an_instance_root", async () => {
+  it("asks_for_vault_setup_without_a_session_root", async () => {
     const res = await send(get("/api/session", { cookie: await cookieFor() }));
-    expect(await res.json()).toEqual({ email: EMAIL });
-  });
-
-  it("asks_for_vault_setup_without_any_root", async () => {
-    const res = await send(get("/api/session", { cookie: await cookieFor() }), {
-      env: noRootEnv(),
-    });
     expect(await res.json()).toEqual({ email: EMAIL, needsVaultSetup: true });
   });
 
-  it("an_own_root_needs_no_setup_and_rewrites_no_cookie", async () => {
-    const res = await send(get("/api/session", { cookie: await cookieFor("vault-1") }), {
-      env: noRootEnv(),
+  it("ignores_legacy_root_folder_id_env_var", async () => {
+    const env = testEnv({ ROOT_FOLDER_ID: "legacy-root" });
+    const sessionRes = await send(get("/api/session", { cookie: await cookieFor() }), { env });
+    expect(await sessionRes.json()).toEqual({ email: EMAIL, needsVaultSetup: true });
+
+    const rootRes = await send(get("/api/root", { cookie: await cookieFor() }), { env });
+    expect(rootRes.status).toBe(400);
+    expect(await rootRes.json()).toEqual({
+      code: "vault_not_configured",
+      message: "No Google Drive vault folder is selected yet.",
     });
+  });
+
+  it("an_own_root_needs_no_setup_and_rewrites_no_cookie", async () => {
+    const res = await send(get("/api/session", { cookie: await cookieFor("vault-1") }));
     expect(await res.json()).toEqual({ email: EMAIL });
     expect(sessionCookieOf(res)).toBeUndefined();
   });
@@ -93,7 +94,6 @@ describe("GET /api/session vault setup", () => {
     const db = new FakeD1();
     db.rows.set(EMAIL, { state_json: '{"rootFolderId":"vault-2"}', updated_at: 5 });
     const res = await send(get("/api/session", { cookie: await cookieFor() }), {
-      env: noRootEnv(),
       stateDb: db,
     });
     expect(await res.json()).toEqual({ email: EMAIL, cloudSync: true });
@@ -111,7 +111,6 @@ describe("GET /api/session vault setup", () => {
       const db = new FakeD1();
       db.rows.set(EMAIL, { state_json: JSON.stringify({ rootFolderId: stored }), updated_at: 5 });
       const res = await send(get("/api/session", { cookie: await cookieFor(own) }), {
-        env: noRootEnv(),
         stateDb: db,
       });
       expect(await res.json()).toEqual({ email: EMAIL, cloudSync: true });
@@ -129,10 +128,7 @@ describe("vault routes without a root", () => {
       "/api/search?q=hello",
       "/api/attachments",
     ]) {
-      const res = await send(get(path, { cookie: await cookieFor() }), {
-        google,
-        env: noRootEnv(),
-      });
+      const res = await send(get(path, { cookie: await cookieFor() }), { google });
       expect(res.status, path).toBe(400);
       expect(await res.json(), path).toEqual({
         code: "vault_not_configured",
@@ -143,7 +139,7 @@ describe("vault routes without a root", () => {
   });
 
   it("still_require_a_session_first", async () => {
-    const res = await send(get("/api/root"), { env: noRootEnv() });
+    const res = await send(get("/api/root"));
     expect(res.status).toBe(401);
   });
 });
@@ -180,10 +176,7 @@ describe("GET /api/drive/folders", () => {
 
   it("works_without_any_vault_root", async () => {
     const google = new FakeGoogle([lists("root", [])]);
-    const res = await send(get("/api/drive/folders", { cookie: await cookieFor() }), {
-      google,
-      env: noRootEnv(),
-    });
+    const res = await send(get("/api/drive/folders", { cookie: await cookieFor() }), { google });
     expect(res.status).toBe(200);
   });
 
@@ -276,7 +269,7 @@ describe("PUT /api/vault/root", () => {
     const db = new FakeD1();
     db.rows.set(EMAIL, { state_json: '{"theme":"dark"}', updated_at: NOW * 1000 + 50 });
     const google = new FakeGoogle([getsFile("vault-1", folder("vault-1", "Vault"))]);
-    const res = await send(await putRoot("vault-1"), { google, env: noRootEnv(), stateDb: db });
+    const res = await send(await putRoot("vault-1"), { google, stateDb: db });
 
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ root: node("vault-1", "Vault") });
@@ -296,28 +289,18 @@ describe("PUT /api/vault/root", () => {
 
   it("then_root_and_vault_index_use_the_chosen_root", async () => {
     const google = new FakeGoogle([getsFile("vault-1", folder("vault-1", "Vault"))]);
-    const switched = await send(await putRoot("vault-1"), { google, env: noRootEnv() });
+    const switched = await send(await putRoot("vault-1"), { google });
     const cookie = `__Host-s=${sessionCookieOf(switched)!.value}`;
 
-    const rootRes = await send(get("/api/root", { cookie }), { google, env: noRootEnv() });
+    const rootRes = await send(get("/api/root", { cookie }), { google });
     expect(await rootRes.json()).toEqual(node("vault-1", "Vault"));
 
     const indexGoogle = new FakeGoogle([lists("vault-1", [])]);
     const index = await send(get("/api/vault/index", { cookie }), {
       google: indexGoogle,
-      env: noRootEnv(),
     });
     expect(((await index.json()) as { rootId: string }).rootId).toBe("vault-1");
     expect(indexGoogle.unexpected).toEqual([]);
-  });
-
-  it("an_own_root_wins_over_the_instance_root", async () => {
-    const google = new FakeGoogle([lists("vault-1", [])]);
-    const res = await send(get("/api/vault/index", { cookie: await cookieFor("vault-1") }), {
-      google,
-    });
-    expect(((await res.json()) as { rootId: string }).rootId).toBe("vault-1");
-    expect(google.callsContaining("root-id")).toEqual([]);
   });
 
   it("missing_trashed_or_non_folder_is_404_and_changes_nothing", async () => {
@@ -354,7 +337,7 @@ describe("PUT /api/vault/root", () => {
 
 describe("account isolation", () => {
   it("two_accounts_with_different_roots_stay_apart", async () => {
-    const env = noRootEnv({ ALLOWED_EMAILS: `${EMAIL},${OTHER}` });
+    const env = testEnv({ ALLOWED_EMAILS: `${EMAIL},${OTHER}` });
     const mine = await cookieFor("vault-a");
     const theirs = await cookieFor("vault-b", OTHER);
     const google = new FakeGoogle([lists("vault-a", []), lists("vault-b", [])]);
@@ -384,7 +367,6 @@ describe("account isolation", () => {
     ]);
     const res = await send(get("/api/files/img-1/blob", { cookie: await cookieFor("vault-a") }), {
       google,
-      env: noRootEnv(),
     });
     expect(res.status).toBe(404);
     expect(google.callsContaining("alt=media")).toEqual([]);
@@ -393,7 +375,7 @@ describe("account isolation", () => {
   it("a_synced_root_is_per_account", async () => {
     const db = new FakeD1();
     db.rows.set(EMAIL, { state_json: '{"rootFolderId":"vault-a"}', updated_at: 1 });
-    const env = noRootEnv({ ALLOWED_EMAILS: `${EMAIL},${OTHER}` });
+    const env = testEnv({ ALLOWED_EMAILS: `${EMAIL},${OTHER}` });
     const res = await send(get("/api/session", { cookie: await cookieFor(undefined, OTHER) }), {
       env,
       stateDb: db,

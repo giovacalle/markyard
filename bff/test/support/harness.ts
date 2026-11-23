@@ -55,7 +55,6 @@ export const testEnv = (
     GOOGLE_CLIENT_SECRET: "client-secret-value",
     ALLOWED_EMAILS: EMAIL,
     COOKIE_KEYS: cookieKeysBinding([{ version: 1, key: KEY_1 }]),
-    ROOT_FOLDER_ID: "root-id",
   };
   for (const [name, value] of Object.entries(overrides)) {
     if (value === undefined) delete env[name];
@@ -326,9 +325,9 @@ export const sessionCookie = (
   keys: ReadonlyArray<CookieKey> = KEYS_1,
 ): Promise<string> => sealWith(keys, encodeSession(session));
 
-/** A `Cookie` header carrying a valid session whose access token is fresh for an hour. */
+/** A `Cookie` header carrying a valid session whose access token is fresh for an hour and has a vault root. */
 export const signedInCookie = async (
-  session: Session = storedSession(NOW + 3600),
+  session: Session = { ...storedSession(NOW + 3600), rootFolderId: "root-id" },
 ): Promise<string> => `theme=dark; __Host-s=${await sessionCookie(session)}`;
 
 /** Flips one character in the middle of a cookie, like the Rust tests do. */

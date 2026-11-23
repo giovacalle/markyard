@@ -55,7 +55,8 @@ const metaOk = (id: string, size: number, mime: string, trashed: boolean): R => 
 ];
 
 const fresh = (): Promise<string> => signedInCookie();
-const expired = (): Promise<string> => signedInCookie(storedSession(NOW + 59));
+const expired = (): Promise<string> =>
+  signedInCookie({ ...storedSession(NOW + 59), rootFolderId: "root-id" });
 
 const getAsSignedIn = async (path: string, google: FakeGoogle): Promise<Response> =>
   send(get(path, { cookie: await fresh() }), { google });

@@ -31,8 +31,6 @@ export interface Config {
   readonly allowAllEmails: boolean;
   /** Sorted by ascending version; the last one seals. */
   readonly keys: ReadonlyArray<CookieKey>;
-  /** The instance-wide vault folder; `undefined` when each account picks its own. */
-  readonly rootFolderId?: string | undefined;
   readonly google: GoogleUrls;
 }
 
@@ -101,7 +99,6 @@ export const parseConfig = (
     const clientId = requireNonEmpty(get, "GOOGLE_CLIENT_ID");
     const clientSecret = requireNonEmpty(get, "GOOGLE_CLIENT_SECRET");
     const keys = parseCookieKeys(requireNonEmpty(get, "COOKIE_KEYS"));
-    const rootFolderId = get("ROOT_FOLDER_ID")?.trim() || undefined;
     return {
       ok: true,
       config: {
@@ -111,7 +108,6 @@ export const parseConfig = (
         allowedEmails,
         allowAllEmails,
         keys,
-        rootFolderId,
         google,
       },
     };

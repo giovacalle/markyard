@@ -21,7 +21,7 @@ export interface Session {
   readonly email: string;
   /** The account display name, when Google gave a non-blank one. */
   readonly name?: string | undefined;
-  /** The vault folder this account picked; the instance `ROOT_FOLDER_ID` applies without one. */
+  /** The vault folder this account picked, or `undefined` until chosen via `PUT /api/vault/root`. */
   readonly rootFolderId?: string | undefined;
 }
 
@@ -93,7 +93,7 @@ export const decodeSession = (json: unknown): Session | undefined => {
     exp: exp.value,
     email: json["email"],
     name: normalizeName(name.value),
-    // A malformed id is dropped (the account falls back to the instance root), not fatal.
+    // A malformed id is dropped (the account must pick a vault root again), not fatal.
     rootFolderId: root.value !== undefined && isValidId(root.value) ? root.value : undefined,
   };
 };

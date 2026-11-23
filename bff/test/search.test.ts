@@ -9,18 +9,18 @@ import {
   FakeGoogle,
   get,
   json,
+  NOW,
   on,
   send,
   setCookies,
   signedInCookie,
-  testEnv,
+  storedSession,
   type Route,
 } from "./support/harness.ts";
 
 const ROOT_ID = "root-folder-1";
 const FOLDER_MIME = "application/vnd.google-apps.folder";
 const DRIVE = "https://fake.test/drive/v3/files";
-const env = testEnv({ ROOT_FOLDER_ID: ROOT_ID });
 
 const searchUrl = (encodedQ: string): string =>
   `${DRIVE}?q=${encodedQ}&pageSize=40&orderBy=modifiedTime+desc&fields=files%28id%2Cname%2CmimeType%2CmodifiedTime%2Ctrashed%2Cparents%29`;
@@ -68,14 +68,19 @@ const resultOf = (
 });
 
 const searchAs = async (path: string, google: FakeGoogle): Promise<Response> =>
-  send(get(path, { cookie: await signedInCookie() }), { google, env });
+  send(
+    get(path, {
+      cookie: await signedInCookie({ ...storedSession(NOW + 3600), rootFolderId: ROOT_ID }),
+    }),
+    { google },
+  );
 
 const sortedUrls = (google: FakeGoogle): Array<string> => google.calls.map((c) => c.url).sort();
 
 describe("search", () => {
   it("search_requires_authentication", async () => {
     const google = new FakeGoogle();
-    const res = await send(get("/api/search?q=roadmap"), { google, env });
+    const res = await send(get("/api/search?q=roadmap"), { google });
     expect(res.status).toBe(401);
     expect(google.calls).toEqual([]);
   });

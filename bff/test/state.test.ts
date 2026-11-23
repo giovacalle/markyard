@@ -30,7 +30,7 @@ const STATE = {
 } as const;
 
 const cookieFor = (email: string = EMAIL) =>
-  signedInCookie({ ...storedSession(NOW + 3600), email });
+  signedInCookie({ ...storedSession(NOW + 3600), email, rootFolderId: "root-id" });
 
 const putState = async (body: unknown, cookie?: string): Promise<Request> =>
   request("PUT", "/api/state", {

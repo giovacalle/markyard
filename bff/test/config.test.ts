@@ -13,7 +13,6 @@ const validBinding = (name: string): string | undefined =>
     GOOGLE_CLIENT_ID: "cid-123",
     GOOGLE_CLIENT_SECRET: "super-secret-value-xyz",
     COOKIE_KEYS: `2:${"ab".repeat(32)}, 1:${"01".repeat(32)}`,
-    ROOT_FOLDER_ID: " root-id-1 ",
   })[name];
 
 const errorOf = (get: (name: string) => string | undefined): string => {
@@ -30,7 +29,6 @@ describe("config", () => {
     expect(cfg.publicOrigin).toBe("https://notes.example.com");
     expect(cfg.clientId).toBe("cid-123");
     expect(cfg.clientSecret).toBe("super-secret-value-xyz");
-    expect(cfg.rootFolderId).toBe("root-id-1");
     expect(cfg.allowedEmails).toEqual(["owner@example.com", "second@example.com"]);
     expect(cfg.allowAllEmails).toBe(false);
     expect(cfg.keys).toEqual([
@@ -65,12 +63,12 @@ describe("config", () => {
     expect(badKeyErr).not.toContain(badKeySecret);
   });
 
-  it("root_folder_id_is_optional", () => {
-    for (const raw of [undefined, "", "   "]) {
-      const result = parseConfig((name) => (name === "ROOT_FOLDER_ID" ? raw : validBinding(name)));
-      if (!result.ok) throw new Error(result.error);
-      expect(result.config.rootFolderId, String(raw)).toBeUndefined();
-    }
+  it("ignores_legacy_root_folder_id_binding", () => {
+    const result = parseConfig((name) =>
+      name === "ROOT_FOLDER_ID" ? "legacy-root-id" : validBinding(name),
+    );
+    if (!result.ok) throw new Error(result.error);
+    expect("rootFolderId" in result.config).toBe(false);
   });
 
   it("allowed_emails_wildcard_allows_any_account", () => {

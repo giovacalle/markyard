@@ -17,7 +17,7 @@ export const SessionLive = HttpApiBuilder.group(Api, "session", (handlers) =>
       Effect.gen(function* () {
         const session = yield* adoptStoredRoot(yield* Effect.flatMap(cookieHeader, authorized));
         const store = yield* StateStore;
-        const root = yield* effectiveRootFolderId(session);
+        const root = effectiveRootFolderId(session);
         return {
           email: session.email,
           ...(session.name !== undefined ? { name: session.name } : {}),

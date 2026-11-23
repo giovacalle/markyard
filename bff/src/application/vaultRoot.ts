@@ -1,7 +1,7 @@
-// The vault root of a signed-in account. Each account may pick its own Drive folder
+// The vault root of a signed-in account. Each account picks its own Drive folder
 // (`PUT /api/vault/root`); it travels in the sealed session cookie and, when cloud sync is bound,
 // in the account's synced state so another device inherits it on its next `GET /api/session`.
-// Without a pick, the instance `ROOT_FOLDER_ID` applies; without either, the account must pick.
+// Without a pick, the account must choose a vault folder before using vault routes.
 
 import * as Effect from "effect/Effect";
 
@@ -16,21 +16,16 @@ import {
 import { parseJson, type Session } from "../domain/session.ts";
 import { getFile, type DriveFailure, type DriveR } from "../infrastructure/drive-client.ts";
 import { resealSession } from "./auth.ts";
-import { AppConfig, CookieSealer, Entropy, ResponseSink, StateStore } from "./ports.ts";
+import { CookieSealer, Entropy, ResponseSink, StateStore } from "./ports.ts";
 
-/** The account's own vault folder, else the instance one, else `undefined`. */
-export const effectiveRootFolderId = (
-  session: Session,
-): Effect.Effect<string | undefined, never, AppConfig> =>
-  Effect.map(AppConfig, (config) => session.rootFolderId ?? config.rootFolderId);
+/** The account's own vault folder, or `undefined` when not yet chosen. */
+export const effectiveRootFolderId = (session: Session): string | undefined => session.rootFolderId;
 
 /** The vault root of a route that needs one, or 400 `vault_not_configured`. */
-export const requireVaultRoot = (
-  session: Session,
-): Effect.Effect<string, InvalidRequest, AppConfig> =>
-  Effect.flatMap(effectiveRootFolderId(session), (root) =>
-    root === undefined ? Effect.fail(vaultNotConfigured()) : Effect.succeed(root),
-  );
+export const requireVaultRoot = (session: Session): Effect.Effect<string, InvalidRequest> =>
+  session.rootFolderId === undefined
+    ? Effect.fail(vaultNotConfigured())
+    : Effect.succeed(session.rootFolderId);
 
 /**
  * The session with the vault folder stored in the synced state adopted (and its cookie resealed)

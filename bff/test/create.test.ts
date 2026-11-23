@@ -54,7 +54,7 @@ const post = (
 
 const ORIGIN = "https://notes.test";
 
-const expiredCookie = () => signedInCookie(storedSession(NOW - 10));
+const expiredCookie = () => signedInCookie({ ...storedSession(NOW - 10), rootFolderId: "root-id" });
 
 const liveFolder = (id: string): Scripted =>
   json(200, {

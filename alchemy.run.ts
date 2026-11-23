@@ -36,7 +36,6 @@ export default Alchemy.Stack(
       env: {
         PUBLIC_ORIGIN: Config.String("PUBLIC_ORIGIN"),
         ALLOWED_EMAILS: Config.String("ALLOWED_EMAILS"),
-        ROOT_FOLDER_ID: Config.String("ROOT_FOLDER_ID").pipe(Config.withDefault("")),
         GOOGLE_CLIENT_ID: Config.Redacted("GOOGLE_CLIENT_ID"),
         GOOGLE_CLIENT_SECRET: Config.Redacted("GOOGLE_CLIENT_SECRET"),
         COOKIE_KEYS: Config.Redacted("COOKIE_KEYS"),

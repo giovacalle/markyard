@@ -343,7 +343,7 @@ describe("session", () => {
 
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toBe("application/json");
-    expect(await res.clone().json()).toEqual({ email: EMAIL });
+    expect(await res.clone().json()).toEqual({ email: EMAIL, needsVaultSetup: true });
     expect(setCookies(res)).toEqual([]);
     expect(await leaks(res, [AT, RT])).toEqual([]);
     expect(google.calls).toEqual([]);
@@ -356,7 +356,7 @@ describe("session", () => {
     const res = await send(sessionReq(cookie), { google });
 
     expect(res.status).toBe(200);
-    expect(await res.clone().json()).toEqual({ email: EMAIL });
+    expect(await res.clone().json()).toEqual({ email: EMAIL, needsVaultSetup: true });
     expect(await leaks(res, [AT, RT, NEW_AT])).toEqual([]);
     expect(urlLeaks(google, [AT, RT, NEW_AT])).toEqual([]);
 
@@ -628,7 +628,7 @@ describe("display name", () => {
     const res = await send(sessionReq(cookie), { google });
 
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ email: EMAIL, name: "Ada Lovelace" });
+    expect(await res.json()).toEqual({ email: EMAIL, name: "Ada Lovelace", needsVaultSetup: true });
     expect(google.calls).toEqual([]);
   });
 
@@ -639,7 +639,7 @@ describe("display name", () => {
     const res = await send(sessionReq(await sealWith(KEYS_1, raw)), { google });
 
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ email: EMAIL });
+    expect(await res.json()).toEqual({ email: EMAIL, needsVaultSetup: true });
     expect(google.calls).toEqual([]);
   });
 
@@ -648,7 +648,7 @@ describe("display name", () => {
     const google = new FakeGoogle([on("POST", "https://fake.test/token", refreshOk())]);
     const res = await send(sessionReq(cookie), { google });
 
-    expect(await res.json()).toEqual({ email: EMAIL, name: "Ada Lovelace" });
+    expect(await res.json()).toEqual({ email: EMAIL, name: "Ada Lovelace", needsVaultSetup: true });
     expect(await unsealWith(KEYS_1, sessionCookieOf(res)!.value)).toEqual({
       rt: RT,
       at: NEW_AT,

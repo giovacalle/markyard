@@ -44,7 +44,8 @@ const callsContaining = (google: FakeGoogle, fragment: string) =>
 const apiReq = (path: string, cookie?: string): Request =>
   get(path, cookie === undefined ? {} : { cookie: `theme=dark; __Host-s=${cookie}` });
 
-const sealed = (exp?: number): Promise<string> => sessionCookie(storedSession(exp));
+const sealed = (exp?: number): Promise<string> =>
+  sessionCookie({ ...storedSession(exp), rootFolderId: "root-id" });
 
 const getAsSignedIn = async (path: string, google: FakeGoogle): Promise<Response> =>
   send(apiReq(path, await sealed(NOW + 3600)), { google });
@@ -156,7 +157,7 @@ describe("GET /api/root", () => {
   });
 
   it("root_that_is_a_file_or_trashed_is_returned_as_is", async () => {
-    // The root route reports what ROOT_FOLDER_ID points at; the children call rejects a non-folder.
+    // The root route reports what the session's vault root points at; the children call rejects a non-folder.
     const google = fake([
       [
         "GET",
