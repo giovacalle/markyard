@@ -7,15 +7,12 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { type ReactNode, type SVGProps, useEffect, useRef, useState } from "react";
+import { type ReactNode, type RefObject, type SVGProps, useEffect, useRef, useState } from "react";
 import {
   ApiError,
-  createFile,
-  createFolder,
   fetchChildren,
   fetchRoot,
   fetchSession,
-  isNameExists,
   isNotFound,
   isRateLimited,
   isSessionEnded,
@@ -67,27 +64,31 @@ import {
   useDriveChangesPolling,
   useRecentDriveChanges,
 } from "./driveChanges";
-import { pickUntitledName } from "./fileName";
 import { findHeading, updateLinksAfterRename } from "./linkIndex";
 import { type PkmApi, PkmContext } from "./pkm";
 import { dailyNoteContent } from "./templates";
 import { readTemplates, useVaultNotes } from "./vaultDocuments";
 import { moveErrorMessage, useMoveNode } from "./moveItem";
 import {
-  addCachedChild,
+  CACHE_STALE_TIMESTAMP,
   clearLocalCache,
   clearVaultCache,
-  deleteCachedFile,
-  deleteCachedSubtree,
+  hasPersistedPendingWork,
   hydrateQueryClient,
-  removeCachedChild,
-  renameCachedChild,
   requestPersistentStorage,
-  writeCachedFile,
   writeCachedFolder,
   writeCachedRoot,
   writeCachedSession,
+  type PendingOp,
 } from "./localCache";
+import { isLocalId } from "./localIds";
+import {
+  OpsQueue,
+  OpsQueueContext,
+  useOpsQueue,
+  usePendingOpsCount,
+  useTotalPendingSyncCount,
+} from "./opsQueue";
 import {
   forgetLastOpenFile,
   rememberLastOpenFile,
@@ -97,19 +98,10 @@ import {
 } from "./openDocument";
 import { resetSettings, useSettings } from "./settings";
 import { clearExpandedFolders } from "./treeExpanded";
-import { SyncQueue, SyncQueueContext, usePendingSyncCount, useSyncQueue } from "./syncQueue";
+import { SyncQueue, SyncQueueContext, useSyncQueue } from "./syncQueue";
 import { useTheme, type ThemePreference } from "./theme";
 import { useVaultSync, useVaultSyncState, VaultSync, VaultSyncContext } from "./vaultSync";
-import {
-  addChild,
-  childrenKey,
-  collectDescendantIds,
-  findNode,
-  findNoteByNameInFolder,
-  getFolderChildNames,
-  removeChild,
-  renameChild,
-} from "./treeCache";
+import { childrenKey, findNode, findNoteByNameInFolder } from "./treeCache";
 
 type WorkspacePanel = "tasks" | "attachments";
 
@@ -401,10 +393,12 @@ function SessionGate({
   networkOffline,
   theme,
   onThemeChange,
+  onOpDiscardedRef,
 }: {
   networkOffline: boolean;
   theme: ThemePreference;
   onThemeChange: (next: ThemePreference) => void;
+  onOpDiscardedRef: RefObject<((op: PendingOp) => void) | null>;
 }) {
   return (
     <RetryScope>
@@ -414,6 +408,7 @@ function SessionGate({
           networkOffline={networkOffline}
           theme={theme}
           onThemeChange={onThemeChange}
+          onOpDiscardedRef={onOpDiscardedRef}
         />
       )}
     </RetryScope>
@@ -421,19 +416,31 @@ function SessionGate({
 }
 
 /** `folderId`'s children: the cached listing, else fetched from Drive and cached. */
-async function folderChildren(queryClient: QueryClient, folderId: string): Promise<DriveNode[]> {
+async function folderChildren(
+  queryClient: QueryClient,
+  opsQueue: OpsQueue,
+  folderId: string,
+): Promise<DriveNode[]> {
   const cached = queryClient.getQueryData<DriveNode[]>(childrenKey(folderId));
   if (cached !== undefined) {
     return cached;
   }
-  return refreshFolderChildren(queryClient, folderId);
+  if (isLocalId(folderId)) {
+    return [];
+  }
+  return refreshFolderChildren(queryClient, opsQueue, folderId);
 }
 
 async function refreshFolderChildren(
   queryClient: QueryClient,
+  opsQueue: OpsQueue,
   folderId: string,
 ): Promise<DriveNode[]> {
-  const children = await fetchChildren(folderId);
+  if (isLocalId(folderId)) {
+    return queryClient.getQueryData<DriveNode[]>(childrenKey(folderId)) ?? [];
+  }
+  const raw = await fetchChildren(folderId);
+  const children = opsQueue.overlayListing(folderId, raw);
   queryClient.setQueryData(childrenKey(folderId), children);
   void writeCachedFolder(folderId, children);
   return children;
@@ -442,33 +449,23 @@ async function refreshFolderChildren(
 /** The live folder `name` directly under `root` (case-insensitive), created when missing. */
 async function ensureRootSubfolder(
   queryClient: QueryClient,
+  opsQueue: OpsQueue,
   root: DriveNode,
   name: string,
 ): Promise<DriveNode> {
   const target = name.toLowerCase();
   const find = (nodes: DriveNode[]) =>
     nodes.find((node) => node.kind === "folder" && node.name.toLowerCase() === target);
-  const existing = find(await folderChildren(queryClient, root.id));
+  const existing = find(await folderChildren(queryClient, opsQueue, root.id));
   if (existing !== undefined) {
     return existing;
   }
-  try {
-    const created = await createFolder(root.id, name);
-    addChild(queryClient, root.id, created);
-    void addCachedChild(root.id, created);
-    queryClient.setQueryData<DriveNode[]>(childrenKey(created.id), []);
-    void writeCachedFolder(created.id, []);
-    return created;
-  } catch (err) {
-    // Created meanwhile (another device or tab): use that one.
-    if (isNameExists(err)) {
-      const raced = find(await refreshFolderChildren(queryClient, root.id));
-      if (raced !== undefined) {
-        return raced;
-      }
-    }
-    throw err;
-  }
+  const result = await opsQueue.createFolder({
+    parentId: root.id,
+    name,
+    adoptExistingOnConflict: true,
+  });
+  return result.node;
 }
 
 function SessionContent({
@@ -476,21 +473,25 @@ function SessionContent({
   networkOffline,
   theme,
   onThemeChange,
+  onOpDiscardedRef,
 }: {
   onRetry: OnRetry;
   networkOffline: boolean;
   theme: ThemePreference;
   onThemeChange: (next: ThemePreference) => void;
+  onOpDiscardedRef: RefObject<((op: PendingOp) => void) | null>;
 }) {
   const queryClient = useQueryClient();
   const syncQueue = useSyncQueue();
+  const opsQueue = useOpsQueue();
   const driveChanges = useDriveChanges();
   const vaultSync = useVaultSync();
   const vaultState = useVaultSyncState();
   const moveNode = useMoveNode();
   const [moveTarget, setMoveTarget] = useState<DriveNode | null>(null);
   const [moveError, setMoveError] = useState<string | null>(null);
-  const pendingSyncCount = usePendingSyncCount();
+  const pendingOpsCount = usePendingOpsCount();
+  const pendingSyncCount = useTotalPendingSyncCount();
   const online = useOnlineStatus();
   const [dirty, setDirty] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -506,6 +507,8 @@ function SessionContent({
   const [folderDialog, setFolderDialog] = useState<FolderDialogState | null>(null);
   const [deleteFolderTarget, setDeleteFolderTarget] = useState<DriveNode | null>(null);
   const documentRef = useRef<DocumentHandle | null>(null);
+  const sessionKeysRef = useRef<Map<string, string>>(new Map());
+  const lastAccountEmailRef = useRef<string | null>(null);
   const vaultNoteList = useVaultNotes();
   const [openPanel, setOpenPanel] = useState<WorkspacePanel | null>(null);
   // A `[[Note#Heading]]` jump waiting for its note to load.
@@ -530,6 +533,100 @@ function SessionContent({
   // Reopen last session's note before the open document is first read (only at `/`, no `?file=`).
   useState(restoreLastOpenFile);
   const [openFileId, openFile] = useOpenDocument();
+
+  const sessionKeyFor = (id: string): string => {
+    const existing = sessionKeysRef.current.get(id);
+    if (existing !== undefined) {
+      return existing;
+    }
+    sessionKeysRef.current.set(id, id);
+    return id;
+  };
+
+  useEffect(
+    () =>
+      opsQueue.onIdRemapped(({ localId, realId, node }) => {
+        const stableKey = sessionKeysRef.current.get(localId) ?? localId;
+        sessionKeysRef.current.set(realId, stableKey);
+        setCreatedFile((prev) => (prev?.id === localId ? { id: realId, name: node.name } : prev));
+        setRevealHint((prev) => (prev?.id === localId ? { ...prev, id: realId } : prev));
+        setPendingHeading((prev) =>
+          prev?.fileId === localId ? { ...prev, fileId: realId } : prev,
+        );
+        setDeleteTarget((prev) =>
+          prev?.id === localId ? { ...prev, id: realId, name: node.name } : prev,
+        );
+        setMoveTarget((prev) =>
+          prev?.id === localId ? { ...prev, id: realId, name: node.name } : prev,
+        );
+        setDeleteFolderTarget((prev) =>
+          prev?.id === localId ? { ...prev, id: realId, name: node.name } : prev,
+        );
+        setFolderDialog((prev) => {
+          if (prev === null) {
+            return prev;
+          }
+          if (prev.mode === "create" && prev.parent.id === localId) {
+            return { mode: "create", parent: { id: realId, name: node.name } };
+          }
+          if (prev.mode === "rename" && prev.folder.id === localId) {
+            return { mode: "rename", folder: { ...prev.folder, id: realId, name: node.name } };
+          }
+          return prev;
+        });
+      }),
+    [opsQueue],
+  );
+
+  const openFileIdRef = useRef(openFileId);
+  openFileIdRef.current = openFileId;
+  useEffect(() => {
+    onOpDiscardedRef.current = (op) => {
+      if (op.kind === "create_file") {
+        if (openFileIdRef.current === op.targetId) {
+          openFile(null, { replace: true });
+        }
+        setCreatedFile((prev) => (prev?.id === op.targetId ? null : prev));
+        setDeleteTarget((prev) => (prev?.id === op.targetId ? null : prev));
+        setMoveTarget((prev) => (prev?.id === op.targetId ? null : prev));
+      } else if (op.kind === "create_folder") {
+        const currentOpen = openFileIdRef.current;
+        if (
+          currentOpen !== null &&
+          isLocalId(currentOpen) &&
+          findNode(queryClient, currentOpen) === undefined
+        ) {
+          openFile(null, { replace: true });
+        }
+        setCreatedFile((prev) =>
+          prev !== null && isLocalId(prev.id) && findNode(queryClient, prev.id) === undefined
+            ? null
+            : prev,
+        );
+        setDeleteFolderTarget((prev) => (prev?.id === op.targetId ? null : prev));
+        setMoveTarget((prev) => (prev?.id === op.targetId ? null : prev));
+        setFolderDialog((prev) => {
+          if (prev === null) {
+            return prev;
+          }
+          if (prev.mode === "create" && prev.parent.id === op.targetId) {
+            return null;
+          }
+          if (prev.mode === "rename" && prev.folder.id === op.targetId) {
+            return null;
+          }
+          return prev;
+        });
+      } else if (op.kind === "rename_file") {
+        setCreatedFile((prev) =>
+          prev?.id === op.targetId ? { id: prev.id, name: op.previousName } : prev,
+        );
+      }
+    };
+    return () => {
+      onOpDiscardedRef.current = null;
+    };
+  }, [onOpDiscardedRef, openFile, queryClient]);
 
   // Retries while the note loads; gives up quietly after ~3 s or when the heading is missing.
   useEffect(() => {
@@ -576,13 +673,19 @@ function SessionContent({
   useEffect(() => {
     let active = true;
     void (async () => {
-      // Load persisted outbox entries into SyncQueue first so pendingSyncCount is populated before
-      // any 401 response can decide whether to wipe local state.
-      await syncQueue.hydrate(false);
-      const hasPending = syncQueue.getSnapshot().pendingCount > 0;
+      // Load persisted outbox & structural ops before any 401 response can decide whether to wipe local state.
+      await Promise.all([syncQueue.hydrate(false), opsQueue.hydrate(false)]);
+      const hasPending =
+        syncQueue.getSnapshot().pendingCount > 0 ||
+        opsQueue.getSnapshot().pendingCount > 0 ||
+        (await hasPersistedPendingWork());
       const cachedSession = await hydrateQueryClient(queryClient, openFileId, {
         preserveOnUnauthenticated: hasPending,
       });
+      opsQueue.applyPendingOverlaysToCache();
+      if (cachedSession !== null && lastAccountEmailRef.current === null) {
+        lastAccountEmailRef.current = cachedSession.email;
+      }
       if (active) {
         setHydrateState({ ready: true, cachedSession });
       }
@@ -592,13 +695,21 @@ function SessionContent({
     };
     // Hydrate once on mount; subsequent opens read per-file cache in DocumentView.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [queryClient, syncQueue]);
+  }, [queryClient, syncQueue, opsQueue]);
 
-  const { data, error, refetch } = useQuery({
+  const { data, dataUpdatedAt, error, refetch } = useQuery({
     queryKey: ["session"],
     queryFn: async ({ signal }) => {
       const session = await fetchSession(signal);
-      void writeCachedSession(session.email, session.name, session.cloudSync);
+      const switched =
+        lastAccountEmailRef.current !== null && lastAccountEmailRef.current !== session.email;
+      lastAccountEmailRef.current = session.email;
+      if (switched) {
+        opsQueue.resetAll();
+        syncQueue.resetAll();
+        sessionKeysRef.current.clear();
+      }
+      await writeCachedSession(session.email, session.name, session.cloudSync);
       return session;
     },
   });
@@ -615,7 +726,9 @@ function SessionContent({
    * query reloads. `root`, when given, is the new vault folder the server just accepted.
    */
   const resetVault = async (root?: DriveNode) => {
+    opsQueue.resetAll();
     syncQueue.resetAll();
+    sessionKeysRef.current.clear();
     driveChanges.reset();
     vaultSync?.reset();
     clearRecentFiles();
@@ -648,7 +761,9 @@ function SessionContent({
   };
 
   const clearLocalSession = () => {
+    opsQueue.resetAll();
     syncQueue.resetAll();
+    sessionKeysRef.current.clear();
     driveChanges.reset();
     vaultSync?.setPinned(false);
     vaultSync?.reset();
@@ -686,58 +801,17 @@ function SessionContent({
   const createNoteMutation = useMutation({
     mutationFn: async (input: CreateNoteInput) => {
       const { folder, name, content = "", openExistingOnConflict = false } = input;
-      if (name !== undefined) {
-        try {
-          const result = await createFile(folder.id, name, content);
-          return { folderId: folder.id, content, created: true, ...result };
-        } catch (err) {
-          if (openExistingOnConflict && isNameExists(err)) {
-            const children = await fetchChildren(folder.id);
-            queryClient.setQueryData(childrenKey(folder.id), children);
-            void writeCachedFolder(folder.id, children);
-            const existing = children.find(
-              (n) => n.kind === "markdown" && n.name.toLowerCase() === name.toLowerCase(),
-            );
-            if (existing) {
-              return {
-                folderId: folder.id,
-                content: "",
-                created: false,
-                node: existing,
-                revision: "",
-              };
-            }
-          }
-          throw err;
-        }
-      }
-      const taken = new Set(getFolderChildNames(queryClient, folder.id));
-      let nextIndex = 1;
-      for (let attempt = 0; attempt < 20; attempt += 1) {
-        const candidate = pickUntitledName(taken, nextIndex);
-        try {
-          const result = await createFile(folder.id, candidate, content);
-          return { folderId: folder.id, content, created: true, ...result };
-        } catch (err) {
-          if (isNameExists(err)) {
-            taken.add(candidate);
-            nextIndex += 1;
-            continue;
-          }
-          throw err;
-        }
-      }
-      const fallback = `Untitled ${Date.now()}.md`;
-      const result = await createFile(folder.id, fallback, content);
-      return { folderId: folder.id, content, created: true, ...result };
+      const result = await opsQueue.createFile({
+        parentId: folder.id,
+        name,
+        initialContent: content,
+        openExistingOnConflict,
+        autoSuffixOnConflict: name === undefined,
+      });
+      return { folderId: folder.id, ...result };
     },
-    onSuccess: ({ folderId, content, created, node, revision }) => {
+    onSuccess: ({ created, node }) => {
       if (created) {
-        addChild(queryClient, folderId, node);
-        void addCachedChild(folderId, node);
-        void writeCachedFile(node.id, content, revision);
-        syncQueue.observeRemoteRevision(node.id, revision, content);
-        queryClient.setQueryData(["files", node.id, "content"], { text: content, revision });
         setCreatedFile({ id: node.id, name: node.name });
       } else {
         setCreatedFile(null);
@@ -758,7 +832,9 @@ function SessionContent({
 
   useEffect(() => {
     if (isSignedOut) {
+      opsQueue.resetAll();
       syncQueue.resetAll();
+      sessionKeysRef.current.clear();
       driveChanges.reset();
       vaultSync?.stop();
       vaultSync?.reset();
@@ -770,7 +846,7 @@ function SessionContent({
       setPaletteInitialQuery("");
       void clearLocalCache();
     }
-  }, [isSignedOut, syncQueue, driveChanges, vaultSync]);
+  }, [isSignedOut, opsQueue, syncQueue, driveChanges, vaultSync]);
 
   // Global keyboard shortcuts: Cmd/Ctrl+K (Command Palette) and Cmd/Ctrl+\ (Toggle sidebar).
   useEffect(() => {
@@ -802,17 +878,23 @@ function SessionContent({
 
   useEffect(() => {
     if (data !== undefined && !isSignedOut && !isUnauthenticated(error)) {
-      void requestPersistentStorage();
-      void syncQueue.hydrate(true);
       void driveChanges.hydrate();
       if (vaultSync !== null) {
         void vaultSync.hydrate();
-        if (vaultSync.getSnapshot().pinned) {
+      }
+      if (dataUpdatedAt > CACHE_STALE_TIMESTAMP) {
+        void requestPersistentStorage();
+        void (async () => {
+          await Promise.all([opsQueue.hydrate(false), syncQueue.hydrate(false)]);
+          await opsQueue.flushAll();
+          await syncQueue.flushAll();
+        })();
+        if (vaultSync !== null && vaultSync.getSnapshot().pinned) {
           void vaultSync.run();
         }
       }
     }
-  }, [data, error, isSignedOut, syncQueue, driveChanges, vaultSync]);
+  }, [data, dataUpdatedAt, error, isSignedOut, opsQueue, syncQueue, driveChanges, vaultSync]);
 
   useDriveChangesPolling(
     driveChanges,
@@ -821,12 +903,26 @@ function SessionContent({
 
   useEffect(() => {
     const handleOnline = () => {
-      void syncQueue.flushAll();
-      void queryClient.invalidateQueries();
+      const startedAt = Date.now();
+      void opsQueue
+        .flushAll()
+        .then(() => syncQueue.flushAll())
+        .then(() =>
+          queryClient.invalidateQueries({
+            predicate: (query) => {
+              if (query.queryKey[0] === "files" && typeof query.queryKey[1] === "string") {
+                if (isLocalId(query.queryKey[1]) || query.state.dataUpdatedAt >= startedAt) {
+                  return false;
+                }
+              }
+              return true;
+            },
+          }),
+        );
     };
     window.addEventListener("online", handleOnline);
     return () => window.removeEventListener("online", handleOnline);
-  }, [queryClient, syncQueue]);
+  }, [queryClient, opsQueue, syncQueue]);
 
   if (isSignedOut) {
     // With cached data, the 401 came after being signed in: say so.
@@ -851,9 +947,17 @@ function SessionContent({
 
   if (session !== undefined) {
     const isOffline = !online || networkOffline;
+    const offlineUnit =
+      pendingOpsCount > 0
+        ? pendingSyncCount === 1
+          ? "change"
+          : "changes"
+        : pendingSyncCount === 1
+          ? "note"
+          : "notes";
     const offlineMessage = isOffline
       ? pendingSyncCount > 0
-        ? `Offline — ${pendingSyncCount} ${pendingSyncCount === 1 ? "note" : "notes"} saved locally, will sync when online`
+        ? `Offline — ${pendingSyncCount} ${offlineUnit} saved locally, will sync when online`
         : "Offline — showing cached notes"
       : undefined;
 
@@ -909,8 +1013,8 @@ function SessionContent({
       let folder: FolderTarget = root;
       if (dailyFolderName !== "") {
         try {
-          folder = await ensureRootSubfolder(queryClient, root, dailyFolderName);
-          await folderChildren(queryClient, folder.id);
+          folder = await ensureRootSubfolder(queryClient, opsQueue, root, dailyFolderName);
+          await folderChildren(queryClient, opsQueue, folder.id);
         } catch (err) {
           setLinkNotice(
             `Could not open the “${dailyFolderName}” folder: ${createErrorMessage(err)}`,
@@ -1000,12 +1104,6 @@ function SessionContent({
     };
 
     const handleDeleted = (fileId: string) => {
-      void syncQueue.cancelDeletedFile(fileId);
-      removeRecentFile(fileId);
-      removeChild(queryClient, fileId);
-      void removeCachedChild(fileId);
-      void deleteCachedFile(fileId);
-      queryClient.removeQueries({ queryKey: ["files", fileId, "content"] });
       if (createdFile?.id === fileId) {
         setCreatedFile(null);
       }
@@ -1028,12 +1126,13 @@ function SessionContent({
         ? undefined
         : (findNode(queryClient, openFileId)?.name ??
           (openFileId === createdFile?.id ? createdFile.name : undefined));
-    const handleFileRenamed = (updated: DriveNode) => {
+    const handleFileRenamed = (updated: DriveNode, renamedFrom?: string) => {
       if (createdFile?.id === updated.id) {
         setCreatedFile({ id: updated.id, name: updated.name });
       }
-      if (previousName !== undefined && previousName !== updated.name) {
-        void updateLinksAfterRename(queryClient, syncQueue, updated.id, previousName, updated.name)
+      const prevName = renamedFrom ?? previousName;
+      if (prevName !== undefined && prevName !== updated.name) {
+        void updateLinksAfterRename(queryClient, syncQueue, updated.id, prevName, updated.name)
           .then((count) => {
             if (count > 0) {
               setLinkNotice(`Updated links in ${count} ${count === 1 ? "note" : "notes"}`);
@@ -1043,59 +1142,27 @@ function SessionContent({
       }
     };
 
-    const handleFolderCreated = (parentId: string, folder: DriveNode) => {
-      addChild(queryClient, parentId, folder);
-      void addCachedChild(parentId, folder);
-      queryClient.setQueryData<DriveNode[]>(childrenKey(folder.id), []);
-      void writeCachedFolder(folder.id, []);
+    const handleFolderCreated = () => {
+      // Cache and Dexie updates are applied by OpsQueue.createFolder.
     };
 
-    const handleFolderRenamed = (updated: DriveNode) => {
-      renameChild(queryClient, updated.id, updated);
-      void renameCachedChild(updated.id, updated);
+    const handleFolderRenamed = () => {
+      // Cache and Dexie updates are applied by OpsQueue.renameFolder.
     };
 
-    const handleFolderDeleted = (folderId: string) => {
-      const { folderIds, fileIds } = collectDescendantIds(queryClient, folderId);
-      const seenFiles = new Set(fileIds);
-      const seenFolders = new Set(folderIds);
-      removeChild(queryClient, folderId);
-      void removeCachedChild(folderId);
-      for (const fileId of fileIds) {
-        void syncQueue.cancelDeletedFile(fileId);
-        removeRecentFile(fileId);
-        queryClient.removeQueries({ queryKey: ["files", fileId, "content"] });
-      }
-      for (const dirId of folderIds) {
-        queryClient.removeQueries({ queryKey: childrenKey(dirId) });
-      }
-      if (createdFile !== null && seenFiles.has(createdFile.id)) {
+    const handleFolderDeleted = () => {
+      if (
+        createdFile !== null &&
+        (syncQueue.isDeleted(createdFile.id) || opsQueue.isPendingDeleted(createdFile.id))
+      ) {
         setCreatedFile(null);
       }
-      if (openFileId !== null && seenFiles.has(openFileId)) {
+      if (
+        openFileId !== null &&
+        (syncQueue.isDeleted(openFileId) || opsQueue.isPendingDeleted(openFileId))
+      ) {
         openFile(null);
       }
-      void deleteCachedSubtree(folderId, folderIds, fileIds).then((deleted) => {
-        for (const fileId of deleted.fileIds) {
-          if (seenFiles.has(fileId)) {
-            continue;
-          }
-          void syncQueue.cancelDeletedFile(fileId);
-          removeRecentFile(fileId);
-          queryClient.removeQueries({ queryKey: ["files", fileId, "content"] });
-          if (createdFile?.id === fileId) {
-            setCreatedFile(null);
-          }
-          if (openFileId === fileId) {
-            openFile(null);
-          }
-        }
-        for (const dirId of deleted.folderIds) {
-          if (!seenFolders.has(dirId)) {
-            queryClient.removeQueries({ queryKey: childrenKey(dirId) });
-          }
-        }
-      });
     };
 
     const handleDropMove = (node: DriveNode, targetFolderId: string) => {
@@ -1106,8 +1173,10 @@ function SessionContent({
     const syncInspectorProps = {
       offline: isOffline,
       onRetry: (fileId: string) => void syncQueue.retryFile(fileId),
-      onRetryAll: () => void syncQueue.flushAll(),
+      onRetryOp: (opId: string) => void opsQueue.retryOp(opId),
+      onRetryAll: () => void opsQueue.flushAll({ force: true }).then(() => syncQueue.flushAll()),
       onDiscard: (fileId: string) => void syncQueue.discardFile(fileId),
+      onDiscardOp: (opId: string) => void opsQueue.discardOp(opId),
       onPinChange: (pinned: boolean) => vaultSync?.setPinned(pinned),
       onSyncVault: () => void vaultSync?.run(),
     };
@@ -1380,6 +1449,7 @@ function SessionContent({
             ) : openFileId !== null ? (
               <DocumentView
                 fileId={openFileId}
+                sessionKey={sessionKeyFor(openFileId)}
                 fallbackName={openFileId === createdFile?.id ? createdFile.name : undefined}
                 fallbackPath={revealHint?.id === openFileId ? revealHint.path : undefined}
                 initialMode={openFileId === createdFile?.id ? "edit" : settings.defaultMode}
@@ -1606,10 +1676,16 @@ export function App() {
             (error instanceof ApiError && error.retryAfter !== undefined ? error.retryAfter : 1) *
             1000,
         },
+        mutations: {
+          // Local-first mutations queue into IndexedDB via OpsQueue instead of pausing offline.
+          networkMode: "always",
+        },
       },
     });
     return client;
   });
+
+  const onOpDiscardedRef = useRef<((op: PendingOp) => void) | null>(null);
 
   const [syncQueue] = useState(
     () =>
@@ -1621,12 +1697,36 @@ export function App() {
 
   useEffect(() => () => syncQueue.dispose(), [syncQueue]);
 
+  const [opsQueue] = useState(
+    () =>
+      new OpsQueue(queryClient, syncQueue, {
+        onNetworkError: () => setNetworkOffline(true),
+        onNetworkSuccess: () => setNetworkOffline(false),
+        onOpDiscarded: (op) => onOpDiscardedRef.current?.(op),
+      }),
+  );
+
+  useEffect(() => () => opsQueue.dispose(), [opsQueue]);
+
   const [driveChanges] = useState(() => new DriveChanges(queryClient));
   useEffect(() => driveChanges.connect(), [driveChanges]);
 
   const [vaultSync] = useState(() => new VaultSync(queryClient));
   // Stop (not dispose) on unmount: Strict Mode remounts effects and the instance must keep working.
   useEffect(() => () => vaultSync.stop(), [vaultSync]);
+
+  useEffect(() => {
+    syncQueue.setOnLocalFileFlush(() => void opsQueue.flushAll());
+    vaultSync.setOpsHooks({
+      overlayListing: opsQueue.overlayListing,
+      overlayVaultIndex: opsQueue.overlayVaultIndex,
+      isPendingDeleted: opsQueue.isPendingDeleted,
+    });
+    return () => {
+      syncQueue.setOnLocalFileFlush(undefined);
+      vaultSync.setOpsHooks(undefined);
+    };
+  }, [opsQueue, syncQueue, vaultSync]);
 
   useEffect(() => {
     const handleOnline = () => setNetworkOffline(false);
@@ -1637,11 +1737,18 @@ export function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <SyncQueueContext value={syncQueue}>
-        <DriveChangesContext value={driveChanges}>
-          <VaultSyncContext value={vaultSync}>
-            <SessionGate networkOffline={networkOffline} theme={theme} onThemeChange={setTheme} />
-          </VaultSyncContext>
-        </DriveChangesContext>
+        <OpsQueueContext value={opsQueue}>
+          <DriveChangesContext value={driveChanges}>
+            <VaultSyncContext value={vaultSync}>
+              <SessionGate
+                networkOffline={networkOffline}
+                theme={theme}
+                onThemeChange={setTheme}
+                onOpDiscardedRef={onOpDiscardedRef}
+              />
+            </VaultSyncContext>
+          </DriveChangesContext>
+        </OpsQueueContext>
       </SyncQueueContext>
     </QueryClientProvider>
   );

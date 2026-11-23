@@ -19,6 +19,8 @@ import {
   writeCachedFolder,
   type CachedFile,
 } from "../localCache";
+import { isLocalId } from "../localIds";
+import { useOptionalOpsQueue } from "../opsQueue";
 import { copyAsRichText } from "../richCopy";
 import { useSettings } from "../settings";
 import { toggleViewPref, useViewPrefs } from "../viewPrefs";
@@ -208,6 +210,7 @@ export function CommandPalette({
   onJumpToHeading: (heading: HeadingItem) => void;
 }) {
   const queryClient = useQueryClient();
+  const opsQueue = useOptionalOpsQueue();
   const { attachmentsFolder } = useSettings();
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -264,6 +267,7 @@ export function CommandPalette({
       const unloaded = folders
         .filter(
           (f) =>
+            !isLocalId(f.node.id) &&
             !isHiddenAttachmentsFolder(f, attachmentsFolder) &&
             queryClient.getQueryData(childrenKey(f.node.id)) === undefined,
         )
@@ -271,7 +275,8 @@ export function CommandPalette({
       if (unloaded.length > 0) {
         void Promise.allSettled(
           unloaded.map(async (f) => {
-            const nodes = await fetchChildren(f.node.id, warmController.signal);
+            const raw = await fetchChildren(f.node.id, warmController.signal);
+            const nodes = opsQueue !== null ? opsQueue.overlayListing(f.node.id, raw) : raw;
             queryClient.setQueryData(childrenKey(f.node.id), nodes);
             void writeCachedFolder(f.node.id, nodes);
           }),
@@ -288,7 +293,7 @@ export function CommandPalette({
       window.clearTimeout(focusTimer);
       warmController.abort();
     };
-  }, [open, initialQuery, offline, queryClient, attachmentsFolder]);
+  }, [open, initialQuery, offline, queryClient, opsQueue, attachmentsFolder]);
 
   const trimmed = query.trim();
   const isCommandMode = trimmed.startsWith(">");
@@ -1012,7 +1017,7 @@ export function CommandPalette({
     }
 
     // 4f. Create-on-the-fly when query is a valid filename not already present in the target folder.
-    if (defaultTargetFolder && !offline) {
+    if (defaultTargetFolder) {
       const normalized = normalizeFileName(trimmed);
       if (normalized.ok) {
         const alreadyExists = findNoteByNameInFolder(

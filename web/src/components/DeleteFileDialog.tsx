@@ -16,6 +16,7 @@ import {
   isUnauthenticated,
   type DriveNode,
 } from "../api";
+import { useOptionalOpsQueue } from "../opsQueue";
 
 function deleteErrorMessage(error: unknown): string {
   if (isUnauthenticated(error)) {
@@ -58,10 +59,17 @@ function OpenDeleteFileDialog({
   onClose: () => void;
   onDeleted: (fileId: string) => void;
 }) {
+  const opsQueue = useOptionalOpsQueue();
   const [pending, setPending] = useState(false);
 
   const mutation = useMutation({
-    mutationFn: () => deleteFile(file.id),
+    mutationFn: async () => {
+      if (opsQueue !== null) {
+        await opsQueue.deleteFile(file.id, undefined, file);
+        return;
+      }
+      await deleteFile(file.id);
+    },
     onMutate: () => setPending(true),
     onSettled: () => setPending(false),
     onSuccess: () => {

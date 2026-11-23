@@ -18,6 +18,7 @@ import {
 import { removeRecentFile, remapRecentFile } from "./commandSearch";
 import { pickUntitledName } from "./fileName";
 import {
+  CACHE_STALE_TIMESTAMP,
   addCachedChild,
   deleteCachedFile,
   deleteCachedSubtree,
@@ -532,7 +533,7 @@ export class OpsQueue {
         };
       }
 
-      addChild(this.queryClient, parentId, node);
+      this.addChildOrSeed(parentId, node);
       upsertVaultIndexNode(this.queryClient, parentId, node);
       this.queryClient.setQueryData(["files", localId, "content"], {
         text: initialContent,
@@ -756,7 +757,7 @@ export class OpsQueue {
         return { status: "queued", node, created: true, opId: op.opId };
       }
 
-      addChild(this.queryClient, parentId, node);
+      this.addChildOrSeed(parentId, node);
       upsertVaultIndexNode(this.queryClient, parentId, node);
       this.queryClient.setQueryData<DriveNode[]>(childrenKey(localId), []);
 
@@ -1035,7 +1036,8 @@ export class OpsQueue {
         return { status: "queued", node, opId: result.activeOp?.opId };
       }
 
-      moveChild(this.queryClient, node, input.toParentId);
+      removeChild(this.queryClient, node.id);
+      this.addChildOrSeed(input.toParentId, node);
       moveInVaultIndex(this.queryClient, node.id, input.toParentId);
 
       this.syncOpsFromDb(result.ops);
@@ -1941,6 +1943,69 @@ export class OpsQueue {
       void this.flushAll();
     }
   }
+
+  /**
+   * Inserts `node` into `folderId`'s cached listing, or seeds a stale single-item listing when
+   * `folderId` was never expanded/cached before going offline so optimistic moves/creates stay
+   * visible in the tree and reconcile with Drive once online.
+   */
+  private addChildOrSeed(folderId: string, node: DriveNode): void {
+    const existing = this.queryClient.getQueryData<DriveNode[]>(childrenKey(folderId));
+    if (existing === undefined) {
+      this.queryClient.setQueryData<DriveNode[]>(childrenKey(folderId), [node], {
+        updatedAt: CACHE_STALE_TIMESTAMP,
+      });
+      return;
+    }
+    addChild(this.queryClient, folderId, node);
+  }
+
+  /**
+   * Projects queued structural ops onto the hydrated TanStack Query folder caches (including
+   * destination folders whose full remote listings were never cached before going offline)
+   * using a stale timestamp so the next online fetch reconciles with Drive.
+   */
+  applyPendingOverlaysToCache = (): void => {
+    if (this.ops.length === 0) {
+      return;
+    }
+    const targetFolders = new Set<string>();
+    const otherFolders = new Set<string>();
+    for (const op of this.ops) {
+      if (
+        op.kind === "create_file" ||
+        op.kind === "create_folder" ||
+        op.kind === "move_file" ||
+        op.kind === "move_folder"
+      ) {
+        targetFolders.add(op.parentId);
+      }
+      if (
+        (op.kind === "move_file" ||
+          op.kind === "move_folder" ||
+          op.kind === "delete_file" ||
+          op.kind === "delete_folder") &&
+        op.previousParentId !== undefined &&
+        !targetFolders.has(op.previousParentId)
+      ) {
+        otherFolders.add(op.previousParentId);
+      }
+    }
+    for (const [key] of this.queryClient.getQueriesData<DriveNode[]>({ queryKey: ["folders"] })) {
+      if (typeof key[1] === "string" && !targetFolders.has(key[1])) {
+        otherFolders.add(key[1]);
+      }
+    }
+    for (const folderId of [...targetFolders, ...otherFolders]) {
+      const existing = this.queryClient.getQueryData<DriveNode[]>(childrenKey(folderId));
+      const overlaid = this.overlayListing(folderId, existing ?? []);
+      if (existing !== undefined || overlaid.length > 0) {
+        this.queryClient.setQueryData<DriveNode[]>(childrenKey(folderId), overlaid, {
+          updatedAt: CACHE_STALE_TIMESTAMP,
+        });
+      }
+    }
+  };
 
   /** Whether `id` (a file or folder) is deleted by a pending `delete_file` or `delete_folder` op. */
   isPendingDeleted = (id: string): boolean => {

@@ -11,6 +11,7 @@ import { useId, useMemo, useState, type KeyboardEvent } from "react";
 import { fetchVaultIndex, type DriveNode } from "../api";
 import { fuzzyMatch } from "../commandSearch";
 import { moveErrorMessage, useMoveNode } from "../moveItem";
+import { useOptionalOpsQueue } from "../opsQueue";
 import { useSettings } from "../settings";
 import {
   knownFolders,
@@ -19,6 +20,7 @@ import {
   VAULT_INDEX_KEY,
   withoutRootAttachmentsFolder,
 } from "../treeCache";
+import { useOnlineStatus } from "../useOnlineStatus";
 import { FolderIcon } from "./icons";
 
 const MAX_RESULTS = 50;
@@ -54,6 +56,8 @@ function OpenMoveDialog({
   onMoved?: (node: DriveNode, targetId: string) => void;
 }) {
   const queryClient = useQueryClient();
+  const opsQueue = useOptionalOpsQueue();
+  const online = useOnlineStatus();
   const moveNode = useMoveNode();
   const inputId = useId();
   const listId = useId();
@@ -62,7 +66,11 @@ function OpenMoveDialog({
   // The whole vault's folders, for destinations nobody has expanded yet; the cached tree meanwhile.
   const index = useQuery({
     queryKey: VAULT_INDEX_KEY,
-    queryFn: ({ signal }) => fetchVaultIndex(signal),
+    queryFn: async ({ signal }) => {
+      const raw = await fetchVaultIndex(signal);
+      return opsQueue !== null ? opsQueue.overlayVaultIndex(raw) : raw;
+    },
+    enabled: online,
     staleTime: 60_000,
     retry: false,
   });
@@ -190,7 +198,7 @@ function OpenMoveDialog({
           ))}
           {results.length === 0 && (
             <li className="px-2.5 py-1.5 text-sm text-neutral-500 dark:text-neutral-400">
-              {index.isPending ? "Loading folders…" : "No matching folder."}
+              {index.isFetching ? "Loading folders…" : "No matching folder."}
             </li>
           )}
         </ul>

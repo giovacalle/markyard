@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { type QueryClient, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   createTreeController,
   Tree,
@@ -10,7 +10,9 @@ import {
 } from "@ui-sdk/react/tree";
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { fetchChildren, fetchVaultIndex, type DriveNode } from "../api";
-import { writeCachedFolder } from "../localCache";
+import { readAllCachedFolders, writeCachedFolder } from "../localCache";
+import { isLocalId } from "../localIds";
+import { type OpsQueue, useOptionalOpsQueue } from "../opsQueue";
 import { useSettings } from "../settings";
 import {
   ancestorIdsFromPath,
@@ -57,11 +59,21 @@ function duplicateNames(nodes: DriveNode[]): Set<string> {
   return duplicates;
 }
 
-function childrenQuery(folderId: string) {
+function childrenQuery(folderId: string, queryClient: QueryClient, opsQueue: OpsQueue | null) {
   return {
     queryKey: childrenKey(folderId),
+    networkMode: isLocalId(folderId) ? ("always" as const) : ("online" as const),
     queryFn: async ({ signal }: { signal: AbortSignal }) => {
-      const nodes = await fetchChildren(folderId, signal);
+      if (isLocalId(folderId)) {
+        const cached = queryClient.getQueryData<DriveNode[]>(childrenKey(folderId));
+        if (cached !== undefined) {
+          return cached;
+        }
+        const all = await readAllCachedFolders();
+        return all.find((folder) => folder.folderId === folderId)?.nodes ?? [];
+      }
+      const raw = await fetchChildren(folderId, signal);
+      const nodes = opsQueue !== null ? opsQueue.overlayListing(folderId, raw) : raw;
       void writeCachedFolder(folderId, nodes);
       return nodes;
     },
@@ -69,7 +81,9 @@ function childrenQuery(folderId: string) {
 }
 
 function useChildren(folderId: string) {
-  return useQuery(childrenQuery(folderId));
+  const queryClient = useQueryClient();
+  const opsQueue = useOptionalOpsQueue();
+  return useQuery(childrenQuery(folderId, queryClient, opsQueue));
 }
 
 function prefersReducedMotion(): boolean {
@@ -293,6 +307,7 @@ function RootTree({
   revealPath?: readonly string[];
 }) {
   const queryClient = useQueryClient();
+  const opsQueue = useOptionalOpsQueue();
   const [expanded, setExpanded] = useState<string[]>(() => readExpandedFolders(rootFolderId));
   const [opened, setOpened] = useState<Set<string>>(() => new Set(expanded));
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
@@ -408,7 +423,7 @@ function RootTree({
     const path = revealPathRef.current;
     if (path !== undefined) {
       ancestorIdsFromPath(rootFolderId, path, selectedId, (id) =>
-        queryClient.ensureQueryData(childrenQuery(id)),
+        queryClient.ensureQueryData(childrenQuery(id, queryClient, opsQueue)),
       ).then(
         (ids) => {
           if (ids !== null) {
@@ -442,7 +457,10 @@ function RootTree({
         queryClient
           .fetchQuery({
             queryKey: VAULT_INDEX_KEY,
-            queryFn: ({ signal }) => fetchVaultIndex(signal),
+            queryFn: async ({ signal }) => {
+              const raw = await fetchVaultIndex(signal);
+              return opsQueue !== null ? opsQueue.overlayVaultIndex(raw) : raw;
+            },
             staleTime: 60_000,
             retry: false,
           })
@@ -457,7 +475,7 @@ function RootTree({
     };
     // handleExpandedChange only touches state setters and refs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedId, revealKey, rootFolderId, queryClient]);
+  }, [selectedId, revealKey, rootFolderId, queryClient, opsQueue]);
 
   // The note's row may render only after its folders' listings load: scroll once it is there.
   useEffect(() => {

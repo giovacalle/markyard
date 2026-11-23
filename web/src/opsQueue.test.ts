@@ -7,10 +7,12 @@ import { readLocalCloudState } from "./cloudState";
 import { getRecentFileIds, recordRecentFile } from "./commandSearch";
 import { DriveChanges } from "./driveChanges";
 import {
+  CACHE_STALE_TIMESTAMP,
   clearLocalCache,
   clearVaultCache,
   enqueueOrCoalesceOp,
   hasPersistedPendingWork,
+  hydrateQueryClient,
   readAllCachedFolders,
   readAllPendingOps,
   readCachedFile,
@@ -1122,6 +1124,47 @@ describe("overlayListing, overlayVaultIndex, VaultSync, cloudState, vaultDocumen
     expect(changes.getSnapshot().external).toBeNull();
 
     changes.dispose();
+    h2.opsQueue.dispose();
+    h2.syncQueue.dispose();
+  });
+
+  it("seeds uncached destination folder offline with stale timestamp and re-projects after cold reload", async () => {
+    const h1 = makeHarness();
+    const rootNode = makeNode("root", "Vault", "folder");
+    const destFolder = makeNode("dir-uncached", "Archive", "folder");
+    const doc = makeNode("doc-1", "note.md", "markdown");
+    h1.queryClient.setQueryData(["root"], rootNode);
+    h1.queryClient.setQueryData(childrenKey("root"), [destFolder, doc]);
+    await writeCachedFolder("root", [destFolder, doc]);
+
+    setOnline(false);
+    await h1.opsQueue.moveNode({ id: "doc-1", kind: "markdown", toParentId: "dir-uncached" });
+
+    // Destination folder was seeded in memory with a stale timestamp, never written partially to Dexie.
+    expect(h1.queryClient.getQueryData<DriveNode[]>(childrenKey("dir-uncached"))).toEqual([
+      expect.objectContaining({ id: "doc-1", name: "note.md" }),
+    ]);
+    expect(h1.queryClient.getQueryState(childrenKey("dir-uncached"))?.dataUpdatedAt).toBe(
+      CACHE_STALE_TIMESTAMP,
+    );
+    const cachedFolders = await readAllCachedFolders();
+    expect(cachedFolders.some((f) => f.folderId === "dir-uncached")).toBe(false);
+
+    // Cold reload offline: hydrateQueryClient + applyPendingOverlaysToCache restores the moved node.
+    h1.opsQueue.dispose();
+    h1.syncQueue.dispose();
+    const h2 = makeHarness();
+    await h2.opsQueue.hydrate(false);
+    await hydrateQueryClient(h2.queryClient, null, { preserveOnUnauthenticated: true });
+    h2.opsQueue.applyPendingOverlaysToCache();
+
+    expect(h2.queryClient.getQueryData<DriveNode[]>(childrenKey("dir-uncached"))).toEqual([
+      expect.objectContaining({ id: "doc-1", name: "note.md" }),
+    ]);
+    expect(h2.queryClient.getQueryState(childrenKey("dir-uncached"))?.dataUpdatedAt).toBe(
+      CACHE_STALE_TIMESTAMP,
+    );
+
     h2.opsQueue.dispose();
     h2.syncQueue.dispose();
   });

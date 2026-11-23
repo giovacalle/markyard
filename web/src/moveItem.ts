@@ -12,6 +12,7 @@ import {
   type VaultIndex,
 } from "./api";
 import { moveCachedChild } from "./localCache";
+import { useOptionalOpsQueue } from "./opsQueue";
 import { useSyncQueue } from "./syncQueue";
 import { moveChild, VAULT_INDEX_KEY } from "./treeCache";
 
@@ -48,8 +49,19 @@ export function moveErrorMessage(error: unknown): string {
 export function useMoveNode(): (node: DriveNode, targetId: string) => Promise<DriveNode> {
   const queryClient = useQueryClient();
   const syncQueue = useSyncQueue();
+  const opsQueue = useOptionalOpsQueue();
   return useCallback(
     async (node: DriveNode, targetId: string) => {
+      if (opsQueue !== null) {
+        const result = await opsQueue.moveNode({
+          id: node.id,
+          kind: node.kind,
+          name: node.name,
+          toParentId: targetId,
+          node,
+        });
+        return result.node;
+      }
       const updated =
         node.kind === "folder"
           ? await moveFolder(node.id, targetId)
@@ -66,6 +78,6 @@ export function useMoveNode(): (node: DriveNode, targetId: string) => Promise<Dr
       });
       return updated;
     },
-    [queryClient, syncQueue],
+    [queryClient, syncQueue, opsQueue],
   );
 }

@@ -20,6 +20,7 @@ import {
   type DriveNode,
 } from "../api";
 import { normalizeFolderName } from "../fileName";
+import { useOptionalOpsQueue } from "../opsQueue";
 import type { FolderTarget } from "./CommandPalette";
 
 export type FolderDialogState =
@@ -103,6 +104,7 @@ function OpenFolderNameDialog({
   onCreated: (parentId: string, folder: DriveNode) => void;
   onRenamed: (folder: DriveNode) => void;
 }) {
+  const opsQueue = useOptionalOpsQueue();
   const inputId = useId();
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [value, setValue] = useState(() => (state.mode === "rename" ? state.folder.name : ""));
@@ -121,10 +123,18 @@ function OpenFolderNameDialog({
   }, [state.mode]);
 
   const mutation = useMutation({
-    mutationFn: (name: string) =>
-      state.mode === "create"
+    mutationFn: async (name: string) => {
+      if (opsQueue !== null) {
+        const result =
+          state.mode === "create"
+            ? await opsQueue.createFolder({ parentId: state.parent.id, name })
+            : await opsQueue.renameFolder(state.folder.id, name, state.folder.name);
+        return result.node;
+      }
+      return state.mode === "create"
         ? createFolder(state.parent.id, name)
-        : renameFolder(state.folder.id, name),
+        : renameFolder(state.folder.id, name);
+    },
     onMutate: () => setPending(true),
     onSettled: () => setPending(false),
     onSuccess: (folder) => {
@@ -290,10 +300,17 @@ function OpenDeleteFolderDialog({
   onClose: () => void;
   onDeleted: (folderId: string) => void;
 }) {
+  const opsQueue = useOptionalOpsQueue();
   const [pending, setPending] = useState(false);
 
   const mutation = useMutation({
-    mutationFn: () => deleteFolder(folder.id),
+    mutationFn: async () => {
+      if (opsQueue !== null) {
+        await opsQueue.deleteFolder(folder.id, undefined, folder);
+        return;
+      }
+      await deleteFolder(folder.id);
+    },
     onMutate: () => setPending(true),
     onSettled: () => setPending(false),
     onSuccess: () => {

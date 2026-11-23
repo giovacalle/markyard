@@ -1,7 +1,14 @@
 import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from "@ui-sdk/react/popover";
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { describeError, isConflict, type VaultIndex } from "../api";
+import { describeError, isConflict, isNameExists, type VaultIndex } from "../api";
+import {
+  formatPendingOpLabel,
+  isPermanentOpError,
+  useOptionalOpsQueue,
+  usePendingOps,
+  type OpRuntimeStatus,
+} from "../opsQueue";
 import { isPermanentSyncError, useSyncStates, type FileSyncState } from "../syncQueue";
 import { findNode, VAULT_INDEX_KEY } from "../treeCache";
 import { useVaultSyncState } from "../vaultSync";
@@ -29,6 +36,22 @@ function statusLabel(state: QueuedState): string {
   return isPermanentSyncError(state.error) ? "Failed" : "Failed, will retry when you ask";
 }
 
+function opStatusLabel(state: OpRuntimeStatus): string {
+  if (state.status === "syncing") {
+    return "Syncing…";
+  }
+  if (state.status === "pending") {
+    return "Waiting to sync";
+  }
+  if (isNameExists(state.error)) {
+    return "Name already exists on Drive";
+  }
+  if (state.retry !== undefined) {
+    return `Failed, retrying (attempt ${state.retry.attempt} of ${state.retry.maxAttempts})`;
+  }
+  return isPermanentOpError(state.error) ? "Failed" : "Failed, will retry when you ask";
+}
+
 export function formatSyncedAt(at: number, now = Date.now()): string {
   const seconds = Math.round((now - at) / 1000);
   if (seconds < 60) {
@@ -52,26 +75,47 @@ export function SyncInspector({
   offline,
   className = "",
   onRetry,
+  onRetryOp,
   onRetryAll,
   onDiscard,
+  onDiscardOp,
   onPinChange,
   onSyncVault,
 }: {
   offline: boolean;
   className?: string;
   onRetry: (fileId: string) => void;
+  onRetryOp?: (opId: string) => void;
   onRetryAll: () => void;
   onDiscard: (fileId: string) => void;
+  onDiscardOp?: (opId: string) => void;
   onPinChange: (pinned: boolean) => void;
   onSyncVault: () => void;
 }) {
   const queryClient = useQueryClient();
+  const opsQueue = useOptionalOpsQueue();
   const [open, setOpen] = useState(false);
+  const pendingOps = usePendingOps();
   const states = useSyncStates();
   const vault = useVaultSyncState();
-  const queued = [...states].filter((entry): entry is [string, QueuedState] => isQueued(entry[1]));
-  const failed = queued.filter(([, state]) => state.status === "error").length;
-  const syncing = queued.some(([, state]) => state.status === "syncing");
+
+  const pendingCreateFileIds = new Set<string>();
+  for (const item of pendingOps) {
+    if (item.op.kind === "create_file") {
+      pendingCreateFileIds.add(item.op.targetId);
+    }
+  }
+  const queued = [...states].filter(
+    (entry): entry is [string, QueuedState] =>
+      isQueued(entry[1]) && !pendingCreateFileIds.has(entry[0]),
+  );
+  const totalQueued = pendingOps.length + queued.length;
+  const failed =
+    pendingOps.filter((item) => item.state.status === "error").length +
+    queued.filter(([, state]) => state.status === "error").length;
+  const syncing =
+    pendingOps.some((item) => item.state.status === "syncing") ||
+    queued.some(([, state]) => state.status === "syncing");
 
   const nameOf = (fileId: string): string => {
     const node = findNode(queryClient, fileId);
@@ -82,15 +126,34 @@ export function SyncInspector({
     return index?.files.find((file) => file.id === fileId)?.name ?? "Untitled note";
   };
 
+  const unit = (count: number) =>
+    pendingOps.length > 0 ? (count === 1 ? "change" : "changes") : count === 1 ? "note" : "notes";
+
   const summary = offline
     ? "Offline"
     : failed > 0
-      ? `${failed} ${failed === 1 ? "note" : "notes"} failed to sync`
-      : queued.length > 0
-        ? `${queued.length} ${queued.length === 1 ? "note" : "notes"} waiting to sync`
+      ? `${failed} ${unit(failed)} failed to sync`
+      : totalQueued > 0
+        ? `${totalQueued} ${unit(totalQueued)} waiting to sync`
         : vault.running
           ? "Syncing vault"
           : "All changes synced";
+
+  const handleRetryOp = (opId: string) => {
+    if (onRetryOp !== undefined) {
+      onRetryOp(opId);
+    } else {
+      void opsQueue?.retryOp(opId);
+    }
+  };
+
+  const handleDiscardOp = (opId: string) => {
+    if (onDiscardOp !== undefined) {
+      onDiscardOp(opId);
+    } else {
+      void opsQueue?.discardOp(opId);
+    }
+  };
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -98,18 +161,18 @@ export function SyncInspector({
         type="button"
         aria-label={`Sync status: ${summary}`}
         title="Sync & offline"
-        data-state={failed > 0 ? "error" : queued.length > 0 || syncing ? "pending" : "idle"}
+        data-state={failed > 0 ? "error" : totalQueued > 0 || syncing ? "pending" : "idle"}
         className={`relative size-7 shrink-0 items-center justify-center rounded-md text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-neutral-900 focus-visible:outline-2 focus-visible:outline-blue-600 data-[open]:bg-neutral-100 data-[state=error]:text-red-600 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100 dark:data-[open]:bg-neutral-800 dark:data-[state=error]:text-red-400 ${className}`}
       >
         {offline ? <CloudOffIcon className="size-4" /> : <CloudIcon className="size-4" />}
-        {queued.length > 0 && (
+        {totalQueued > 0 && (
           <span
             aria-hidden="true"
             className={`absolute -top-0.5 -right-0.5 flex min-w-3.5 items-center justify-center rounded-full px-0.5 text-[9px] leading-3.5 font-semibold text-white ${
               failed > 0 ? "bg-red-600" : "bg-amber-500"
             }`}
           >
-            {queued.length}
+            {totalQueued}
           </span>
         )}
       </PopoverTrigger>
@@ -127,9 +190,62 @@ export function SyncInspector({
           {summary}
         </p>
 
-        {queued.length > 0 && (
+        {totalQueued > 0 && (
           <section aria-label="Sync queue" className="mt-2.5">
             <ul className="max-h-60 space-y-1.5 overflow-y-auto">
+              {pendingOps.map(({ op, state }) => {
+                const label = formatPendingOpLabel(op);
+                return (
+                  <li
+                    key={op.opId}
+                    aria-label={label}
+                    className="rounded-lg border border-neutral-200 p-2 dark:border-neutral-800"
+                  >
+                    <p className="truncate text-xs font-medium" title={label}>
+                      {label}
+                    </p>
+                    <p
+                      className={`mt-0.5 text-[11px] ${
+                        state.status === "error"
+                          ? "text-red-600 dark:text-red-400"
+                          : "text-neutral-500 dark:text-neutral-400"
+                      }`}
+                    >
+                      {opStatusLabel(state)}
+                    </p>
+                    {state.status === "error" && (
+                      <p className="mt-0.5 font-mono text-[10px] break-words text-red-600/90 dark:text-red-300/80">
+                        {describeError(state.error)}
+                      </p>
+                    )}
+                    <div className="mt-1.5 flex gap-1.5">
+                      {state.status !== "syncing" && (
+                        <button
+                          type="button"
+                          className={ROW_BUTTON_CLASS}
+                          disabled={offline}
+                          aria-label={`Retry ${label}`}
+                          onClick={() => handleRetryOp(op.opId)}
+                        >
+                          Retry
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className={ROW_BUTTON_CLASS}
+                        aria-label={`Discard ${label}`}
+                        onClick={() => {
+                          if (window.confirm(`Discard "${label}" and undo this local change?`)) {
+                            handleDiscardOp(op.opId);
+                          }
+                        }}
+                      >
+                        Discard
+                      </button>
+                    </div>
+                  </li>
+                );
+              })}
               {queued.map(([fileId, state]) => {
                 const name = nameOf(fileId);
                 return (

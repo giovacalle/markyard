@@ -44,6 +44,8 @@ import {
   writeCachedFile,
   writeCachedRemoteFile,
 } from "../localCache";
+import { isLocalId } from "../localIds";
+import { useOptionalOpsQueue, usePendingOps } from "../opsQueue";
 import { useExternalChange, useOptionalDriveChanges } from "../driveChanges";
 import {
   isPermanentSyncError,
@@ -219,6 +221,7 @@ function clickedInsideEditorContent(event: MouseEvent<HTMLDivElement>): boolean 
 
 export function DocumentView({
   fileId,
+  sessionKey,
   fallbackName,
   fallbackPath,
   initialMode = "preview",
@@ -234,6 +237,8 @@ export function DocumentView({
   onTagClick,
 }: {
   fileId: string;
+  /** Stable key kept across `local:` → real Drive ID remap so CodeMirror never unmounts. */
+  sessionKey?: string;
   fallbackName?: string;
   fallbackPath?: readonly string[];
   initialMode?: DocumentMode;
@@ -244,7 +249,7 @@ export function DocumentView({
   trailingControl?: ReactNode;
   documentRef?: RefObject<DocumentHandle | null>;
   onDirtyChange?: (dirty: boolean) => void;
-  onFileRenamed?: (node: DriveNode) => void;
+  onFileRenamed?: (node: DriveNode, previousName?: string) => void;
   /** Drive answered 404 for this note's content. */
   onNotFound?: (fileId: string) => void;
   onTagClick?: (tag: string) => void;
@@ -254,6 +259,7 @@ export function DocumentView({
       {(onRetry) => (
         <DocumentContent
           fileId={fileId}
+          sessionKey={sessionKey}
           fallbackName={fallbackName}
           fallbackPath={fallbackPath}
           initialMode={initialMode}
@@ -276,6 +282,7 @@ export function DocumentView({
 
 function DocumentContent({
   fileId,
+  sessionKey,
   fallbackName,
   fallbackPath,
   initialMode,
@@ -292,6 +299,7 @@ function DocumentContent({
   onRetry,
 }: {
   fileId: string;
+  sessionKey?: string;
   fallbackName?: string;
   fallbackPath?: readonly string[];
   initialMode: DocumentMode;
@@ -302,7 +310,7 @@ function DocumentContent({
   trailingControl?: ReactNode;
   documentRef?: RefObject<DocumentHandle | null>;
   onDirtyChange: (dirty: boolean) => void;
-  onFileRenamed?: (node: DriveNode) => void;
+  onFileRenamed?: (node: DriveNode, previousName?: string) => void;
   /** Drive answered 404 for this note's content. */
   onNotFound?: (fileId: string) => void;
   onTagClick?: (tag: string) => void;
@@ -311,15 +319,20 @@ function DocumentContent({
   const queryClient = useQueryClient();
   const syncQueue = useSyncQueue();
   const containerRef = useRef<HTMLElement>(null);
-  const [viewMode, setViewMode] = useState<{ fileId: string; mode: DocumentMode }>({
-    fileId,
+  const activeSessionKey = sessionKey ?? fileId;
+  const [viewMode, setViewMode] = useState<{ sessionKey: string; mode: DocumentMode }>({
+    sessionKey: activeSessionKey,
     mode: initialMode,
   });
   const [renamed, setRenamed] = useState<{ fileId: string; name: string } | null>(null);
-  const mode: DocumentMode = viewMode.fileId === fileId ? viewMode.mode : initialMode;
+  const mode: DocumentMode = viewMode.sessionKey === activeSessionKey ? viewMode.mode : initialMode;
   const { data, error, refetch } = useQuery({
     queryKey: ["files", fileId, "content"],
+    networkMode: isLocalId(fileId) ? "always" : "online",
     queryFn: async ({ signal }) => {
+      if (isLocalId(fileId)) {
+        return (await readCachedFile(fileId)) ?? { text: "", revision: "" };
+      }
       const generation = syncQueue.writeGeneration(fileId);
       try {
         const fresh = await fetchContent(fileId, signal);
@@ -363,6 +376,9 @@ function DocumentContent({
   });
 
   useEffect(() => {
+    if (isLocalId(fileId)) {
+      return;
+    }
     let active = true;
     void readCachedFile(fileId).then((cached) => {
       if (!active || cached === undefined) {
@@ -393,11 +409,11 @@ function DocumentContent({
   }, [notFound, fileId, onNotFound]);
 
   useEffect(() => {
-    void fileId;
+    void activeSessionKey;
     if (window.matchMedia?.("(max-width: 47.99rem)").matches) {
       containerRef.current?.scrollIntoView?.({ block: "start" });
     }
-  }, [fileId]);
+  }, [activeSessionKey]);
 
   const title = mode === "preview" ? "Preview" : "Editor";
   const cachedNodeName = useNodeName(fileId);
@@ -409,15 +425,15 @@ function DocumentContent({
         ? fallbackPath.join(" / ")
         : "";
   const knownFileName =
-    (renamed?.fileId === fileId ? renamed.name : undefined) ?? cachedNodeName ?? fallbackName;
+    cachedNodeName ?? (renamed?.fileId === fileId ? renamed.name : undefined) ?? fallbackName;
   const fileName = knownFileName ?? title;
 
   const handleRenamed = useCallback(
-    (updated: DriveNode) => {
+    (updated: DriveNode, previousName?: string) => {
       setRenamed({ fileId: updated.id, name: updated.name });
       renameChild(queryClient, updated.id, updated);
       void renameCachedChild(updated.id, updated);
-      onFileRenamed?.(updated);
+      onFileRenamed?.(updated, previousName);
     },
     [queryClient, onFileRenamed],
   );
@@ -430,7 +446,7 @@ function DocumentContent({
     >
       {data !== undefined ? (
         <DocumentSession
-          key={fileId}
+          key={activeSessionKey}
           fileId={fileId}
           fileName={fileName}
           folderPath={folderPath}
@@ -443,7 +459,7 @@ function DocumentContent({
           leadingControl={leadingControl}
           trailingControl={trailingControl}
           documentRef={documentRef}
-          onModeChange={(next) => setViewMode({ fileId, mode: next })}
+          onModeChange={(next) => setViewMode({ sessionKey: activeSessionKey, mode: next })}
           onDirtyChange={onDirtyChange}
           onRenamed={handleRenamed}
           onTagClick={onTagClick}
@@ -516,8 +532,9 @@ function RenameableTitle({
   fileName: string;
   hasKnownName: boolean;
   startRenameRef: RefObject<(() => void) | null>;
-  onRenamed: (node: DriveNode, revision?: string) => void;
+  onRenamed: (node: DriveNode, revision?: string, previousName?: string) => void;
 }) {
+  const opsQueue = useOptionalOpsQueue();
   const syncQueue = useSyncQueue();
   const [editing, setEditing] = useState(false);
   const [rawName, setRawName] = useState("");
@@ -526,9 +543,16 @@ function RenameableTitle({
   const cancelledRef = useRef(false);
 
   const mutation = useMutation({
-    mutationFn: (name: string) => syncQueue.renameFile(fileId, name),
-    onSuccess: ({ node, revision }) => {
-      onRenamed(node, revision || undefined);
+    mutationFn: async ({ name, previousName }: { name: string; previousName?: string }) => {
+      if (opsQueue !== null) {
+        const res = await opsQueue.renameFile(fileId, name, previousName);
+        return { node: res.node, revision: res.revision, previousName };
+      }
+      const res = await syncQueue.renameFile(fileId, name);
+      return { node: res.node, revision: res.revision, previousName };
+    },
+    onSuccess: ({ node, revision, previousName }) => {
+      onRenamed(node, revision || undefined, previousName);
       setEditing(false);
       setValidationError(null);
     },
@@ -581,7 +605,7 @@ function RenameableTitle({
       return;
     }
     setValidationError(null);
-    mutation.mutate(result.name);
+    mutation.mutate({ name: result.name, previousName: hasKnownName ? fileName : undefined });
   };
 
   const activeError =
@@ -695,13 +719,19 @@ function DocumentSession({
   documentRef?: RefObject<DocumentHandle | null>;
   onModeChange: (mode: DocumentMode) => void;
   onDirtyChange: (dirty: boolean) => void;
-  onRenamed: (node: DriveNode) => void;
+  onRenamed: (node: DriveNode, previousName?: string) => void;
   onTagClick?: (tag: string) => void;
   onRetry: OnRetry;
 }) {
   const queryClient = useQueryClient();
   const syncQueue = useSyncQueue();
   const syncState = useFileSyncState(fileId);
+  const pendingOps = usePendingOps();
+  const isLocalFile = isLocalId(fileId);
+  const localFileOp = isLocalFile
+    ? pendingOps.find((entry) => entry.op.targetId === fileId)
+    : undefined;
+  const isOpSyncing = localFileOp?.state.status === "syncing";
   const discardVersion = useFileDiscardVersion(fileId);
   const sessionEpochRef = useRef(syncQueue.sessionEpoch);
   const prevDiscardVersionRef = useRef(discardVersion);
@@ -778,6 +808,9 @@ function DocumentSession({
       return;
     }
     if (hasUnflushedDraft || isPendingLocal || isSyncing || saveError !== null) {
+      if (base.revision === "" && remote.revision !== "") {
+        setBase(remote);
+      }
       return;
     }
     if (remote.text === base.text && remote.revision !== base.revision) {
@@ -866,12 +899,14 @@ function DocumentSession({
     syncQueue.enqueueSave(fileId, merged, mergeRemote.revision, mergeRemote.text);
   };
 
+  const fileIdRef = useRef(fileId);
   const draftRef = useRef(draft);
   const localSavedTextRef = useRef(localSavedText);
   const baseRevisionRef = useRef(base.revision);
   const baseTextRef = useRef(base.text);
   const blocksNewSaveRef = useRef(blocksNewSave);
   const reloadingRef = useRef(reloadMutation.isPending);
+  fileIdRef.current = fileId;
   draftRef.current = draft;
   localSavedTextRef.current = localSavedText;
   baseRevisionRef.current = base.revision;
@@ -880,12 +915,13 @@ function DocumentSession({
   reloadingRef.current = reloadMutation.isPending;
 
   const flushPendingDraft = useCallback(() => {
+    const activeId = fileIdRef.current;
     if (
       blocksNewSaveRef.current ||
       reloadingRef.current ||
       syncQueue.sessionEpoch !== sessionEpochRef.current ||
-      syncQueue.isDeleted(fileId) ||
-      syncQueue.discardVersion(fileId) !== prevDiscardVersionRef.current
+      syncQueue.isDeleted(activeId) ||
+      syncQueue.discardVersion(activeId) !== prevDiscardVersionRef.current
     ) {
       return;
     }
@@ -894,8 +930,8 @@ function DocumentSession({
       return;
     }
     localSavedTextRef.current = currentDraft;
-    syncQueue.enqueueSave(fileId, currentDraft, baseRevisionRef.current, baseTextRef.current);
-  }, [fileId, syncQueue]);
+    syncQueue.enqueueSave(activeId, currentDraft, baseRevisionRef.current, baseTextRef.current);
+  }, [syncQueue]);
 
   // Flush any pending draft locally and queue background sync when switching files, hiding, or leaving.
   useEffect(() => {
@@ -991,15 +1027,16 @@ function DocumentSession({
     [fileId, syncQueue],
   );
 
-  const statusText = isSyncing
-    ? "Saving…"
-    : hasUnflushedDraft
-      ? "Unsaved changes"
-      : isPendingLocal
-        ? "Saved locally"
-        : isSynced
-          ? "Saved"
-          : "";
+  const statusText =
+    isSyncing || isOpSyncing
+      ? "Saving…"
+      : hasUnflushedDraft
+        ? "Unsaved changes"
+        : isPendingLocal || isLocalFile
+          ? "Saved locally"
+          : isSynced
+            ? "Saved"
+            : "";
 
   const handleReload = () => {
     if (window.confirm(RELOAD_CONFIRM)) {
@@ -1338,11 +1375,11 @@ function DocumentSession({
                 fileName={fileName}
                 hasKnownName={hasKnownName}
                 startRenameRef={startRenameRef}
-                onRenamed={(node, revision) => {
+                onRenamed={(node, revision, previousName) => {
                   if (revision && !hasLocalWorkRef.current) {
                     setBase((prev) => ({ ...prev, revision }));
                   }
-                  onRenamed(node);
+                  onRenamed(node, previousName);
                 }}
               />
               {folderPath.length > 0 && (
@@ -1382,7 +1419,9 @@ function DocumentSession({
               title={
                 offline
                   ? "Version history needs a connection"
-                  : "Version history: compare and restore"
+                  : isLocalFile
+                    ? "Version history is available after this note syncs to Drive."
+                    : "Version history: compare and restore"
               }
               onClick={() => setHistoryOpen(true)}
               className={`${HEADER_ICON_BUTTON_CLASS} disabled:opacity-40`}

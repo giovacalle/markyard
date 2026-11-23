@@ -18,6 +18,7 @@ import {
   NotUtf8Error,
   type Revision,
 } from "../api";
+import { isLocalId } from "../localIds";
 
 function DiffLoadFailed() {
   return (
@@ -132,7 +133,11 @@ export function VersionHistoryDialog({
             Versions of {fileName} stored by Google Drive.
           </DialogDescription>
         </div>
-        {offline ? (
+        {isLocalId(fileId) ? (
+          <p className="text-sm text-neutral-600 dark:text-neutral-300">
+            Version history is available after this note syncs to Drive.
+          </p>
+        ) : offline ? (
           <p className="text-sm text-neutral-600 dark:text-neutral-300">
             Version history needs a connection. Reconnect to browse and restore earlier versions.
           </p>
@@ -144,7 +149,7 @@ export function VersionHistoryDialog({
             onRestore={onRestore}
           />
         )}
-        {offline && (
+        {(offline || isLocalId(fileId)) && (
           <div className="flex justify-end">
             <DialogClose type="button" className={BUTTON_CLASS}>
               Close
