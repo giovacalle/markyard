@@ -222,10 +222,24 @@ const MODES: readonly { value: DefaultMode; label: string }[] = [
   { value: "edit", label: "Edit" },
 ];
 
-const VIEW_TOGGLES: readonly { key: ViewPrefKey; label: string }[] = [
-  { key: "readOnly", label: "Read-only mode" },
-  { key: "focusMode", label: "Focus mode" },
-  { key: "typewriterMode", label: "Typewriter mode" },
+const VIEW_TOGGLES: readonly { key: ViewPrefKey; label: string; description: string }[] = [
+  {
+    key: "readOnly",
+    label: "Read-only mode",
+    description: "Lock notes against accidental edits. Also toggleable from the note header.",
+  },
+  {
+    key: "focusMode",
+    label: "Focus mode",
+    description:
+      "Dim everything outside the active paragraph. Also toggleable from the editor toolbar.",
+  },
+  {
+    key: "typewriterMode",
+    label: "Typewriter mode",
+    description:
+      "Keep the cursor line centered while writing. Also toggleable from the editor toolbar.",
+  },
 ];
 
 export function SettingsDialog({
@@ -394,10 +408,11 @@ function SettingsBody({
           checked={settings.linkPreviewsEnabled}
           onChange={(linkPreviewsEnabled) => updateSettings({ linkPreviewsEnabled })}
         />
-        {VIEW_TOGGLES.map(({ key, label }) => (
+        {VIEW_TOGGLES.map(({ key, label, description }) => (
           <Switch
             key={key}
             label={label}
+            description={description}
             checked={viewPrefs[key]}
             onChange={(next) => setViewPref(key, next)}
           />

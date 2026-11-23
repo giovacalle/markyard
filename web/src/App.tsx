@@ -95,7 +95,8 @@ import {
   useOpenDocument,
   wasRestoredFile,
 } from "./openDocument";
-import { useSettings } from "./settings";
+import { resetSettings, useSettings } from "./settings";
+import { clearExpandedFolders } from "./treeExpanded";
 import { SyncQueue, SyncQueueContext, usePendingSyncCount, useSyncQueue } from "./syncQueue";
 import { useTheme, type ThemePreference } from "./theme";
 import { useVaultSync, useVaultSyncState, VaultSync, VaultSyncContext } from "./vaultSync";
@@ -160,7 +161,7 @@ async function fetchAndCacheRoot(signal?: AbortSignal): Promise<DriveNode> {
 
 function SignIn({ ended }: { ended: boolean }) {
   return (
-    <main className="flex min-h-dvh items-center justify-center bg-neutral-50 p-6 dark:bg-neutral-950">
+    <main className="flex min-h-dvh flex-col items-center justify-center gap-4 bg-neutral-50 p-6 dark:bg-neutral-950">
       <section
         aria-label="Sign in"
         className="w-full max-w-sm rounded-xl border border-neutral-200 bg-white p-8 shadow-sm dark:border-neutral-800 dark:bg-neutral-900"
@@ -196,6 +197,9 @@ function SignIn({ ended }: { ended: boolean }) {
           <span>Sign in with Google</span>
         </a>
       </section>
+      <p className="text-center text-xs text-neutral-400 dark:text-neutral-500">
+        Independent open-source project. Not affiliated with Google LLC.
+      </p>
     </main>
   );
 }
@@ -492,6 +496,7 @@ function SessionContent({
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [paletteInitialQuery, setPaletteInitialQuery] = useState("");
   const [createdFile, setCreatedFile] = useState<{ id: string; name: string } | null>(null);
   // Folder path of a note opened from a Drive search hit, so the tree can reveal it.
   const [revealHint, setRevealHint] = useState<{ id: string; path: readonly string[] } | null>(
@@ -629,7 +634,10 @@ function SessionContent({
       vaultSync?.reset();
       clearRecentFiles();
       forgetLastOpenFile();
+      clearExpandedFolders();
+      resetSettings();
       setPaletteOpen(false);
+      setPaletteInitialQuery("");
       void clearLocalCache();
       void queryClient.resetQueries({ queryKey: ["session"] });
     },
@@ -716,7 +724,10 @@ function SessionContent({
       vaultSync?.reset();
       clearRecentFiles();
       forgetLastOpenFile();
+      clearExpandedFolders();
+      resetSettings();
       setPaletteOpen(false);
+      setPaletteInitialQuery("");
       void clearLocalCache();
     }
   }, [isSignedOut, syncQueue, driveChanges, vaultSync]);
@@ -734,6 +745,7 @@ function SessionContent({
       if (key === "k" && !event.shiftKey) {
         event.preventDefault();
         event.stopPropagation();
+        setPaletteInitialQuery("");
         setPaletteOpen((prev) => !prev);
       } else if (key === "\\" && !event.shiftKey) {
         event.preventDefault();
@@ -1051,12 +1063,17 @@ function SessionContent({
       </button>
     );
 
+    const openPalette = (initialQuery = "") => {
+      setPaletteInitialQuery(initialQuery);
+      setPaletteOpen(true);
+    };
+
     const headerSearchButton = (
       <button
         type="button"
         aria-label="Search notes and commands"
         title="Search notes and commands (Cmd/Ctrl+K)"
-        onClick={() => setPaletteOpen(true)}
+        onClick={() => openPalette()}
         className={`${
           sidebarCollapsed ? "inline-flex" : "inline-flex md:hidden"
         } size-7 shrink-0 items-center justify-center rounded-md text-neutral-600 transition-colors hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100`}
@@ -1119,7 +1136,7 @@ function SessionContent({
             <div className="shrink-0 border-b border-neutral-200 px-2.5 py-2 dark:border-neutral-800">
               <button
                 type="button"
-                onClick={() => setPaletteOpen(true)}
+                onClick={() => openPalette()}
                 aria-label="Search notes and commands"
                 className="flex w-full items-center justify-between gap-2 rounded-lg border border-neutral-200 bg-white px-2.5 py-1.5 text-xs text-neutral-500 transition-colors hover:border-neutral-300 hover:text-neutral-800 focus-visible:outline-2 focus-visible:outline-blue-600 dark:border-neutral-800 dark:bg-neutral-950/60 dark:text-neutral-400 dark:hover:border-neutral-700 dark:hover:text-neutral-200"
               >
@@ -1280,6 +1297,7 @@ function SessionContent({
               <DocumentView
                 fileId={openFileId}
                 fallbackName={openFileId === createdFile?.id ? createdFile.name : undefined}
+                fallbackPath={revealHint?.id === openFileId ? revealHint.path : undefined}
                 initialMode={openFileId === createdFile?.id ? "edit" : settings.defaultMode}
                 autoFocusEditor={openFileId === createdFile?.id}
                 offline={isOffline}
@@ -1290,6 +1308,7 @@ function SessionContent({
                 onDirtyChange={setDirty}
                 onFileRenamed={handleFileRenamed}
                 onNotFound={handleNotFound}
+                onTagClick={(tag) => openPalette(`tag:${tag}`)}
               />
             ) : (
               <>
@@ -1333,6 +1352,7 @@ function SessionContent({
 
           <CommandPalette
             open={paletteOpen}
+            initialQuery={paletteInitialQuery}
             offline={isOffline}
             openFileId={openFileId}
             openFileName={openFileName}
@@ -1340,7 +1360,10 @@ function SessionContent({
             sidebarCollapsed={sidebarCollapsed}
             theme={theme}
             getCurrentText={() => documentRef.current?.getText() ?? ""}
-            onClose={() => setPaletteOpen(false)}
+            onClose={() => {
+              setPaletteOpen(false);
+              setPaletteInitialQuery("");
+            }}
             onOpenFile={handleOpenFile}
             onCreateNote={handleCreateInFolder}
             onCreateFolder={(folder) => setFolderDialog({ mode: "create", parent: folder })}

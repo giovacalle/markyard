@@ -4,6 +4,8 @@ import { HttpResponse, http } from "msw";
 import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vite-plus/test";
 import { App } from "./App";
+import { DEFAULT_SETTINGS, getSettings, SETTINGS_STORAGE_KEY, updateSettings } from "./settings";
+import { writeExpandedFolders } from "./treeExpanded";
 
 const server = setupServer(
   http.get("/api/root", () =>
@@ -82,6 +84,9 @@ describe("App", () => {
     const link = await screen.findByRole("link", { name: "Sign in with Google" });
     expect(link).toHaveAttribute("href", "/api/auth/login");
     expect(screen.queryByText(ENDED_MESSAGE)).not.toBeInTheDocument();
+    expect(
+      screen.getByText("Independent open-source project. Not affiliated with Google LLC."),
+    ).toBeInTheDocument();
   });
 
   it("signed in shows the email and opens the account popover with theme and sign-out controls", async () => {
@@ -174,7 +179,7 @@ describe("App", () => {
     expect(sidebar).not.toHaveAttribute("hidden");
   });
 
-  it("sign out posts to /api/auth/logout and returns to the sign-in screen without a message", async () => {
+  it("sign out posts to /api/auth/logout, clears expanded folders and settings, and returns to sign-in", async () => {
     let active = true;
     let logoutCalls = 0;
     server.use(
@@ -185,6 +190,9 @@ describe("App", () => {
         return new HttpResponse(null, { status: 204 });
       }),
     );
+    writeExpandedFolders("root-id", ["folder-1", "folder-2"]);
+    writeExpandedFolders("other-root", ["folder-3"]);
+    updateSettings({ dailyNotesFolder: "Journal", attachmentsFolder: "Media" });
     render(<App />);
 
     fireEvent.click(await screen.findByRole("button", { name: /Account: owner@example\.com/ }));
@@ -193,6 +201,10 @@ describe("App", () => {
     expect(await screen.findByRole("link", { name: "Sign in with Google" })).toBeInTheDocument();
     expect(logoutCalls).toBe(1);
     expect(screen.queryByText(ENDED_MESSAGE)).not.toBeInTheDocument();
+    expect(localStorage.getItem("markyard:tree-expanded:root-id")).toBeNull();
+    expect(localStorage.getItem("markyard:tree-expanded:other-root")).toBeNull();
+    expect(localStorage.getItem(SETTINGS_STORAGE_KEY)).toBeNull();
+    expect(getSettings()).toEqual(DEFAULT_SETTINGS);
   });
 
   it("a failed sign out keeps the signed-in view and says so", async () => {

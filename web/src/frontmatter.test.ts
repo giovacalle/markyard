@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import { parseFrontmatter } from "./frontmatter";
+import { extractFrontmatterTags, normalizeFrontmatterFence, parseFrontmatter } from "./frontmatter";
 
 describe("parseFrontmatter", () => {
   it("reads scalar, inline-list, and block-list properties and locates the raw block", () => {
@@ -22,6 +22,33 @@ describe("parseFrontmatter", () => {
     expect(parseFrontmatter("---\ntags: a, b #c\n...\n")?.properties).toEqual([
       { key: "tags", value: ["a", "b", "c"] },
     ]);
+  });
+
+  it("strips leading `#` from tag values across inline bracket lists and block lists", () => {
+    const inline = '---\ntags: [#alpha, "#beta", gamma]\n---\n';
+    expect(parseFrontmatter(inline)?.properties).toEqual([
+      { key: "tags", value: ["alpha", "beta", "gamma"] },
+    ]);
+
+    const block = "---\ntags:\n  - #work\n  - '#project'\n  - personal\n  - #\n---\n";
+    expect(parseFrontmatter(block)?.properties).toEqual([
+      { key: "tags", value: ["work", "project", "personal"] },
+    ]);
+    expect(extractFrontmatterTags("---\ntags:\n  - #Work\nkeywords: [work, #ops]\n---\n")).toEqual([
+      "Work",
+      "ops",
+    ]);
+  });
+
+  it("normalizes a `...` closing fence to `---` without shifting any body offsets", () => {
+    const raw = "\uFEFF---\r\ntitle: Hi\r\n...  \r\n- [ ] task\r\n";
+    const normalized = normalizeFrontmatterFence(raw);
+    expect(normalized).toBe("\uFEFF---\r\ntitle: Hi\r\n---  \r\n- [ ] task\r\n");
+    expect(normalized.length).toBe(raw.length);
+    expect(normalized.indexOf("- [ ] task")).toBe(raw.indexOf("- [ ] task"));
+
+    const already = "---\ntitle: Hi\n---\n# Body\n";
+    expect(normalizeFrontmatterFence(already)).toBe(already);
   });
 
   it("returns null without an opening and closing fence at the top of the note", () => {

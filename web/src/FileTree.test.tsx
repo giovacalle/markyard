@@ -4,6 +4,7 @@ import { HttpResponse, http } from "msw";
 import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vite-plus/test";
 import { App } from "./App";
+import { resetSettings, updateSettings } from "./settings";
 
 const server = setupServer();
 
@@ -14,6 +15,7 @@ beforeAll(() => {
 afterEach(() => {
   server.resetHandlers();
   focusManager.setFocused(undefined);
+  resetSettings();
 });
 
 afterAll(() => {
@@ -711,5 +713,55 @@ describe("lazy tree expansion", () => {
     render(<App />);
     await screen.findByRole("treeitem", { name: /alpha/ });
     expect(screen.queryByRole("treeitem", { name: /nested/ })).not.toBeInTheDocument();
+  });
+
+  it("hides the root attachments folder (default and custom) while keeping nested same-name folders", async () => {
+    signedInWithRoot();
+    server.use(
+      http.get("/api/folders/root-id/children", () =>
+        HttpResponse.json({
+          nodes: [
+            node("att-root", "_attachments", "folder"),
+            node("media-root", "Media", "folder"),
+            node("docs-id", "Docs", "folder"),
+            node("note-1", "a.md", "markdown"),
+          ],
+        }),
+      ),
+      http.get("/api/folders/docs-id/children", () =>
+        HttpResponse.json({
+          nodes: [node("nested-att", "_attachments", "folder")],
+        }),
+      ),
+    );
+
+    render(<App />);
+    await screen.findByRole("tree", { name: "Notes" });
+
+    // Default `_attachments` at root is hidden; `Media` and `Docs` stay visible.
+    expect(screen.queryByRole("treeitem", { name: /_attachments/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("treeitem", { name: /Media/ })).toBeInTheDocument();
+
+    // Expanding Docs reveals its nested `_attachments` folder (only root-level is hidden).
+    fireEvent.click(screen.getByRole("treeitem", { name: /Docs/ }));
+    expect(await screen.findByRole("treeitem", { name: /_attachments/ })).toBeInTheDocument();
+
+    // Changing Settings to `Media` hides root `Media` and reveals root `_attachments`.
+    act(() => updateSettings({ attachmentsFolder: "Media" }));
+    expect(screen.queryByRole("treeitem", { name: /Media/ })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("treeitem", { name: /_attachments/ })).toHaveLength(2);
+  });
+
+  it("shows the empty state when the root only contains the attachments folder", async () => {
+    signedInWithRoot();
+    server.use(
+      http.get("/api/folders/root-id/children", () =>
+        HttpResponse.json({ nodes: [node("att-root", "_attachments", "folder")] }),
+      ),
+    );
+    render(<App />);
+
+    expect(await screen.findByText("This folder is empty.")).toBeInTheDocument();
+    expect(screen.queryByRole("tree", { name: "Notes" })).not.toBeInTheDocument();
   });
 });

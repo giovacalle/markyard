@@ -52,3 +52,24 @@ export function subscribeExpandedFolders(
   listeners.add(listener);
   return () => listeners.delete(listener);
 }
+
+/** Drops every stored expanded-folder list from localStorage (sign-out, account switch). */
+export function clearExpandedFolders(): void {
+  if (typeof localStorage === "undefined") {
+    return;
+  }
+  try {
+    const keys: string[] = [];
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const key = localStorage.key(i);
+      if (key !== null && key.startsWith(EXPANDED_STORAGE_PREFIX)) {
+        keys.push(key);
+      }
+    }
+    for (const key of keys) {
+      localStorage.removeItem(key);
+    }
+  } catch {
+    // Ignore storage errors.
+  }
+}

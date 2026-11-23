@@ -14,6 +14,7 @@ import {
 import Markdown, { type Components } from "react-markdown";
 import remarkFrontmatter from "remark-frontmatter";
 import remarkGfm from "remark-gfm";
+import { normalizeFrontmatterFence } from "../frontmatter";
 import { usePkm } from "../pkm";
 import { isExternalHref, safeImageSrc } from "../safeUrl";
 import { CALLOUT_LABELS, type CalloutType, remarkCallouts } from "../remarkCallouts";
@@ -492,11 +493,12 @@ export function Preview({
   /** Receives the whole note with one task checkbox flipped; omit to keep checkboxes disabled. */
   onToggleTask?: (nextText: string) => void;
 }) {
+  const markdown = useMemo(() => normalizeFrontmatterFence(text), [text]);
   const math = useLazyModule(
-    useMemo(() => hasMath(text), [text]),
+    useMemo(() => hasMath(markdown), [markdown]),
     MATH,
   );
-  const highlight = useLazyModule(hasFence(text), HIGHLIGHT);
+  const highlight = useLazyModule(hasFence(markdown), HIGHLIGHT);
   const context = useMemo(() => ({ text, onToggleTask }), [text, onToggleTask]);
 
   const remarkPlugins = useMemo<PluginList>(
@@ -527,7 +529,7 @@ export function Preview({
           rehypePlugins={rehypePlugins}
           skipHtml
         >
-          {text}
+          {markdown}
         </Markdown>
       </div>
     </PreviewContext.Provider>

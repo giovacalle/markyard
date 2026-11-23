@@ -117,6 +117,18 @@ describe("Preview task checkboxes", () => {
     render(<Preview text={"- [ ] task"} />);
     expect(screen.getByRole("checkbox", { name: "task" })).toBeDisabled();
   });
+
+  it("hides `...`-closed YAML frontmatter and preserves it byte-for-byte on task toggle", () => {
+    const dotClosed = "---\ntitle: Secret\ntags:\n  - #work\n...\n\n# Visible\n\n- [ ] Ship it\n";
+    const onToggleTask = vi.fn();
+    render(<Preview text={dotClosed} onToggleTask={onToggleTask} />);
+
+    expect(screen.getByRole("heading", { name: "Visible" })).toBeInTheDocument();
+    expect(screen.queryByText(/Secret/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Ship it" }));
+    expect(onToggleTask).toHaveBeenCalledWith(dotClosed.replace("- [ ] Ship it", "- [x] Ship it"));
+  });
 });
 
 describe("Preview callouts", () => {

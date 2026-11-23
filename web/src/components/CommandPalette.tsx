@@ -6,10 +6,12 @@ import {
   findContentSnippet,
   fuzzyMatch,
   getRecentFileIds,
+  matchFrontmatterTags,
   todayNoteName,
   type ContentSnippet,
   type HeadingItem,
 } from "../commandSearch";
+import { extractFrontmatterTags } from "../frontmatter";
 import { normalizeFileName } from "../fileName";
 import {
   readAllCachedFiles,
@@ -18,9 +20,16 @@ import {
   type CachedFile,
 } from "../localCache";
 import { copyAsRichText } from "../richCopy";
+import { useSettings } from "../settings";
 import { toggleViewPref, useViewPrefs } from "../viewPrefs";
 import type { ThemePreference } from "../theme";
-import { childrenKey, collectIndexedTree, findNoteByNameInFolder, findParent } from "../treeCache";
+import {
+  childrenKey,
+  collectIndexedTree,
+  findNoteByNameInFolder,
+  findParent,
+  type IndexedFolder,
+} from "../treeCache";
 import {
   CalendarIcon,
   CheckSquareIcon,
@@ -69,6 +78,14 @@ interface PaletteItem {
 
 const DRIVE_SEARCH_DEBOUNCE_MS = 220;
 const MAX_WARM_FOLDERS = 12;
+
+function isHiddenAttachmentsFolder(folder: IndexedFolder, attachmentsFolder: string): boolean {
+  return (
+    attachmentsFolder.length > 0 &&
+    ((folder.path.length === 0 && folder.node.name === attachmentsFolder) ||
+      folder.path[0] === attachmentsFolder)
+  );
+}
 
 function HighlightedText({ text, indices }: { text: string; indices?: number[] }) {
   if (!indices || indices.length === 0) {
@@ -124,6 +141,7 @@ function SnippetLine({ snippet }: { snippet: ContentSnippet }) {
 
 export function CommandPalette({
   open,
+  initialQuery = "",
   offline,
   openFileId,
   openFileName,
@@ -153,6 +171,8 @@ export function CommandPalette({
   onJumpToHeading,
 }: {
   open: boolean;
+  /** Optional pre-filled query when opened from an explicit action (e.g. clicking a tag pill). */
+  initialQuery?: string;
   offline: boolean;
   openFileId: string | null;
   openFileName?: string;
@@ -188,6 +208,7 @@ export function CommandPalette({
   onJumpToHeading: (heading: HeadingItem) => void;
 }) {
   const queryClient = useQueryClient();
+  const { attachmentsFolder } = useSettings();
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const listboxId = useId();
@@ -204,7 +225,7 @@ export function CommandPalette({
     if (!open) {
       return;
     }
-    setQuery("");
+    setQuery(initialQuery);
     setActiveIndex(0);
     setDriveHits([]);
     setSearchingDrive(false);
@@ -241,7 +262,11 @@ export function CommandPalette({
     if (!offline) {
       const { folders } = collectIndexedTree(queryClient);
       const unloaded = folders
-        .filter((f) => queryClient.getQueryData(childrenKey(f.node.id)) === undefined)
+        .filter(
+          (f) =>
+            !isHiddenAttachmentsFolder(f, attachmentsFolder) &&
+            queryClient.getQueryData(childrenKey(f.node.id)) === undefined,
+        )
         .slice(0, MAX_WARM_FOLDERS);
       if (unloaded.length > 0) {
         void Promise.allSettled(
@@ -263,16 +288,21 @@ export function CommandPalette({
       window.clearTimeout(focusTimer);
       warmController.abort();
     };
-  }, [open, offline, queryClient]);
+  }, [open, initialQuery, offline, queryClient, attachmentsFolder]);
 
   const trimmed = query.trim();
   const isCommandMode = trimmed.startsWith(">");
   const isHeadingMode = trimmed.startsWith("#");
-  const effectiveQuery = isCommandMode || isHeadingMode ? trimmed.slice(1).trim() : trimmed;
+  const isTagMode = /^tag:/i.test(trimmed);
+  const effectiveQuery = isTagMode
+    ? trimmed.slice(4).trim().replace(/^#/, "")
+    : isCommandMode || isHeadingMode
+      ? trimmed.slice(1).trim()
+      : trimmed;
 
   // Debounced Google Drive search for notes not yet cached locally.
   useEffect(() => {
-    if (!open || offline || isCommandMode || isHeadingMode || trimmed.length < 2) {
+    if (!open || offline || isCommandMode || isHeadingMode || isTagMode || trimmed.length < 2) {
       setDriveHits([]);
       setSearchingDrive(false);
       return;
@@ -299,7 +329,7 @@ export function CommandPalette({
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [open, offline, isCommandMode, isHeadingMode, trimmed]);
+  }, [open, offline, isCommandMode, isHeadingMode, isTagMode, trimmed]);
 
   const defaultTargetFolder = useMemo<FolderTarget | null>(() => {
     if (openFileId !== null) {
@@ -326,7 +356,8 @@ export function CommandPalette({
       return [];
     }
     void treeVersion;
-    const { notes, folders } = collectIndexedTree(queryClient);
+    const { notes, folders: allFolders } = collectIndexedTree(queryClient);
+    const folders = allFolders.filter((f) => !isHiddenAttachmentsFolder(f, attachmentsFolder));
     const notesById = new Map(notes.map((n) => [n.node.id, n]));
     const todayName = todayNoteName();
 
@@ -609,6 +640,80 @@ export function CommandPalette({
       return out;
     }
 
+    // 1b. Frontmatter tag filter mode (`tag:...`).
+    if (isTagMode) {
+      const contentSources = new Map<string, string>();
+      for (const f of cachedFiles) {
+        contentSources.set(f.fileId, f.text);
+      }
+      if (openFileId !== null) {
+        contentSources.set(openFileId, getCurrentText());
+      }
+
+      if (effectiveQuery.length === 0) {
+        const tagCounts = new Map<string, { label: string; count: number }>();
+        for (const [fileId, text] of contentSources) {
+          if (!notesById.has(fileId)) {
+            continue;
+          }
+          for (const tag of extractFrontmatterTags(text)) {
+            const key = tag.toLowerCase();
+            const existing = tagCounts.get(key);
+            if (existing) {
+              existing.count += 1;
+            } else {
+              tagCounts.set(key, { label: tag, count: 1 });
+            }
+          }
+        }
+        return Array.from(tagCounts.values())
+          .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: "accent" }))
+          .map(({ label, count }) => ({
+            id: `tag:${label.toLowerCase()}`,
+            section: "Tags",
+            label: `#${label}`,
+            badge: `${count} ${count === 1 ? "note" : "notes"}`,
+            icon: <HashIcon className="size-4" />,
+            onSelect: () => {
+              setQuery(`tag:${label}`);
+              setActiveIndex(0);
+              inputRef.current?.focus();
+            },
+          }));
+      }
+
+      const needle = effectiveQuery.toLowerCase();
+      const matched: {
+        fileId: string;
+        entry: (typeof notes)[number];
+        tags: string[];
+        rank: number;
+      }[] = [];
+      for (const [fileId, text] of contentSources) {
+        const entry = notesById.get(fileId);
+        if (!entry) {
+          continue;
+        }
+        const tags = matchFrontmatterTags(text, effectiveQuery);
+        if (tags.length === 0) {
+          continue;
+        }
+        const best = tags[0].toLowerCase();
+        const rank = best === needle ? 0 : best.startsWith(needle) ? 1 : 2;
+        matched.push({ fileId, entry, tags, rank });
+      }
+      matched.sort((a, b) => a.rank - b.rank || a.entry.node.name.localeCompare(b.entry.node.name));
+      return matched.map(({ fileId, entry, tags }) => ({
+        id: `tag-note:${fileId}`,
+        section: "Tagged notes",
+        label: entry.node.name,
+        subtitle: entry.path.length > 0 ? entry.path.join(" / ") : undefined,
+        badge: tags.map((tag) => `#${tag}`).join(" "),
+        icon: <FileIcon className="size-4" />,
+        onSelect: () => runAndClose(() => onOpenFile(fileId)),
+      }));
+    }
+
     // 2. Commands-only mode (`>...`).
     if (isCommandMode) {
       const scored = allCommands
@@ -790,25 +895,45 @@ export function CommandPalette({
         if (shownNoteIds.has(fileId)) {
           continue;
         }
-        const snippet = findContentSnippet(text, trimmed);
-        if (!snippet) {
-          continue;
-        }
         const entry = notesById.get(fileId);
         if (!entry) {
           continue;
         }
-        shownNoteIds.add(fileId);
-        contentItems.push({
-          id: `content:${fileId}`,
-          section: "In note content",
-          label: entry.node.name,
-          subtitle: entry.path.length > 0 ? entry.path.join(" / ") : undefined,
-          badge: `L${snippet.line}`,
-          icon: <SearchIcon className="size-4" />,
-          snippet,
-          onSelect: () => runAndClose(() => onOpenFile(fileId)),
-        });
+        const snippet = findContentSnippet(text, trimmed);
+        if (snippet) {
+          shownNoteIds.add(fileId);
+          contentItems.push({
+            id: `content:${fileId}`,
+            section: "In note content",
+            label: entry.node.name,
+            subtitle: entry.path.length > 0 ? entry.path.join(" / ") : undefined,
+            badge: `L${snippet.line}`,
+            icon: <SearchIcon className="size-4" />,
+            snippet,
+            onSelect: () => runAndClose(() => onOpenFile(fileId)),
+          });
+        } else {
+          const matchedTags = matchFrontmatterTags(text, trimmed);
+          if (matchedTags.length === 0) {
+            continue;
+          }
+          shownNoteIds.add(fileId);
+          contentItems.push({
+            id: `content-tag:${fileId}`,
+            section: "In note content",
+            label: entry.node.name,
+            subtitle: entry.path.length > 0 ? entry.path.join(" / ") : undefined,
+            badge: "Tag",
+            icon: <HashIcon className="size-4" />,
+            snippet: {
+              before: "Tag ",
+              match: `#${matchedTags[0]}`,
+              after: matchedTags.length > 1 ? ` (+${matchedTags.length - 1})` : "",
+              line: 1,
+            },
+            onSelect: () => runAndClose(() => onOpenFile(fileId)),
+          });
+        }
         if (contentItems.length >= 8) {
           break;
         }
@@ -915,6 +1040,7 @@ export function CommandPalette({
     open,
     treeVersion,
     queryClient,
+    attachmentsFolder,
     defaultTargetFolder,
     rootFolder,
     openFileId,
@@ -926,6 +1052,7 @@ export function CommandPalette({
     theme,
     isHeadingMode,
     isCommandMode,
+    isTagMode,
     effectiveQuery,
     trimmed,
     recentIds,
@@ -1016,11 +1143,15 @@ export function CommandPalette({
     ? openFileId === null
       ? "Open a note to jump to its headings."
       : "No matching headings in this note."
-    : isCommandMode
-      ? "No matching commands."
-      : searchingDrive
-        ? "Searching Google Drive…"
-        : "No matching notes or commands.";
+    : isTagMode
+      ? effectiveQuery.length === 0
+        ? "No tagged notes in local cache."
+        : "No locally cached notes match that tag."
+      : isCommandMode
+        ? "No matching commands."
+        : searchingDrive
+          ? "Searching Google Drive…"
+          : "No matching notes or commands.";
 
   return (
     <div
@@ -1038,7 +1169,7 @@ export function CommandPalette({
         className="flex w-full max-w-xl flex-col overflow-hidden rounded-xl border border-neutral-200 bg-white shadow-2xl dark:border-neutral-800 dark:bg-neutral-900"
       >
         <div className="flex items-center gap-2.5 border-b border-neutral-200 px-3.5 py-2.5 dark:border-neutral-800">
-          {isHeadingMode ? (
+          {isHeadingMode || isTagMode ? (
             <HashIcon className="size-4 shrink-0 text-blue-600 dark:text-blue-400" />
           ) : (
             <SearchIcon className="size-4 shrink-0 text-neutral-400 dark:text-neutral-500" />
@@ -1051,7 +1182,7 @@ export function CommandPalette({
             aria-controls={listboxId}
             aria-activedescendant={activeItemId}
             aria-label="Search notes and commands"
-            placeholder="Search notes, content, > commands, # headings…"
+            placeholder="Search notes, content, tag:, > commands, # headings…"
             value={query}
             onChange={(event) => {
               setQuery(event.target.value);
@@ -1149,6 +1280,7 @@ export function CommandPalette({
           <div className="flex items-center gap-3">
             <span>↑↓ Navigate</span>
             <span>↵ Select</span>
+            <span>tag: Tags</span>
             <span>&gt; Commands</span>
             <span># Headings</span>
           </div>

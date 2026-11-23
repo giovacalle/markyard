@@ -299,8 +299,8 @@ export function InfoDrawer({
                 Properties
               </h3>
               <dl className="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1">
-                {properties.map((property) => (
-                  <div key={property.key} className="contents">
+                {properties.map((property, index) => (
+                  <div key={`${property.key}-${index}`} className="contents">
                     <dt className="text-neutral-500 dark:text-neutral-400">{property.key}</dt>
                     <dd className="break-words text-neutral-800 dark:text-neutral-200">
                       {Array.isArray(property.value) ? property.value.join(", ") : property.value}

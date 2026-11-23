@@ -173,7 +173,7 @@ describe("folder actions popover and dialogs", () => {
     expect(dialog).toHaveTextContent("All notes and subfolders inside Projects");
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
     expect(deletedIds).toHaveLength(0);
-    expect(screen.getByText("Projects")).toBeInTheDocument();
+    expect(screen.getByRole("treeitem", { name: /Projects/ })).toBeInTheDocument();
 
     // Open folder popover -> Delete -> Confirm trashes folder & closes active note.
     fireEvent.click(screen.getByRole("button", { name: "Actions for Projects" }));

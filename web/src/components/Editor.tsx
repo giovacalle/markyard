@@ -337,7 +337,7 @@ const EDITOR_THEME = EditorView.theme({
 });
 
 const TOOLBAR_BUTTON_CLASS =
-  "inline-flex h-7 min-w-7 shrink-0 items-center justify-center rounded-md px-1.5 text-xs font-medium text-neutral-600 transition-colors hover:bg-neutral-200/70 hover:text-neutral-950 focus-visible:outline-2 focus-visible:outline-blue-600 aria-pressed:bg-neutral-200 aria-pressed:text-neutral-950 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-50 dark:aria-pressed:bg-neutral-800 dark:aria-pressed:text-neutral-50";
+  "inline-flex h-7 min-w-7 shrink-0 items-center justify-center rounded-md px-1.5 text-xs font-medium text-neutral-600 transition-colors hover:bg-neutral-200/70 hover:text-neutral-950 focus-visible:outline-2 focus-visible:outline-blue-600 aria-pressed:bg-blue-100 aria-pressed:text-blue-700 aria-pressed:ring-1 aria-pressed:ring-inset aria-pressed:ring-blue-300 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-50 dark:aria-pressed:bg-blue-950/70 dark:aria-pressed:text-blue-300 dark:aria-pressed:ring-blue-800";
 
 /** Indents a list item, or the line with the default indent unit elsewhere. */
 function indent(view: EditorView): boolean {

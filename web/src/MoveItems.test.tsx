@@ -251,4 +251,40 @@ describe("moving notes and folders", () => {
       expect(patches).toEqual([{ kind: "files", id: "note-a", parentId: "projects" }]),
     );
   });
+
+  it("excludes the root attachments folder and its subfolders from move destinations", async () => {
+    vault();
+    server.use(
+      http.get("/api/vault/index", () =>
+        HttpResponse.json({
+          rootId: "root-id",
+          folders: [
+            { id: "projects", name: "Projects", parentId: "root-id", modifiedTime: MODIFIED },
+            { id: "archive", name: "Archive", parentId: "root-id", modifiedTime: MODIFIED },
+            { id: "att-root", name: "_attachments", parentId: "root-id", modifiedTime: MODIFIED },
+            { id: "att-sub", name: "2026", parentId: "att-root", modifiedTime: MODIFIED },
+            {
+              id: "nested-att",
+              name: "_attachments",
+              parentId: "projects",
+              modifiedTime: MODIFIED,
+            },
+          ],
+          files: [{ id: "note-a", name: "a.md", parentId: "root-id", modifiedTime: MODIFIED }],
+          truncated: false,
+        }),
+      ),
+    );
+    render(<App />);
+    await screen.findByText("a.md");
+
+    const dialog = await openMovePicker("a.md");
+    await vi.waitFor(() =>
+      expect(optionPaths(dialog)).toEqual([
+        "Notes / Archive",
+        "Notes / Projects",
+        "Notes / Projects / _attachments",
+      ]),
+    );
+  });
 });

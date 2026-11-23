@@ -11,11 +11,13 @@ import {
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { fetchChildren, fetchVaultIndex, type DriveNode } from "../api";
 import { writeCachedFolder } from "../localCache";
+import { useSettings } from "../settings";
 import {
   ancestorIdsFromPath,
   canMoveInto,
   childrenKey,
   indexedAncestorIds,
+  isRootAttachmentsFolder,
   knownAncestorIds,
   knownFolders,
   relativePath,
@@ -202,6 +204,7 @@ function RootFolderContent({
   selectedId: string | null;
   revealPath?: readonly string[];
 }) {
+  const { attachmentsFolder } = useSettings();
   const { data, error, refetch } = useChildren(folderId);
 
   if (data === undefined) {
@@ -228,7 +231,9 @@ function RootFolderContent({
     );
   }
 
-  const visible = visibleNodes(data);
+  const visible = visibleNodes(data).filter(
+    (node) => !isRootAttachmentsFolder(node, folderId, folderId, attachmentsFolder),
+  );
   if (visible.length === 0) {
     return (
       <p className="px-2 py-1.5 text-sm text-neutral-500 dark:text-neutral-400">

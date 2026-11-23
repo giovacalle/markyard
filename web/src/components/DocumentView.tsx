@@ -38,7 +38,7 @@ import {
 } from "../localCache";
 import { useExternalChange, useOptionalDriveChanges } from "../driveChanges";
 import { isPermanentSyncError, useFileSyncState, useSyncQueue } from "../syncQueue";
-import { renameChild, useNodeName } from "../treeCache";
+import { renameChild, useNodeFolderPath, useNodeName } from "../treeCache";
 import type { HeadingItem } from "../commandSearch";
 import { toggleViewPref, useViewPrefs } from "../viewPrefs";
 import { CopyRichTextButton } from "./CopyRichTextButton";
@@ -206,6 +206,7 @@ function clickedInsideEditorContent(event: MouseEvent<HTMLDivElement>): boolean 
 export function DocumentView({
   fileId,
   fallbackName,
+  fallbackPath,
   initialMode = "preview",
   autoFocusEditor = false,
   offline = false,
@@ -216,9 +217,11 @@ export function DocumentView({
   onDirtyChange = NOOP,
   onFileRenamed,
   onNotFound,
+  onTagClick,
 }: {
   fileId: string;
   fallbackName?: string;
+  fallbackPath?: readonly string[];
   initialMode?: DocumentMode;
   autoFocusEditor?: boolean;
   offline?: boolean;
@@ -230,6 +233,7 @@ export function DocumentView({
   onFileRenamed?: (node: DriveNode) => void;
   /** Drive answered 404 for this note's content. */
   onNotFound?: (fileId: string) => void;
+  onTagClick?: (tag: string) => void;
 }) {
   return (
     <RetryScope className="flex min-h-0 flex-1 flex-col">
@@ -237,6 +241,7 @@ export function DocumentView({
         <DocumentContent
           fileId={fileId}
           fallbackName={fallbackName}
+          fallbackPath={fallbackPath}
           initialMode={initialMode}
           autoFocusEditor={autoFocusEditor}
           offline={offline}
@@ -247,6 +252,7 @@ export function DocumentView({
           onDirtyChange={onDirtyChange}
           onFileRenamed={onFileRenamed}
           onNotFound={onNotFound}
+          onTagClick={onTagClick}
           onRetry={onRetry}
         />
       )}
@@ -257,6 +263,7 @@ export function DocumentView({
 function DocumentContent({
   fileId,
   fallbackName,
+  fallbackPath,
   initialMode,
   autoFocusEditor,
   offline,
@@ -267,10 +274,12 @@ function DocumentContent({
   onDirtyChange,
   onFileRenamed,
   onNotFound,
+  onTagClick,
   onRetry,
 }: {
   fileId: string;
   fallbackName?: string;
+  fallbackPath?: readonly string[];
   initialMode: DocumentMode;
   autoFocusEditor: boolean;
   offline: boolean;
@@ -282,6 +291,7 @@ function DocumentContent({
   onFileRenamed?: (node: DriveNode) => void;
   /** Drive answered 404 for this note's content. */
   onNotFound?: (fileId: string) => void;
+  onTagClick?: (tag: string) => void;
   onRetry: OnRetry;
 }) {
   const queryClient = useQueryClient();
@@ -366,6 +376,13 @@ function DocumentContent({
 
   const title = mode === "preview" ? "Preview" : "Editor";
   const cachedNodeName = useNodeName(fileId);
+  const cachedFolderPath = useNodeFolderPath(fileId);
+  const folderPath =
+    cachedFolderPath !== null
+      ? cachedFolderPath
+      : fallbackPath !== undefined
+        ? fallbackPath.join(" / ")
+        : "";
   const knownFileName =
     (renamed?.fileId === fileId ? renamed.name : undefined) ?? cachedNodeName ?? fallbackName;
   const fileName = knownFileName ?? title;
@@ -391,6 +408,7 @@ function DocumentContent({
           key={fileId}
           fileId={fileId}
           fileName={fileName}
+          folderPath={folderPath}
           hasKnownName={knownFileName !== undefined}
           remote={data}
           mode={mode}
@@ -403,6 +421,7 @@ function DocumentContent({
           onModeChange={(next) => setViewMode({ fileId, mode: next })}
           onDirtyChange={onDirtyChange}
           onRenamed={handleRenamed}
+          onTagClick={onTagClick}
           onRetry={onRetry}
         />
       ) : (
@@ -416,13 +435,24 @@ function DocumentContent({
                   : "border-neutral-200 dark:border-neutral-800"
               }`}
             >
-              <div className="flex items-center gap-2">
+              <div className="flex min-w-0 flex-1 items-center gap-2">
                 {leadingControl}
-                <h2 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
-                  {fileName}
-                </h2>
+                <div className="flex min-w-0 flex-col">
+                  <h2 className="truncate text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+                    {fileName}
+                  </h2>
+                  {folderPath.length > 0 && (
+                    <span
+                      data-testid="document-path"
+                      title={folderPath}
+                      className="truncate text-[11px] leading-tight text-neutral-400 dark:text-neutral-500"
+                    >
+                      {folderPath}
+                    </span>
+                  )}
+                </div>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex shrink-0 items-center gap-2">
                 {offline && offlineMessage && (
                   <span
                     role="status"
@@ -593,13 +623,13 @@ function RenameableTitle({
   }
 
   return (
-    <h2 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+    <h2 className="min-w-0 text-sm font-semibold text-neutral-900 dark:text-neutral-100">
       <button
         type="button"
         aria-label={hasKnownName ? undefined : "Rename note"}
         onClick={startEditing}
         title="Click to rename"
-        className="rounded-md px-1 py-0.5 text-left transition-colors hover:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-blue-600 dark:hover:bg-neutral-800"
+        className="block max-w-full truncate rounded-md px-1 py-0.5 text-left transition-colors hover:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-blue-600 dark:hover:bg-neutral-800"
       >
         {fileName}
       </button>
@@ -610,6 +640,7 @@ function RenameableTitle({
 function DocumentSession({
   fileId,
   fileName,
+  folderPath,
   hasKnownName,
   remote,
   mode,
@@ -622,10 +653,12 @@ function DocumentSession({
   onModeChange,
   onDirtyChange,
   onRenamed,
+  onTagClick,
   onRetry,
 }: {
   fileId: string;
   fileName: string;
+  folderPath: string;
   hasKnownName: boolean;
   remote: { text: string; revision: string };
   mode: DocumentMode;
@@ -638,6 +671,7 @@ function DocumentSession({
   onModeChange: (mode: DocumentMode) => void;
   onDirtyChange: (dirty: boolean) => void;
   onRenamed: (node: DriveNode) => void;
+  onTagClick?: (tag: string) => void;
   onRetry: OnRetry;
 }) {
   const queryClient = useQueryClient();
@@ -1129,20 +1163,31 @@ function DocumentSession({
               : "border-neutral-200 dark:border-neutral-800"
           }`}
         >
-          <div className="flex flex-wrap items-center gap-2.5">
+          <div className="flex min-w-0 flex-1 items-center gap-2.5">
             {leadingControl}
-            <RenameableTitle
-              fileId={fileId}
-              fileName={fileName}
-              hasKnownName={hasKnownName}
-              startRenameRef={startRenameRef}
-              onRenamed={(node, revision) => {
-                if (revision) {
-                  setBase((prev) => ({ ...prev, revision }));
-                }
-                onRenamed(node);
-              }}
-            />
+            <div className="flex min-w-0 flex-col">
+              <RenameableTitle
+                fileId={fileId}
+                fileName={fileName}
+                hasKnownName={hasKnownName}
+                startRenameRef={startRenameRef}
+                onRenamed={(node, revision) => {
+                  if (revision) {
+                    setBase((prev) => ({ ...prev, revision }));
+                  }
+                  onRenamed(node);
+                }}
+              />
+              {folderPath.length > 0 && (
+                <span
+                  data-testid="document-path"
+                  title={folderPath}
+                  className="truncate px-1 text-[11px] leading-tight text-neutral-400 dark:text-neutral-500"
+                >
+                  {folderPath}
+                </span>
+              )}
+            </div>
             <span className="shrink-0 text-xs text-neutral-500 dark:text-neutral-400" role="status">
               {statusText}
             </span>
@@ -1153,7 +1198,7 @@ function DocumentSession({
               </span>
             )}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex shrink-0 items-center gap-2">
             {offline && offlineMessage && (
               <span
                 className="shrink-0 text-xs font-medium text-red-700 dark:text-red-300"
@@ -1280,7 +1325,9 @@ function DocumentSession({
                 onCompare={() => onRetry(() => compareMutation.mutate())}
               />
             )}
-            {frontmatter !== null && <PropertiesBar frontmatter={frontmatter} />}
+            {frontmatter !== null && (
+              <PropertiesBar frontmatter={frontmatter} onTagClick={onTagClick} />
+            )}
             {mergeRemote !== null ? (
               <Suspense
                 fallback={
@@ -1350,7 +1397,7 @@ function DocumentSession({
 }
 
 const HEADER_ICON_BUTTON_CLASS =
-  "inline-flex size-8 shrink-0 items-center justify-center rounded-md text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-neutral-900 focus-visible:outline-2 focus-visible:outline-blue-600 aria-expanded:bg-neutral-100 aria-expanded:text-neutral-900 aria-pressed:bg-neutral-100 aria-pressed:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100 dark:aria-expanded:bg-neutral-800 dark:aria-expanded:text-neutral-100 dark:aria-pressed:bg-neutral-800 dark:aria-pressed:text-neutral-100";
+  "inline-flex size-8 shrink-0 items-center justify-center rounded-md text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-neutral-900 focus-visible:outline-2 focus-visible:outline-blue-600 aria-expanded:bg-neutral-100 aria-expanded:text-neutral-900 aria-pressed:bg-amber-100 aria-pressed:text-amber-800 aria-pressed:ring-1 aria-pressed:ring-inset aria-pressed:ring-amber-300 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100 dark:aria-expanded:bg-neutral-800 dark:aria-expanded:text-neutral-100 dark:aria-pressed:bg-amber-950/70 dark:aria-pressed:text-amber-300 dark:aria-pressed:ring-amber-800";
 
 const CONFLICT_BUTTON_CLASS =
   "rounded-md border border-neutral-300 bg-white px-2.5 py-1 text-xs font-medium text-neutral-900 hover:bg-neutral-50 disabled:opacity-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 dark:hover:bg-neutral-800";

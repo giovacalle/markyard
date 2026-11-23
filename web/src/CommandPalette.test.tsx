@@ -9,6 +9,7 @@ import {
   extractHeadings,
   findContentSnippet,
   fuzzyMatch,
+  matchFrontmatterTags,
   todayNoteInitialContent,
   todayNoteName,
 } from "./commandSearch";
@@ -101,7 +102,7 @@ describe("commandSearch unit helpers", () => {
     ]);
   });
 
-  it("extracts clean full-text snippets skipping frontmatter", () => {
+  it("extracts clean full-text snippets skipping frontmatter (including `...` closing fence)", () => {
     const md = "---\ntags: secret\n---\nIntro line\nWe should ship the rocket launch tomorrow.\n";
     expect(findContentSnippet(md, "secret")).toBeNull();
     expect(findContentSnippet(md, "rocket launch")).toEqual({
@@ -110,6 +111,24 @@ describe("commandSearch unit helpers", () => {
       after: " tomorrow.",
       line: 5,
     });
+
+    const dotMd = "---\ntitle: Hidden\n# Ignored heading\n...\n# Real Heading\nVisible line.\n";
+    expect(extractHeadings(dotMd)).toEqual([{ level: 1, text: "Real Heading", line: 5, index: 0 }]);
+    expect(findContentSnippet(dotMd, "Hidden")).toBeNull();
+    expect(findContentSnippet(dotMd, "Visible")).toEqual({
+      before: "",
+      match: "Visible",
+      after: " line.",
+      line: 6,
+    });
+  });
+
+  it("matches frontmatter tags case-insensitively with exact > prefix > substring priority", () => {
+    const md = "---\ntags:\n  - #framework\n  - #work\n  - #workflow\n---\nBody\n";
+    expect(matchFrontmatterTags(md, "#work")).toEqual(["work", "workflow", "framework"]);
+    expect(matchFrontmatterTags(md, "WORK")).toEqual(["work", "workflow", "framework"]);
+    expect(matchFrontmatterTags(md, "")).toEqual(["framework", "work", "workflow"]);
+    expect(matchFrontmatterTags(md, "missing")).toEqual([]);
   });
 });
 
@@ -445,5 +464,107 @@ describe("Command Palette (Cmd+K)", () => {
         delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
       }
     }
+  });
+
+  it("skips warming the root attachments folder and omits it from folder commands", async () => {
+    const fetchedFolders: string[] = [];
+    server.use(
+      http.get("/api/session", () => HttpResponse.json({ email: "owner@example.com" })),
+      http.get("/api/root", () => HttpResponse.json(node("root-id", "Notes", "folder"))),
+      http.get("/api/folders/:id/children", ({ params }) => {
+        const id = String(params.id);
+        fetchedFolders.push(id);
+        if (id === "root-id") {
+          return HttpResponse.json({
+            nodes: [
+              node("att-root", "_attachments", "folder"),
+              node("proj-id", "Projects", "folder"),
+              node("a-id", "alpha.md", "markdown"),
+            ],
+          });
+        }
+        return HttpResponse.json({ nodes: [] });
+      }),
+      http.get("/api/search", () => HttpResponse.json({ results: [] })),
+    );
+
+    render(<App />);
+    await screen.findByRole("treeitem", { name: /alpha\.md/ });
+
+    pressCmdK();
+    const dialog = await screen.findByRole("dialog", { name: "Command palette" });
+    const input = within(dialog).getByRole("combobox");
+
+    await vi.waitFor(() => expect(fetchedFolders).toContain("proj-id"));
+    expect(fetchedFolders).not.toContain("att-root");
+
+    fireEvent.change(input, { target: { value: "_attachments" } });
+    expect(within(dialog).queryByRole("option", { name: /New note in _attachments/ })).toBeNull();
+
+    fireEvent.change(input, { target: { value: ">_attachments" } });
+    expect(within(dialog).queryByRole("option", { name: /New note in _attachments/ })).toBeNull();
+  });
+
+  it("searches frontmatter tags via `tag:` operator and regular local search", async () => {
+    await writeCachedFile(
+      "work-id",
+      "---\ntags:\n  - #work\n  - quarterly\n---\nPlain body.\n",
+      "r1",
+    );
+    await writeCachedFile(
+      "home-id",
+      "---\ntags: [personal, work-life]\n---\nAnother note.\n",
+      "r2",
+    );
+
+    server.use(
+      http.get("/api/session", () => HttpResponse.json({ email: "owner@example.com" })),
+      http.get("/api/root", () => HttpResponse.json(node("root-id", "Notes", "folder"))),
+      http.get("/api/folders/root-id/children", () =>
+        HttpResponse.json({
+          nodes: [
+            node("work-id", "roadmap.md", "markdown"),
+            node("home-id", "journal.md", "markdown"),
+          ],
+        }),
+      ),
+      http.get("/api/files/:id/content", ({ params }) =>
+        contentResponse(`# Loaded ${String(params.id)}`),
+      ),
+      http.get("/api/search", () => HttpResponse.json({ results: [] })),
+    );
+
+    render(<App />);
+    await screen.findByRole("treeitem", { name: /roadmap\.md/ });
+
+    pressCmdK();
+    const dialog = await screen.findByRole("dialog", { name: "Command palette" });
+    const input = within(dialog).getByRole("combobox");
+
+    // `tag:` lists all known frontmatter tags with counts.
+    fireEvent.change(input, { target: { value: "tag:" } });
+    const workTagOption = await within(dialog).findByRole("option", { name: "#work" });
+    expect(workTagOption).toHaveTextContent("1 note");
+    expect(within(dialog).getByRole("option", { name: "#quarterly" })).toBeInTheDocument();
+
+    // Selecting a tag narrows to `tag:work` and surfaces matching notes (exact first).
+    fireEvent.click(workTagOption);
+    expect(input).toHaveValue("tag:work");
+    const taggedOptions = within(dialog).getAllByRole("option");
+    expect(taggedOptions[0]).toHaveTextContent("roadmap.md");
+    expect(taggedOptions[0]).toHaveTextContent("#work");
+    expect(taggedOptions[1]).toHaveTextContent("journal.md");
+    expect(taggedOptions[1]).toHaveTextContent("#work-life");
+
+    // `tag:#quarterly` also works with an optional leading `#`.
+    fireEvent.change(input, { target: { value: "tag:#quarterly" } });
+    expect(within(dialog).getByRole("option", { name: /roadmap\.md/ })).toBeInTheDocument();
+    expect(within(dialog).queryByRole("option", { name: /journal\.md/ })).toBeNull();
+
+    // Regular local search (no `tag:` prefix) also matches frontmatter tags offline.
+    fireEvent.change(input, { target: { value: "quarterly" } });
+    const contentMatch = within(dialog).getByRole("option", { name: /roadmap\.md/ });
+    expect(contentMatch).toHaveTextContent("#quarterly");
+    expect(contentMatch).toHaveTextContent("Tag");
   });
 });

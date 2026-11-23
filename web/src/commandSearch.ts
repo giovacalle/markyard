@@ -1,3 +1,5 @@
+import { extractFrontmatterTags, parseFrontmatter } from "./frontmatter";
+
 export const RECENT_FILES_STORAGE_KEY = "markyard:recent-files:v1";
 const MAX_RECENT_FILES = 8;
 
@@ -148,13 +150,33 @@ export interface ContentSnippet {
 }
 
 function stripFrontmatterWithOffset(text: string): { body: string; lineOffset: number } {
-  const clean = text.startsWith("\uFEFF") ? text.slice(1) : text;
-  const fm = /^---[ \t]*\r?\n[\s\S]*?\r?\n---[ \t]*(?:\r?\n|$)/.exec(clean);
-  if (!fm) {
-    return { body: clean, lineOffset: 0 };
+  const fm = parseFrontmatter(text);
+  if (fm === null) {
+    return { body: text.startsWith("\uFEFF") ? text.slice(1) : text, lineOffset: 0 };
   }
-  const lineOffset = fm[0].split(/\r?\n/).length - 1;
-  return { body: clean.slice(fm[0].length), lineOffset };
+  const body = text.slice(fm.end).replace(/^(?:\r\n|\r|\n)/, "");
+  return { body, lineOffset: fm.endLine };
+}
+
+/**
+ * Matches a note's frontmatter tags against `query` (case-insensitive, optional leading `#`),
+ * ordered exact match > prefix match > substring match. Empty query returns all tags.
+ */
+export function matchFrontmatterTags(text: string, query: string): string[] {
+  const tags = extractFrontmatterTags(text);
+  const needle = query.trim().replace(/^#/, "").toLowerCase();
+  if (needle.length === 0) {
+    return tags;
+  }
+  const rank = (tag: string): number => {
+    const lower = tag.toLowerCase();
+    if (lower === needle) return 0;
+    if (lower.startsWith(needle)) return 1;
+    return 2;
+  };
+  return tags
+    .filter((tag) => tag.toLowerCase().includes(needle))
+    .sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
 }
 
 /**
@@ -239,18 +261,11 @@ function cleanHeadingText(raw: string): string {
 /** Extracts ATX Markdown headings (`#`..`######`), skipping YAML frontmatter and fenced code blocks. */
 export function extractHeadings(markdown: string): HeadingItem[] {
   const clean = markdown.startsWith("\uFEFF") ? markdown.slice(1) : markdown;
-  const lines = clean.split(/\r?\n/);
+  const lines = clean.split(/\r\n|\r|\n/);
   const headings: HeadingItem[] = [];
 
-  let i = 0;
-  if (lines[0]?.trim() === "---") {
-    for (let j = 1; j < lines.length; j += 1) {
-      if (lines[j].trim() === "---") {
-        i = j + 1;
-        break;
-      }
-    }
-  }
+  const fm = parseFrontmatter(markdown);
+  let i = fm === null ? 0 : fm.endLine;
 
   let fence: { char: string; len: number } | null = null;
   for (; i < lines.length; i += 1) {

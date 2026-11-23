@@ -569,4 +569,81 @@ describe("open and preview a Markdown file", () => {
       vi.resetModules();
     }
   });
+
+  it("shows a small folder path below the title for nested notes and omits it at the root", async () => {
+    signedInWithRoot();
+    server.use(
+      http.get("/api/folders/root-id/children", () =>
+        HttpResponse.json({
+          nodes: [node("proj-id", "Projects", "folder"), node("root-note", "top.md", "markdown")],
+        }),
+      ),
+      http.get("/api/folders/proj-id/children", () =>
+        HttpResponse.json({ nodes: [node("sub-id", "2026", "folder")] }),
+      ),
+      http.get("/api/folders/sub-id/children", () =>
+        HttpResponse.json({ nodes: [node("nested-note", "plan.md", "markdown")] }),
+      ),
+      http.get("/api/files/:id/content", () => contentResponse("# Hello")),
+    );
+
+    render(<App />);
+
+    // Root-level note: heading name stays exact, no folder path line.
+    fireEvent.click(await screen.findByRole("treeitem", { name: /top\.md/ }));
+    const docRegion = await screen.findByRole("region", { name: "Preview" });
+    expect(
+      await within(docRegion).findByRole("heading", { level: 2, name: "top.md" }),
+    ).toBeInTheDocument();
+    expect(within(docRegion).queryByTestId("document-path")).not.toBeInTheDocument();
+
+    // Nested note: heading name stays exact (`plan.md`), folder path sits outside <h2>.
+    fireEvent.click(screen.getByRole("treeitem", { name: /Projects/ }));
+    const sub = await screen.findByRole("treeitem", { name: /2026/ });
+    fireEvent.click(sub);
+    fireEvent.click(await screen.findByRole("treeitem", { name: /plan\.md/ }));
+
+    const heading = await within(docRegion).findByRole("heading", { level: 2, name: "plan.md" });
+    const pathEl = await within(docRegion).findByTestId("document-path");
+    expect(pathEl).toHaveTextContent("Projects / 2026");
+    expect(heading).not.toContainElement(pathEl);
+  });
+
+  it("renders `#`-prefixed block tags cleanly and opens tag search when clicking a PropertiesBar tag pill", async () => {
+    signedInWithRoot();
+    const markdown = [
+      "---",
+      "title: Launch",
+      "tags:",
+      "  - #work",
+      "  - #ops",
+      "---",
+      "# Plan",
+    ].join("\n");
+    server.use(
+      http.get("/api/folders/:id/children", () =>
+        HttpResponse.json({ nodes: [node("doc-id", "launch.md", "markdown")] }),
+      ),
+      http.get("/api/files/:id/content", () => contentResponse(markdown)),
+      http.get("/api/search", () => HttpResponse.json({ results: [] })),
+    );
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole("treeitem", { name: /launch\.md/ }));
+
+    const preview = await screen.findByRole("region", { name: "Preview" });
+    const properties = await within(preview).findByRole("group", { name: "Properties" });
+    const workPill = within(properties).getByRole("button", { name: "#work" });
+    expect(within(properties).queryByText("##work")).not.toBeInTheDocument();
+    expect(properties).not.toHaveAttribute("open");
+
+    // Clicking the tag pill does not toggle `<details>` or switch to Edit, and opens Cmd+K pre-filled with `tag:work`.
+    fireEvent.click(workPill);
+    expect(properties).not.toHaveAttribute("open");
+    expect(screen.getByRole("region", { name: "Preview" })).toBeInTheDocument();
+
+    const palette = await screen.findByRole("dialog", { name: "Command palette" });
+    expect(within(palette).getByRole("combobox")).toHaveValue("tag:work");
+    expect(await within(palette).findByRole("option", { name: /launch\.md/ })).toBeInTheDocument();
+  });
 });

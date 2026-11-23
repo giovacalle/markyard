@@ -11,7 +11,14 @@ import { useId, useMemo, useState, type KeyboardEvent } from "react";
 import { fetchVaultIndex, type DriveNode } from "../api";
 import { fuzzyMatch } from "../commandSearch";
 import { moveErrorMessage, useMoveNode } from "../moveItem";
-import { knownFolders, knownParentId, moveTargets, VAULT_INDEX_KEY } from "../treeCache";
+import { useSettings } from "../settings";
+import {
+  knownFolders,
+  knownParentId,
+  moveTargets,
+  VAULT_INDEX_KEY,
+  withoutRootAttachmentsFolder,
+} from "../treeCache";
 import { FolderIcon } from "./icons";
 
 const MAX_RESULTS = 50;
@@ -60,12 +67,17 @@ function OpenMoveDialog({
     retry: false,
   });
 
+  const { attachmentsFolder } = useSettings();
   const targets = useMemo(() => {
     void index.data;
-    const folders = knownFolders(queryClient);
+    const folders = withoutRootAttachmentsFolder(
+      knownFolders(queryClient),
+      rootId,
+      attachmentsFolder,
+    );
     const item = { id: node.id, kind: node.kind, parentId: knownParentId(queryClient, node.id) };
     return moveTargets(folders, rootId, item);
-  }, [index.data, queryClient, node, rootId]);
+  }, [index.data, queryClient, node, rootId, attachmentsFolder]);
 
   const results = useMemo(() => {
     if (query.trim().length === 0) {

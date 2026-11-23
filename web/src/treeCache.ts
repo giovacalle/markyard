@@ -429,6 +429,77 @@ export function findNoteByNameInFolder(
   return list.find((node) => node.kind === "markdown" && node.name.toLowerCase() === target);
 }
 
+/** Whether `node` is the vault-root attachments folder configured in Settings. */
+export function isRootAttachmentsFolder(
+  node: Pick<DriveNode, "kind" | "name">,
+  parentId: string,
+  rootId: string,
+  attachmentsFolder: string,
+): boolean {
+  return (
+    parentId === rootId &&
+    node.kind === "folder" &&
+    attachmentsFolder.length > 0 &&
+    node.name === attachmentsFolder
+  );
+}
+
+/** Copy of `folders` without the vault-root attachments folder or any subfolder under it. */
+export function withoutRootAttachmentsFolder(
+  folders: ReadonlyMap<string, FolderEntry>,
+  rootId: string,
+  attachmentsFolder: string,
+): Map<string, FolderEntry> {
+  const hiddenIds = new Set<string>();
+  if (attachmentsFolder.length > 0) {
+    for (const folder of folders.values()) {
+      if (folder.parentId === rootId && folder.name === attachmentsFolder) {
+        hiddenIds.add(folder.id);
+      }
+    }
+  }
+  if (hiddenIds.size === 0) {
+    return new Map(folders);
+  }
+  const out = new Map<string, FolderEntry>();
+  for (const [id, folder] of folders) {
+    const chain = chainToRoot(folders, rootId, id);
+    if (chain !== null && chain.some((ancestorId) => hiddenIds.has(ancestorId))) {
+      continue;
+    }
+    out.set(id, folder);
+  }
+  return out;
+}
+
+/**
+ * Readable folder path of `id` below the root (e.g. `Projects / 2026`), `""` for root-level
+ * items, or `null` while its ancestor chain is not known yet.
+ */
+export function knownFolderPath(queryClient: QueryClient, id: string): string | null {
+  const root = queryClient.getQueryData<DriveNode>(["root"]);
+  if (root === undefined) {
+    return null;
+  }
+  const ancestors = indexedAncestorIds(queryClient, root.id, id);
+  if (ancestors === null) {
+    return null;
+  }
+  if (ancestors.length === 0) {
+    return "";
+  }
+  const folders = knownFolders(queryClient);
+  const names: string[] = [];
+  for (const folderId of ancestors) {
+    const name = folders.get(folderId)?.name ?? findNode(queryClient, folderId)?.name;
+    if (name === undefined) {
+      return null;
+    }
+    names.push(name);
+  }
+  return names.join(" / ");
+}
+
 /** Reactive lookup of a node's name across cached tree listings. */
 export function useNodeName(id: string): string | undefined {
   const queryClient = useQueryClient();
@@ -437,5 +508,16 @@ export function useNodeName(id: string): string | undefined {
     [queryClient],
   );
   const getSnapshot = useCallback(() => findNode(queryClient, id)?.name, [queryClient, id]);
+  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+}
+
+/** Reactive lookup of a node's folder path below the root (`""` at root, `null` when unknown). */
+export function useNodeFolderPath(id: string): string | null {
+  const queryClient = useQueryClient();
+  const subscribe = useCallback(
+    (onChange: () => void) => queryClient.getQueryCache().subscribe(onChange),
+    [queryClient],
+  );
+  const getSnapshot = useCallback(() => knownFolderPath(queryClient, id), [queryClient, id]);
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
