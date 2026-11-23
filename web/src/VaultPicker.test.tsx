@@ -88,8 +88,8 @@ describe("vault onboarding", () => {
     const onboarding = await screen.findByRole("region", { name: "Choose your vault folder" });
     expect(screen.getByText("New User (new@example.com)")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
-    // My Drive itself cannot be the vault.
-    expect(within(onboarding).getByRole("button", { name: "Use this folder" })).toBeDisabled();
+    // My Drive itself can be the vault.
+    expect(within(onboarding).getByRole("button", { name: "Use “My Drive”" })).toBeEnabled();
 
     // Drill into Work, then back via the breadcrumbs.
     fireEvent.click(await within(onboarding).findByRole("button", { name: "Open Work" }));
@@ -118,6 +118,35 @@ describe("vault onboarding", () => {
     fireEvent.click(within(onboarding).getByRole("button", { name: "Use “My notes”" }));
     expect(await screen.findByRole("treeitem", { name: /hello\.md/ })).toBeInTheDocument();
     expect(picks).toEqual([{ folderId: "notes-id" }]);
+    expect(screen.queryByRole("region", { name: "Choose your vault folder" })).toBeNull();
+  });
+
+  it("lets a vault-less account take all of My Drive as its vault", async () => {
+    const picks: unknown[] = [];
+    driveFolders();
+    server.use(
+      http.get("/api/session", () =>
+        HttpResponse.json({ email: "new@example.com", name: "New User", needsVaultSetup: true }),
+      ),
+      http.put("/api/vault/root", async ({ request }) => {
+        const body = (await request.json()) as { folderId: string };
+        picks.push(body);
+        return HttpResponse.json({ root: node("my-drive-id", "My Drive", "folder") });
+      }),
+      http.get("/api/root", () => HttpResponse.json(node("my-drive-id", "My Drive", "folder"))),
+      http.get("/api/folders/my-drive-id/children", () =>
+        HttpResponse.json({ nodes: [node("n1", "hello.md", "markdown")] }),
+      ),
+    );
+    render(<App />);
+
+    const onboarding = await screen.findByRole("region", { name: "Choose your vault folder" });
+    await within(onboarding).findByRole("button", { name: "Open Work" });
+
+    fireEvent.click(within(onboarding).getByRole("button", { name: "Use “My Drive”" }));
+
+    expect(await screen.findByRole("treeitem", { name: /hello\.md/ })).toBeInTheDocument();
+    expect(picks).toEqual([{ folderId: "root" }]);
     expect(screen.queryByRole("region", { name: "Choose your vault folder" })).toBeNull();
   });
 });

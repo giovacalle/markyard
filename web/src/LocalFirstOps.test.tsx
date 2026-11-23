@@ -1,12 +1,23 @@
 import { EditorView } from "@codemirror/view";
 import { onlineManager } from "@tanstack/react-query";
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vite-plus/test";
 import { App } from "./App";
 import { todayNoteName } from "./commandSearch";
-import { clearLocalCache, readAllPendingOps, readCachedFile, readPendingWrite } from "./localCache";
+import {
+  clearLocalCache,
+  enqueueOrCoalesceOp,
+  readAllPendingOps,
+  readCachedFile,
+  readPendingWrite,
+  upsertPendingWrite,
+  writeCachedFile,
+  writeCachedFolder,
+  writeCachedRoot,
+  writeCachedSession,
+} from "./localCache";
 import { isLocalId } from "./localIds";
 import { updateSettings } from "./settings";
 
@@ -17,6 +28,7 @@ beforeAll(() => {
 });
 
 afterEach(async () => {
+  cleanup();
   server.resetHandlers();
   vi.restoreAllMocks();
   localStorage.clear();
@@ -276,7 +288,6 @@ describe("local-first structural vault operations (App integration)", () => {
     const mutations: string[] = [];
     mockSignedInVault([node("target-dir", "Archive", "folder")]);
     server.use(
-      http.get("/api/folders/target-dir/children", () => HttpResponse.json({ nodes: [] })),
       http.get("/api/folders/target-dir/children", () => HttpResponse.json({ nodes: [] })),
       http.post("/api/folders/:id/folders", () => {
         mutations.push("POST folder");
@@ -629,12 +640,11 @@ describe("local-first structural vault operations (App integration)", () => {
     // Reconnect: POST clash.md hits 409 and shows in SyncInspector.
     setOnline(true);
     await vi.waitFor(() => expect(posts).toEqual([{ name: "clash.md", content: "" }]));
-    const inspector = await vi.waitFor(() => {
+    await vi.waitFor(() => {
       const dialog = openInspector();
       expect(within(dialog).getByRole("listitem", { name: "Create clash.md" })).toHaveTextContent(
         "Name already exists on Drive",
       );
-      return dialog;
     });
     // Close inspector popover by clicking trigger.
     fireEvent.click(screen.getAllByRole("button", { name: /^Sync status:/ })[0]);
@@ -660,7 +670,6 @@ describe("local-first structural vault operations (App integration)", () => {
     await vi.waitFor(async () => {
       expect(await readAllPendingOps()).toHaveLength(0);
     });
-    expect(inspector).toBeTruthy();
   });
 
   it("preserves db.ops and local cache on 401 when structural ops are queued", async () => {
@@ -702,9 +711,151 @@ describe("local-first structural vault operations (App integration)", () => {
     expect(screen.queryByRole("region", { name: "Sign in" })).not.toBeInTheDocument();
     expect(folderPostCalls).toBe(0);
 
+    // Triggering an online event while the session is still 401 must not flush queued mutations.
+    setOnline(true);
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 30));
+    });
+    expect(folderPostCalls).toBe(0);
+
     // db.ops was NOT wiped by the 401!
     const preservedOps = await readAllPendingOps();
     expect(preservedOps).toHaveLength(1);
     expect(preservedOps[0]).toMatchObject({ kind: "create_folder", name: "OfflineFolder" });
+  });
+
+  it("creates today's daily note offline when the configured daily folder already exists in root but was never expanded, then adopts on reconnect", async () => {
+    updateSettings({ dailyNotesFolder: "Daily" });
+    const expectedTodayName = todayNoteName();
+    const createdFiles: { parentId: string; name: string }[] = [];
+
+    mockSignedInVault([
+      node("daily-id", "Daily", "folder"),
+      node("doc-1", "welcome.md", "markdown"),
+    ]);
+    render(<App />);
+    await screen.findByText("Daily");
+
+    // Go offline without ever expanding "Daily" (its children listing is not cached).
+    setOnline(false);
+    mockNetworkOffline();
+
+    pressCmdK();
+    const palette = await screen.findByRole("dialog", { name: "Command palette" });
+    fireEvent.click(await within(palette).findByRole("option", { name: /Today's note/ }));
+
+    const editor = await screen.findByRole("region", { name: "Editor" });
+    expect(await within(editor).findByRole("heading", { level: 2 })).toHaveTextContent(
+      expectedTodayName,
+    );
+    expect(screen.queryByText(/Could not open the “Daily” folder/)).not.toBeInTheDocument();
+
+    const ops = await readAllPendingOps();
+    expect(ops).toHaveLength(1);
+    expect(ops[0]).toMatchObject({
+      kind: "create_file",
+      parentId: "daily-id",
+      name: expectedTodayName,
+      openExistingOnConflict: true,
+    });
+
+    // Reconnect when Drive already has today's note: 409 name_exists adopts the existing remote note cleanly.
+    mockSignedInVault([
+      node("daily-id", "Daily", "folder"),
+      node("doc-1", "welcome.md", "markdown"),
+    ]);
+    server.use(
+      http.post("/api/folders/daily-id/files", async ({ request }) => {
+        const body = (await request.json()) as { name: string };
+        createdFiles.push({ parentId: "daily-id", name: body.name });
+        return HttpResponse.json(
+          { code: "name_exists", message: "Already exists" },
+          { status: 409 },
+        );
+      }),
+      http.get("/api/folders/daily-id/children", () =>
+        HttpResponse.json({
+          nodes: [node("existing-today", expectedTodayName, "markdown")],
+        }),
+      ),
+      http.get("/api/files/existing-today/content", () =>
+        contentResponse("# Already on Drive", '"etag-existing"'),
+      ),
+    );
+
+    setOnline(true);
+
+    await vi.waitFor(() => {
+      expect(createdFiles).toEqual([{ parentId: "daily-id", name: expectedTodayName }]);
+    });
+    await vi.waitFor(() => {
+      expect(new URLSearchParams(window.location.search).get("file")).toBe("existing-today");
+    });
+    await vi.waitFor(async () => {
+      expect(await readAllPendingOps()).toHaveLength(0);
+    });
+  });
+
+  it("clears Account A's persisted ops, outbox, and cached folders on cold-load switch to Account B", async () => {
+    // Seed IndexedDB with Account A's cached vault, pending outbox edit, and pending structural op.
+    await writeCachedSession("alice@example.com");
+    await writeCachedRoot(node("root-a", "Alice Vault", "folder"));
+    await writeCachedFolder("root-a", [node("doc-a", "alice-secret.md", "markdown")]);
+    await writeCachedFile("doc-a", "# Alice Secret", '"etag-a"');
+    await upsertPendingWrite("doc-a", "# Alice Dirty Edit", '"etag-a"');
+    await enqueueOrCoalesceOp({
+      opId: "op-alice-1",
+      kind: "create_folder",
+      targetId: "local:alice-dir",
+      targetName: "AliceOfflineFolder",
+      parentId: "root-a",
+      name: "AliceOfflineFolder",
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+    expect(await readAllPendingOps()).toHaveLength(1);
+    expect(await readPendingWrite("doc-a")).toBeDefined();
+
+    // Boot <App /> with /api/session resolving immediately as Account B.
+    const unexpectedMutations: string[] = [];
+    server.use(
+      http.get("/api/session", () => HttpResponse.json({ email: "bob@example.com" })),
+      http.get("/api/root", () => HttpResponse.json(node("root-b", "Bob Vault", "folder"))),
+      http.get("/api/folders/root-b/children", () =>
+        HttpResponse.json({ nodes: [node("doc-b", "bob-note.md", "markdown")] }),
+      ),
+      http.get("/api/changes/start-token", () => HttpResponse.json({ startPageToken: "tb1" })),
+      http.get("/api/changes", () =>
+        HttpResponse.json({ nextPageToken: "tb1", hasMore: false, changes: [] }),
+      ),
+      http.post("/api/folders/:id/folders", ({ params }) => {
+        unexpectedMutations.push(`POST folder ${String(params.id)}`);
+        return HttpResponse.json(node("x", "x", "folder"), { status: 201 });
+      }),
+      http.put("/api/files/:id/content", ({ params }) => {
+        unexpectedMutations.push(`PUT file ${String(params.id)}`);
+        return new HttpResponse(null, { status: 204, headers: { ETag: '"e"' } });
+      }),
+    );
+
+    render(<App />);
+    expect(await screen.findByText("bob-note.md")).toBeInTheDocument();
+    expect(await screen.findByText("bob@example.com")).toBeInTheDocument();
+
+    // Wait a tick so any in-flight mount hydration would have settled if unguarded.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 30));
+    });
+
+    // Account B sees no leftover Account A folders/notes and 0 pending ops/outbox items.
+    expect(screen.queryByText("alice-secret.md")).not.toBeInTheDocument();
+    expect(screen.queryByText("AliceOfflineFolder")).not.toBeInTheDocument();
+
+    const inspector = openInspector();
+    expect(within(inspector).getByRole("status")).toHaveTextContent("All changes synced");
+    expect(within(inspector).queryByText("AliceOfflineFolder")).not.toBeInTheDocument();
+    expect(unexpectedMutations).toHaveLength(0);
+    expect(await readAllPendingOps()).toHaveLength(0);
+    expect(await readPendingWrite("doc-a")).toBeUndefined();
   });
 });

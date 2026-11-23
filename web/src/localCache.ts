@@ -273,13 +273,13 @@ export function writeCachedSession(
   email: string,
   name?: string,
   cloudSync?: boolean,
-): Promise<void> {
+): Promise<boolean> {
   const profile = {
     ...(name !== undefined && name.trim().length > 0 ? { name } : {}),
     ...(cloudSync === true ? { cloudSync } : {}),
   };
   return safe(async (db) => {
-    await db.transaction("rw", [db.meta, db.folders, db.files, db.outbox, db.ops], async () => {
+    return db.transaction("rw", [db.meta, db.folders, db.files, db.outbox, db.ops], async () => {
       const existing = (await db.meta.get("account")) as CachedAccount | undefined;
       if (existing !== undefined && existing.email !== email) {
         clearCloudStateStamp();
@@ -290,7 +290,7 @@ export function writeCachedSession(
         await db.ops.clear();
         await db.meta.bulkDelete([...ACCOUNT_SCOPED_META_KEYS]);
         await db.meta.put({ key: "account", email, ...profile, root: null, updatedAt: Date.now() });
-        return;
+        return true;
       }
       await db.meta.put({
         key: "account",
@@ -299,8 +299,9 @@ export function writeCachedSession(
         root: existing?.root ?? null,
         updatedAt: Date.now(),
       });
+      return false;
     });
-  }, undefined);
+  }, false);
 }
 
 export function writeCachedRoot(root: DriveNode): Promise<void> {
@@ -2010,10 +2011,18 @@ export function discardPendingOpInDb(opId: string): Promise<{
 export async function hydrateQueryClient(
   queryClient: QueryClient,
   openFileId: string | null,
-  options?: { preserveOnUnauthenticated?: boolean },
+  options?: {
+    preserveOnUnauthenticated?: boolean;
+    isStale?: () => boolean;
+    expectedEmail?: () => string | null;
+  },
 ): Promise<Session | null> {
   const account = await readCachedAccount();
-  if (account === undefined) {
+  const isMismatched = (email: string) => {
+    const expected = options?.expectedEmail?.() ?? null;
+    return expected !== null && expected !== email;
+  };
+  if (account === undefined || options?.isStale?.() === true || isMismatched(account.email)) {
     return null;
   }
 
@@ -2050,6 +2059,10 @@ export async function hydrateQueryClient(
     readAllCachedFolders(),
     openFileId !== null ? readCachedFile(openFileId) : Promise.resolve(undefined),
   ]);
+
+  if (options?.isStale?.() === true || isMismatched(account.email)) {
+    return null;
+  }
 
   for (const folder of folders) {
     seedIfEmpty(childrenKey(folder.folderId), folder.nodes);

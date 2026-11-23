@@ -445,6 +445,9 @@ export class OpsQueue {
   async hydrate(autoFlush = false): Promise<void> {
     const epoch = this.globalEpoch;
     await this.runSerialized(async () => {
+      if (!this.isEpochCurrent(epoch)) {
+        return;
+      }
       const persisted = await readAllPendingOps();
       if (!this.isEpochCurrent(epoch)) {
         return;

@@ -318,6 +318,21 @@ describe("PUT /api/vault/root", () => {
     }
   });
 
+  it("takes_the_root_alias_as_all_of_my_drive", async () => {
+    // The picker sends `root` for "My Drive itself"; Drive answers the alias with the real id,
+    // which is what the session and the synced state must then hold.
+    const google = new FakeGoogle([getsFile("root", folder("my-drive-id", "My Drive"))]);
+    const res = await send(await putRoot("root"), { google });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ root: node("my-drive-id", "My Drive") });
+    expect(await sealedOf(res)).toEqual({
+      ...storedSession(NOW + 3600),
+      rootFolderId: "my-drive-id",
+    });
+    expect(google.unexpected).toEqual([]);
+  });
+
   it("bad_body_is_400_without_drive", async () => {
     for (const id of ["../x", "", 42, null]) {
       const google = new FakeGoogle();

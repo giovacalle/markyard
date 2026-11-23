@@ -16,6 +16,7 @@ import {
   isNotFound,
   isRateLimited,
   isSessionEnded,
+  isTransientError,
   isUnauthenticated,
   signOut,
   type DriveNode,
@@ -509,6 +510,7 @@ function SessionContent({
   const documentRef = useRef<DocumentHandle | null>(null);
   const sessionKeysRef = useRef<Map<string, string>>(new Map());
   const lastAccountEmailRef = useRef<string | null>(null);
+  const accountEpochRef = useRef(0);
   const vaultNoteList = useVaultNotes();
   const [openPanel, setOpenPanel] = useState<WorkspacePanel | null>(null);
   // A `[[Note#Heading]]` jump waiting for its note to load.
@@ -672,23 +674,36 @@ function SessionContent({
 
   useEffect(() => {
     let active = true;
+    const hydrateEpoch = accountEpochRef.current;
+    const isStale = () => !active || accountEpochRef.current !== hydrateEpoch;
     void (async () => {
       // Load persisted outbox & structural ops before any 401 response can decide whether to wipe local state.
       await Promise.all([syncQueue.hydrate(false), opsQueue.hydrate(false)]);
+      if (isStale()) {
+        return;
+      }
       const hasPending =
         syncQueue.getSnapshot().pendingCount > 0 ||
         opsQueue.getSnapshot().pendingCount > 0 ||
         (await hasPersistedPendingWork());
+      if (isStale()) {
+        return;
+      }
       const cachedSession = await hydrateQueryClient(queryClient, openFileId, {
         preserveOnUnauthenticated: hasPending,
+        isStale,
+        expectedEmail: () => lastAccountEmailRef.current,
       });
-      opsQueue.applyPendingOverlaysToCache();
-      if (cachedSession !== null && lastAccountEmailRef.current === null) {
-        lastAccountEmailRef.current = cachedSession.email;
+      if (isStale()) {
+        return;
       }
-      if (active) {
-        setHydrateState({ ready: true, cachedSession });
+      if (cachedSession !== null) {
+        opsQueue.applyPendingOverlaysToCache();
+        if (lastAccountEmailRef.current === null) {
+          lastAccountEmailRef.current = cachedSession.email;
+        }
       }
+      setHydrateState({ ready: true, cachedSession });
     })();
     return () => {
       active = false;
@@ -701,15 +716,24 @@ function SessionContent({
     queryKey: ["session"],
     queryFn: async ({ signal }) => {
       const session = await fetchSession(signal);
-      const switched =
-        lastAccountEmailRef.current !== null && lastAccountEmailRef.current !== session.email;
+      const prevEmail = lastAccountEmailRef.current;
       lastAccountEmailRef.current = session.email;
+      const switchedInDb = await writeCachedSession(session.email, session.name, session.cloudSync);
+      const switched = switchedInDb || (prevEmail !== null && prevEmail !== session.email);
       if (switched) {
+        accountEpochRef.current += 1;
         opsQueue.resetAll();
         syncQueue.resetAll();
         sessionKeysRef.current.clear();
+        driveChanges.reset();
+        vaultSync?.reset();
+        clearRecentFiles();
+        forgetLastOpenFile();
+        clearExpandedFolders();
+        openFile(null, { replace: true });
+        setHydrateState({ ready: true, cachedSession: null });
+        queryClient.removeQueries({ predicate: (query) => query.queryKey[0] !== "session" });
       }
-      await writeCachedSession(session.email, session.name, session.cloudSync);
       return session;
     },
   });
@@ -901,8 +925,13 @@ function SessionContent({
     data !== undefined && !isSignedOut && !isUnauthenticated(error) && rootQuery.isSuccess,
   );
 
+  const sessionUnauthenticated = isSignedOut || isUnauthenticated(error);
   useEffect(() => {
     const handleOnline = () => {
+      if (sessionUnauthenticated) {
+        void queryClient.invalidateQueries({ queryKey: ["session"] });
+        return;
+      }
       const startedAt = Date.now();
       void opsQueue
         .flushAll()
@@ -922,7 +951,7 @@ function SessionContent({
     };
     window.addEventListener("online", handleOnline);
     return () => window.removeEventListener("online", handleOnline);
-  }, [queryClient, opsQueue, syncQueue]);
+  }, [queryClient, opsQueue, syncQueue, sessionUnauthenticated]);
 
   if (isSignedOut) {
     // With cached data, the 401 came after being signed in: say so.
@@ -1014,7 +1043,15 @@ function SessionContent({
       if (dailyFolderName !== "") {
         try {
           folder = await ensureRootSubfolder(queryClient, opsQueue, root, dailyFolderName);
-          await folderChildren(queryClient, opsQueue, folder.id);
+          if (!isOffline) {
+            try {
+              await folderChildren(queryClient, opsQueue, folder.id);
+            } catch (err) {
+              if (!isTransientError(err)) {
+                throw err;
+              }
+            }
+          }
         } catch (err) {
           setLinkNotice(
             `Could not open the “${dailyFolderName}” folder: ${createErrorMessage(err)}`,

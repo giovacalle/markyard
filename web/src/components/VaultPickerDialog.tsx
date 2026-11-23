@@ -20,7 +20,7 @@ import {
 import { validateFolderSetting } from "../settings";
 import { CheckIcon, ChevronIcon, FolderIcon, FolderPlusIcon, LogOutIcon, NotesLogo } from "./icons";
 
-/** My Drive's top level: browsable, but not a folder the vault can live in. */
+/** My Drive's top level: browsable, and pickable when the whole drive is the vault. */
 const MY_DRIVE = { id: "root", name: "My Drive" } as const;
 
 interface Crumb {
@@ -97,8 +97,9 @@ export function VaultPicker({
     onSuccess: (root) => onPicked(root),
   });
 
-  // The vault needs a real folder: the selected row, else the folder being browsed.
-  const target: Crumb | null = selected ?? (current.id === MY_DRIVE.id ? null : current);
+  // The vault needs a folder to live in: the selected row, else the folder being browsed
+  // (`My Drive` itself resolves server-side to the account's root folder).
+  const target: Crumb = selected ?? current;
   const busy = pick.isPending || create.isPending;
 
   const navigate = (nextTrail: Crumb[]) => {
@@ -120,7 +121,7 @@ export function VaultPicker({
   };
 
   const confirm = () => {
-    if (target === null || busy) {
+    if (busy) {
       return;
     }
     pick.mutate({ id: target.id, name: target.name, kind: "folder", modifiedTime: "" });
@@ -303,15 +304,11 @@ export function VaultPicker({
 
       <button
         type="button"
-        disabled={target === null || busy}
+        disabled={busy}
         onClick={confirm}
         className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
       >
-        {pick.isPending
-          ? "Opening vault…"
-          : target === null
-            ? "Use this folder"
-            : `Use “${target.name}”`}
+        {pick.isPending ? "Opening vault…" : `Use “${target.name}”`}
       </button>
     </div>
   );
@@ -346,7 +343,7 @@ export function VaultPickerDialog({
         <div className="mb-3 space-y-1">
           <DialogTitle className="text-base font-semibold">Choose vault folder</DialogTitle>
           <DialogDescription className="text-sm text-neutral-500 dark:text-neutral-400">
-            Pick the Google Drive folder that holds your notes.
+            Pick the Google Drive folder that holds your notes, or use My Drive itself.
           </DialogDescription>
         </div>
         <VaultPicker currentRootId={currentRootId} onPicked={onPicked} />
@@ -409,7 +406,8 @@ export function VaultOnboarding({
             Choose your vault folder
           </h1>
           <p className="mt-1 mb-4 text-sm text-neutral-500 dark:text-neutral-400">
-            Your notes live in a Google Drive folder. Pick an existing folder or create a new one.
+            Your notes live in a Google Drive folder. Pick an existing folder, use My Drive itself,
+            or create a new one.
           </p>
           <VaultPicker onPicked={onPicked} />
         </section>
