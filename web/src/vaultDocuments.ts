@@ -8,6 +8,7 @@ import {
   writeCachedFolder,
   writeCachedRemoteFile,
 } from "./localCache";
+import { isLocalId } from "./localIds";
 import type { SyncQueue } from "./syncQueue";
 import { isTemplatesFolder, type TemplateNote } from "./templates";
 import { childrenKey, collectIndexedTree } from "./treeCache";
@@ -111,6 +112,7 @@ async function loadTemplatesFolder(
   );
   if (
     folder === undefined ||
+    isLocalId(folder.id) ||
     queryClient.getQueryData(childrenKey(folder.id)) !== undefined ||
     (typeof navigator !== "undefined" && navigator.onLine === false)
   ) {
@@ -146,7 +148,7 @@ export async function readTemplates(
       if (local !== undefined) {
         return { id: note.id, name: note.name, text: local.text };
       }
-      if (typeof navigator !== "undefined" && navigator.onLine === false) {
+      if (isLocalId(note.id) || (typeof navigator !== "undefined" && navigator.onLine === false)) {
         return null;
       }
       try {

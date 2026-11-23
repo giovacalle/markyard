@@ -39,6 +39,24 @@ export function removeRecentFile(fileId: string): string[] {
   return saveRecentFileIds(next);
 }
 
+/** Replaces `localId` with `realId` in the stored recent-files list, deduplicating in order. */
+export function remapRecentFile(localId: string, realId: string): string[] {
+  const existing = getRecentFileIds();
+  if (!existing.includes(localId)) {
+    return existing;
+  }
+  const seen = new Set<string>();
+  const next: string[] = [];
+  for (const id of existing) {
+    const mapped = id === localId ? realId : id;
+    if (!seen.has(mapped)) {
+      seen.add(mapped);
+      next.push(mapped);
+    }
+  }
+  return saveRecentFileIds(next);
+}
+
 export function clearRecentFiles(): void {
   try {
     window.localStorage.removeItem(RECENT_FILES_STORAGE_KEY);

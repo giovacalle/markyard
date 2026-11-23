@@ -6,6 +6,7 @@ import {
   type CloudUserState,
 } from "./api";
 import { readCloudStateStamp, writeCloudStateStamp } from "./cloudStateStamp";
+import { isLocalId } from "./localIds";
 import {
   forgetLastOpenFile,
   getOpenFileId,
@@ -53,13 +54,14 @@ const VIEW_PREF_KEYS: readonly ViewPrefKey[] = [
 /** Every synced field this device owns. `rootFolderId` belongs to the BFF and is only echoed. */
 type FullState = Required<Omit<CloudUserState, "rootFolderId">>;
 
-/** This device's current synced preferences. */
+/** This device's current synced preferences. Temporary `local:` ids are filtered out. */
 export function readLocalCloudState(rootFolderId: string): FullState {
   const prefs = getViewPrefs();
+  const rawLastOpen = getOpenFileId() ?? readLastOpenFile();
   return {
     theme: getStoredTheme(),
-    lastOpenFileId: getOpenFileId() ?? readLastOpenFile(),
-    expandedFolders: readExpandedFolders(rootFolderId),
+    lastOpenFileId: rawLastOpen !== null && !isLocalId(rawLastOpen) ? rawLastOpen : null,
+    expandedFolders: readExpandedFolders(rootFolderId).filter((id) => !isLocalId(id)),
     readOnly: prefs.readOnly,
     focusMode: prefs.focusMode,
     typewriterMode: prefs.typewriterMode,

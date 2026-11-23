@@ -20,6 +20,7 @@ import {
   writeCachedRemoteFile,
   writeVaultState,
 } from "./localCache";
+import { isLocalId } from "./localIds";
 import { childrenKey, VAULT_INDEX_KEY } from "./treeCache";
 
 export const VAULT_PIN_STORAGE_KEY = "markyard:vault-pinned";
@@ -119,6 +120,13 @@ export function listingsFromIndex(index: VaultIndex): Map<string, DriveNode[]> {
   return out;
 }
 
+/** Optional hooks supplied by `OpsQueue` so vault sync never clobbers pending structural ops. */
+export interface VaultSyncOpsHooks {
+  overlayListing?: (folderId: string, nodes: DriveNode[]) => DriveNode[];
+  overlayVaultIndex?: (index: VaultIndex) => VaultIndex;
+  isPendingDeleted?: (id: string) => boolean;
+}
+
 /**
  * Keeps every note of the vault readable offline ("Pin vault offline"): reads the vault index,
  * seeds folder listings nobody has opened yet, then downloads only notes that are missing or older
@@ -126,14 +134,16 @@ export function listingsFromIndex(index: VaultIndex): Map<string, DriveNode[]> {
  */
 export class VaultSync {
   private readonly queryClient: QueryClient;
+  private opsHooks: VaultSyncOpsHooks | undefined;
   private readonly listeners = new Set<() => void>();
   private snapshot: VaultSyncSnapshot;
   private controller: AbortController | null = null;
   private running: Promise<void> | null = null;
   private pausedUntil = 0;
 
-  constructor(queryClient: QueryClient) {
+  constructor(queryClient: QueryClient, opsHooks?: VaultSyncOpsHooks) {
     this.queryClient = queryClient;
+    this.opsHooks = opsHooks;
     this.snapshot = {
       pinned: readPinned(),
       running: false,
@@ -144,6 +154,11 @@ export class VaultSync {
       truncated: false,
       error: null,
     };
+  }
+
+  /** Attaches (or clears) pending structural op overlay hooks. */
+  setOpsHooks(opsHooks: VaultSyncOpsHooks | undefined): void {
+    this.opsHooks = opsHooks;
   }
 
   subscribe = (listener: () => void): (() => void) => {
@@ -242,17 +257,24 @@ export class VaultSync {
     while (!isOnline()) {
       await untilOnline(signal);
     }
-    const index = await fetchVaultIndex(signal);
+    const rawIndex = await fetchVaultIndex(signal);
     if (signal.aborted) {
       throw new AbortedError();
     }
+    const index = this.opsHooks?.overlayVaultIndex
+      ? this.opsHooks.overlayVaultIndex(rawIndex)
+      : rawIndex;
     this.queryClient.setQueryData(VAULT_INDEX_KEY, index);
     await this.seedFolders(index);
 
     const [stamps, pending] = await Promise.all([readCachedFileStamps(), readAllPendingWrites()]);
     const pendingIds = new Set(pending.map((entry) => entry.fileId));
     const queue = index.files.filter((file) => {
-      if (pendingIds.has(file.id)) {
+      if (
+        isLocalId(file.id) ||
+        pendingIds.has(file.id) ||
+        this.opsHooks?.isPendingDeleted?.(file.id) === true
+      ) {
         return false;
       }
       const stamp = stamps.get(file.id);
@@ -269,6 +291,9 @@ export class VaultSync {
         const file = queue.shift();
         if (file === undefined) {
           return;
+        }
+        if (isLocalId(file.id) || this.opsHooks?.isPendingDeleted?.(file.id) === true) {
+          continue;
         }
         for (;;) {
           if (signal.aborted) {
@@ -287,6 +312,9 @@ export class VaultSync {
             const fresh = await fetchContent(file.id, signal);
             if (signal.aborted) {
               throw new AbortedError();
+            }
+            if (this.opsHooks?.isPendingDeleted?.(file.id) === true) {
+              break;
             }
             await writeCachedRemoteFile(file.id, fresh.text, fresh.revision);
             cached += 1;
@@ -331,7 +359,13 @@ export class VaultSync {
     const listings = listingsFromIndex(index);
     const stored = new Set((await readAllCachedFolders()).map((folder) => folder.folderId));
     const toStore: { folderId: string; nodes: DriveNode[] }[] = [];
-    for (const [folderId, nodes] of listings) {
+    for (const [folderId, rawNodes] of listings) {
+      if (this.opsHooks?.isPendingDeleted?.(folderId) === true) {
+        continue;
+      }
+      const nodes = this.opsHooks?.overlayListing
+        ? this.opsHooks.overlayListing(folderId, rawNodes)
+        : rawNodes;
       if (this.queryClient.getQueryData(childrenKey(folderId)) === undefined) {
         this.queryClient.setQueryData(childrenKey(folderId), nodes, {
           updatedAt: CACHE_STALE_TIMESTAMP,

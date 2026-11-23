@@ -53,6 +53,43 @@ export function subscribeExpandedFolders(
   return () => listeners.delete(listener);
 }
 
+/**
+ * Replaces `localId` with `realId` across all stored expanded-folder lists and notifies
+ * subscribers so an expanded offline-created folder stays expanded after syncing.
+ */
+export function remapExpandedFolder(localId: string, realId: string): void {
+  if (typeof localStorage === "undefined") {
+    return;
+  }
+  try {
+    const rootIds: string[] = [];
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const key = localStorage.key(i);
+      if (key !== null && key.startsWith(EXPANDED_STORAGE_PREFIX)) {
+        rootIds.push(key.slice(EXPANDED_STORAGE_PREFIX.length));
+      }
+    }
+    for (const rootId of rootIds) {
+      const existing = readExpandedFolders(rootId);
+      if (!existing.includes(localId)) {
+        continue;
+      }
+      const seen = new Set<string>();
+      const next: string[] = [];
+      for (const id of existing) {
+        const mapped = id === localId ? realId : id;
+        if (!seen.has(mapped)) {
+          seen.add(mapped);
+          next.push(mapped);
+        }
+      }
+      writeExpandedFolders(rootId, next);
+    }
+  } catch {
+    // Ignore storage errors.
+  }
+}
+
 /** Drops every stored expanded-folder list from localStorage (sign-out, account switch). */
 export function clearExpandedFolders(): void {
   if (typeof localStorage === "undefined") {

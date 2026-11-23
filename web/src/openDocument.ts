@@ -85,6 +85,28 @@ export function wasRestoredFile(id: string): boolean {
   return restoredFileId === id;
 }
 
+/**
+ * Remaps an open or stored `local:` note id to Drive's real id in place (no new history entry)
+ * when an offline-created note finishes syncing.
+ */
+export function remapOpenFileId(localId: string, realId: string): boolean {
+  let remapped = false;
+  if (readLastOpenFile() === localId) {
+    rememberLastOpenFile(realId);
+    remapped = true;
+  }
+  if (restoredFileId === localId) {
+    restoredFileId = realId;
+    remapped = true;
+  }
+  if (typeof window !== "undefined" && getOpenFileId() === localId) {
+    window.history.replaceState(window.history.state, "", urlForFile(realId));
+    window.dispatchEvent(new Event(OPEN_EVENT));
+    remapped = true;
+  }
+  return remapped;
+}
+
 /** Calls `listener` whenever the open note may have changed. */
 export function subscribeOpenDocument(listener: () => void): () => void {
   window.addEventListener("popstate", listener);

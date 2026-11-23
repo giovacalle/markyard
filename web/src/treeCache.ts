@@ -170,6 +170,193 @@ export function moveChild(queryClient: QueryClient, node: DriveNode, toFolderId:
   addChild(queryClient, toFolderId, node);
 }
 
+/**
+ * Remaps a temporary `local:` node id to Drive's real node across all loaded folder listings,
+ * the folder's own children cache (when `realNode.kind === "folder"`), and `VAULT_INDEX_KEY`.
+ */
+export function remapNodeId(
+  queryClient: QueryClient,
+  localId: string,
+  realNode: DriveNode,
+  options?: { preserveName?: boolean },
+): void {
+  const preserveName = options?.preserveName === true;
+  for (const [folderId, list] of listings(queryClient)) {
+    if (folderId === localId) {
+      continue;
+    }
+    const existingLocal = list.find((n) => n.id === localId);
+    if (existingLocal === undefined) {
+      continue;
+    }
+    const replacement: DriveNode = preserveName
+      ? { ...realNode, name: existingLocal.name }
+      : realNode;
+    const deduped: DriveNode[] = [];
+    let inserted = false;
+    for (const n of list) {
+      if (n.id === localId || n.id === realNode.id) {
+        if (!inserted) {
+          deduped.push(replacement);
+          inserted = true;
+        }
+      } else {
+        deduped.push(n);
+      }
+    }
+    queryClient.setQueryData<DriveNode[]>(childrenKey(folderId), deduped);
+  }
+
+  if (realNode.kind === "folder") {
+    const localChildren = queryClient.getQueryData<DriveNode[]>(childrenKey(localId));
+    if (localChildren !== undefined) {
+      const existingReal = queryClient.getQueryData<DriveNode[]>(childrenKey(realNode.id));
+      if (existingReal !== undefined) {
+        const byId = new Map<string, DriveNode>();
+        for (const n of existingReal) {
+          byId.set(n.id, n);
+        }
+        for (const n of localChildren) {
+          if (!byId.has(n.id)) {
+            byId.set(n.id, n);
+          }
+        }
+        queryClient.setQueryData<DriveNode[]>(childrenKey(realNode.id), Array.from(byId.values()));
+      } else {
+        queryClient.setQueryData<DriveNode[]>(childrenKey(realNode.id), localChildren);
+      }
+      queryClient.removeQueries({ queryKey: childrenKey(localId), exact: true });
+    }
+  }
+
+  queryClient.setQueryData<VaultIndex>(VAULT_INDEX_KEY, (index) => {
+    if (index === undefined) {
+      return index;
+    }
+    const rewriteEntries = (
+      entries: VaultIndex["folders"],
+      isTargetCollection: boolean,
+    ): VaultIndex["folders"] => {
+      const out: VaultIndex["folders"] = [];
+      const seen = new Set<string>();
+      for (const entry of entries) {
+        const parentId = entry.parentId === localId ? realNode.id : entry.parentId;
+        if (isTargetCollection && entry.id === localId) {
+          if (!seen.has(realNode.id)) {
+            seen.add(realNode.id);
+            out.push({
+              id: realNode.id,
+              name: preserveName ? entry.name : realNode.name,
+              parentId,
+              modifiedTime: realNode.modifiedTime,
+            });
+          }
+        } else if (!seen.has(entry.id)) {
+          seen.add(entry.id);
+          out.push(parentId === entry.parentId ? entry : { ...entry, parentId });
+        }
+      }
+      return out;
+    };
+    return {
+      ...index,
+      folders: rewriteEntries(index.folders, realNode.kind === "folder"),
+      files: rewriteEntries(index.files, realNode.kind === "markdown"),
+    };
+  });
+}
+
+/** Inserts or updates `node` inside `VAULT_INDEX_KEY` when the vault index is cached. */
+export function upsertVaultIndexNode(
+  queryClient: QueryClient,
+  parentId: string,
+  node: DriveNode,
+): void {
+  if (node.kind === "other") {
+    return;
+  }
+  queryClient.setQueryData<VaultIndex>(VAULT_INDEX_KEY, (index) => {
+    if (index === undefined) {
+      return index;
+    }
+    const entry = {
+      id: node.id,
+      name: node.name,
+      parentId,
+      modifiedTime: node.modifiedTime,
+    };
+    if (node.kind === "folder") {
+      return {
+        ...index,
+        folders: [...index.folders.filter((f) => f.id !== node.id), entry],
+      };
+    }
+    return {
+      ...index,
+      files: [...index.files.filter((f) => f.id !== node.id), entry],
+    };
+  });
+}
+
+/** Updates a node's name in `VAULT_INDEX_KEY` when the vault index is cached. */
+export function renameInVaultIndex(
+  queryClient: QueryClient,
+  id: string,
+  name: string,
+  modifiedTime?: string,
+): void {
+  queryClient.setQueryData<VaultIndex>(VAULT_INDEX_KEY, (index) => {
+    if (index === undefined) {
+      return index;
+    }
+    const update = <T extends { id: string; name: string; modifiedTime: string }>(entry: T): T =>
+      entry.id === id
+        ? { ...entry, name, ...(modifiedTime !== undefined ? { modifiedTime } : {}) }
+        : entry;
+    return {
+      ...index,
+      folders: index.folders.map(update),
+      files: index.files.map(update),
+    };
+  });
+}
+
+/** Updates a node's `parentId` in `VAULT_INDEX_KEY` when the vault index is cached. */
+export function moveInVaultIndex(queryClient: QueryClient, id: string, toParentId: string): void {
+  queryClient.setQueryData<VaultIndex>(VAULT_INDEX_KEY, (index) => {
+    if (index === undefined) {
+      return index;
+    }
+    const reparent = <T extends { id: string; parentId: string }>(entry: T): T =>
+      entry.id === id ? { ...entry, parentId: toParentId } : entry;
+    return {
+      ...index,
+      folders: index.folders.map(reparent),
+      files: index.files.map(reparent),
+    };
+  });
+}
+
+/** Removes `id` (and any given descendant ids) from `VAULT_INDEX_KEY` when cached. */
+export function removeFromVaultIndex(
+  queryClient: QueryClient,
+  id: string,
+  descendantIds?: { folderIds?: readonly string[]; fileIds?: readonly string[] },
+): void {
+  queryClient.setQueryData<VaultIndex>(VAULT_INDEX_KEY, (index) => {
+    if (index === undefined) {
+      return index;
+    }
+    const dropFolders = new Set<string>([id, ...(descendantIds?.folderIds ?? [])]);
+    const dropFiles = new Set<string>([id, ...(descendantIds?.fileIds ?? [])]);
+    return {
+      ...index,
+      folders: index.folders.filter((f) => !dropFolders.has(f.id)),
+      files: index.files.filter((f) => !dropFiles.has(f.id)),
+    };
+  });
+}
+
 export interface FolderEntry {
   id: string;
   name: string;

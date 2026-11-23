@@ -17,6 +17,7 @@ import {
   updateChangesState,
   type RecentDriveChange,
 } from "./localCache";
+import { isLocalId } from "./localIds";
 import {
   clearSelfWrites,
   isSelfChange,
@@ -322,6 +323,9 @@ export class DriveChanges {
    * device last knew of it, so our own uploads (or metadata-only changes) never raise a banner.
    */
   private async checkOpenNote(fileId: string, epoch: number): Promise<void> {
+    if (isLocalId(fileId)) {
+      return;
+    }
     let fresh: { text: string; revision: string };
     try {
       fresh = await fetchContent(fileId);

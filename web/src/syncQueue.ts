@@ -26,6 +26,7 @@ import {
   writeCachedFile,
   type PendingWrite,
 } from "./localCache";
+import { isLocalId } from "./localIds";
 
 export type FileSyncState =
   | { status: "idle" }
@@ -82,6 +83,7 @@ export class SyncQueue {
   private readonly queryClient: QueryClient;
   private readonly onNetworkError?: () => void;
   private readonly onNetworkSuccess?: () => void;
+  private onLocalFileFlush?: (fileId: string) => void;
   private readonly listeners = new Set<() => void>();
   private readonly states = new Map<string, FileSyncState>();
   private readonly inFlight = new Map<string, Promise<void>>();
@@ -113,11 +115,27 @@ export class SyncQueue {
 
   constructor(
     queryClient: QueryClient,
-    callbacks?: { onNetworkError?: () => void; onNetworkSuccess?: () => void },
+    callbacks?: {
+      onNetworkError?: () => void;
+      onNetworkSuccess?: () => void;
+      onLocalFileFlush?: (fileId: string) => void;
+    },
   ) {
     this.queryClient = queryClient;
     this.onNetworkError = callbacks?.onNetworkError;
     this.onNetworkSuccess = callbacks?.onNetworkSuccess;
+    this.onLocalFileFlush = callbacks?.onLocalFileFlush;
+  }
+
+  /** Registers (or clears) the hook invoked when `flushFile` is called on a `local:` file id. */
+  setOnLocalFileFlush(callback: ((fileId: string) => void) | undefined): void {
+    this.onLocalFileFlush = callback;
+  }
+
+  /** Whether `fileId` currently has an unsynced, syncing, or failed edit in the queue. */
+  hasPendingForFile(fileId: string): boolean {
+    const state = this.states.get(fileId);
+    return state?.status === "pending" || state?.status === "syncing" || state?.status === "error";
   }
 
   /** Monotonic counter bumped on `resetAll()` (sign-out / vault switch). */
@@ -404,7 +422,10 @@ export class SyncQueue {
     this.cancelRetry(fileId);
     this.retryAttempts.delete(fileId);
     this.queryClient.setQueryData(["files", fileId, "content"], { text, revision });
-    this.setFileState(fileId, isOnline() ? { status: "syncing" } : { status: "pending" });
+    this.setFileState(
+      fileId,
+      isLocalId(fileId) || !isOnline() ? { status: "pending" } : { status: "syncing" },
+    );
 
     const writePromise = this.chainWrite(fileId, async () => {
       if (!this.isCurrent(fileId, epoch)) {
@@ -414,6 +435,13 @@ export class SyncQueue {
     });
     void writePromise.then((written) => {
       if (written === undefined || !this.isCurrent(fileId, epoch)) {
+        return;
+      }
+      if (isLocalId(fileId)) {
+        this.setFileState(fileId, { status: "pending" });
+        if (isOnline()) {
+          this.onLocalFileFlush?.(fileId);
+        }
         return;
       }
       if (isOnline()) {
@@ -532,6 +560,14 @@ export class SyncQueue {
     { force = false, automatic = false }: { force?: boolean; automatic?: boolean } = {},
   ): Promise<void> {
     if (this.disposed || this.deletedFiles.has(fileId)) {
+      return Promise.resolve();
+    }
+    if (isLocalId(fileId)) {
+      // Never PUT `local:*` directly; delegate to `OpsQueue` which creates the file with the
+      // latest local text and then remaps `localId -> realId`.
+      if (isOnline()) {
+        this.onLocalFileFlush?.(fileId);
+      }
       return Promise.resolve();
     }
     if (!automatic) {
@@ -787,6 +823,60 @@ export class SyncQueue {
     this.syncedBySelf.delete(fileId);
     this.setFileState(fileId, IDLE_STATE);
     return this.chainWrite(fileId, () => deletePendingWrite(fileId));
+  }
+
+  /** Re-allows local saves for a file whose queued deletion was discarded (rolled back). */
+  unmarkDeletedFile(fileId: string): void {
+    this.deletedFiles.delete(fileId);
+  }
+
+  /**
+   * Transfers in-memory revision/state tracking from a temporary `local:` id to Drive's real id
+   * after `create_file` succeeds, and immediately flushes any mid-POST chained outbox edit.
+   */
+  remapFileId(
+    localId: string,
+    realId: string,
+    revision: string,
+    sentText: string,
+    hasChainedOutbox: boolean,
+  ): void {
+    if (this.disposed) {
+      return;
+    }
+    this.bumpFileEpoch(localId);
+    this.cancelRetry(localId);
+    this.retryAttempts.delete(localId);
+    this.fileEpochs.delete(localId);
+
+    const nextGen = Math.max(this.writeGeneration(localId), this.writeGeneration(realId)) + 1;
+    this.generations.delete(localId);
+    this.generations.set(realId, nextGen);
+
+    const discardVer = this.discardVersions.get(localId);
+    if (discardVer !== undefined) {
+      this.discardVersions.delete(localId);
+      this.discardVersions.set(realId, discardVer);
+    }
+
+    this.syncedRevisions.delete(localId);
+    this.syncedTexts.delete(localId);
+    this.syncedBySelf.delete(localId);
+    if (revision.length > 0) {
+      this.setSynced(realId, revision, sentText, true);
+    }
+
+    this.states.delete(localId);
+    if (hasChainedOutbox) {
+      this.states.set(realId, { status: "pending" });
+    } else if (revision.length > 0) {
+      this.states.set(realId, { status: "synced" });
+    }
+    this.emit();
+
+    if (hasChainedOutbox && isOnline()) {
+      void this.flushFile(realId, { force: true });
+    }
   }
 
   resetAll(): void {
