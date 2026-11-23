@@ -1,5 +1,12 @@
 {
   "name": "markyard",
+  "description": "Self-hosted, offline-first Markdown notes PWA backed by Google Drive on Cloudflare Workers",
+  "license": "MIT",
+  "homepage": "https://markyard.giova.dev",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/giovacalle/markyard.git"
+  },
   "private": true,
   "type": "module",
   "scripts": {

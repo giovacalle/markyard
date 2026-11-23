@@ -1,8 +1,10 @@
 # Markyard
 
-A fast, self-hosted, offline-capable Markdown notes PWA backed directly by a Google Drive folder, running on a single Cloudflare Worker.
+**Your Markdown notes, stored in your Google Drive — fast, offline-first, and self-hosted on a single Cloudflare Worker.**
 
-Your notes stay plain `.md` files in Google Drive—editable with Drive for Desktop, Obsidian, or any editor—while **Markyard** gives you a clean web & mobile app with conflict-safe saves, PKM features, inline image attachments, Drive version history, rich link previews, and optional Cloudflare D1 multi-device state sync.
+[Website](https://markyard.giova.dev) · [Features](#features) · [Quick Start](#quick-start-local-development) · [Self-Hosting](#self-hosting-on-cloudflare-workers) · [License](#license)
+
+Your notes stay plain `.md` files in your own Google Drive folder—editable with Google Drive for desktop, Obsidian, or any editor, with zero vendor lock-in. **Markyard** adds a clean web & mobile PWA on top with conflict-safe saves, offline editing, PKM tools (`[[wikilinks]]`, backlinks, tasks, templates), inline image attachments, Drive version history, rich link previews, and optional Cloudflare D1 state sync.
 
 ## Features
 
@@ -101,6 +103,18 @@ Architecture Decision Records live in [`docs/adr/`](docs/adr/):
 | `pnpm test:web` | Run Web test suite |
 | `pnpm check:bff` | Format, lint, and typecheck `bff/` |
 | `pnpm test:bff` | Run BFF test suite |
+
+## Privacy & Google API Notice
+
+Markyard is designed to be **self-hosted**: your Cloudflare Worker talks directly to Google Drive using your own Google Cloud OAuth credentials, and no data is sent to the project author or any third-party analytics service. OAuth tokens remain server-side in AES-256-GCM sealed `HttpOnly` cookies, and optional Cloudflare D1 state stores only UI preferences (never note contents).
+
+Markyard requests the `https://www.googleapis.com/auth/drive` scope so it can read and edit existing Markdown files in your chosen vault folder. For personal use, keeping your Google Cloud OAuth consent screen in **Testing** mode (with test users matching `ALLOWED_EMAILS`) avoids public OAuth verification. If you operate a public multi-user instance, you are responsible for completing Google OAuth verification, publishing a Privacy Policy, and complying with the [Google API Services User Data Policy](https://developers.google.com/terms/api-services-user-data-policy) (including the Limited Use requirements).
+
+## Disclaimer & Trademarks
+
+Markyard is an independent open-source project and is not affiliated with, endorsed by, or sponsored by Google LLC. Google and Google Drive are trademarks of Google LLC. Cloudflare, Obsidian, and any other product names mentioned are trademarks of their respective owners.
+
+Markyard is provided "as is" under the [MIT License](LICENSE), without warranty of any kind.
 
 ## License
 
