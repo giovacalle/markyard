@@ -5,8 +5,9 @@ import * as Effect from "effect/Effect";
 import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder";
 
 import * as State from "../../application/state.ts";
+import { MAX_STATE_BYTES } from "../../domain/state.ts";
 import { Api } from "../api.ts";
-import { bodyBytes, signedInSession as session } from "../request.ts";
+import { bodyBytesOf, signedInSession as session } from "../request.ts";
 
 export const StateLive = HttpApiBuilder.group(Api, "state", (handlers) =>
   handlers
@@ -14,7 +15,7 @@ export const StateLive = HttpApiBuilder.group(Api, "state", (handlers) =>
     .handleRaw("write", () =>
       Effect.gen(function* () {
         const { email } = yield* session;
-        return yield* State.write(email, yield* bodyBytes);
+        return yield* State.write(email, yield* bodyBytesOf(MAX_STATE_BYTES));
       }),
     ),
 );

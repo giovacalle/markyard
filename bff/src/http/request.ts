@@ -4,9 +4,16 @@ import * as Effect from "effect/Effect";
 import * as HttpServerRequest from "effect/http/HttpServerRequest";
 
 import { authorized, signedIn } from "../application/auth.ts";
+import { readAtMost } from "../application/files.ts";
 import { requireVaultRoot } from "../application/vaultRoot.ts";
+import { MAX_FILE_BYTES, rawPathId } from "../domain/drive.ts";
 import { notImplemented, type NotImplemented } from "../domain/errors.ts";
-import { rawPathId } from "../domain/drive.ts";
+import { parseContentLength } from "../domain/files.ts";
+
+/** Default cap for small JSON control-plane request bodies (rename, move, folder, vault). */
+export const MAX_JSON_BODY_BYTES = 64 * 1024;
+/** Cap for `POST /api/folders/{id}/files` JSON bodies (10 MB note content + JSON escaping/overhead). */
+export const MAX_CREATE_BODY_BYTES = 2 * MAX_FILE_BYTES + 64 * 1024;
 
 /** The Web `Request` the Worker received. */
 export const webRequest: Effect.Effect<Request, never, HttpServerRequest.HttpServerRequest> =
@@ -14,15 +21,38 @@ export const webRequest: Effect.Effect<Request, never, HttpServerRequest.HttpSer
     return (yield* HttpServerRequest.HttpServerRequest).source as Request;
   });
 
-/** The whole request body; a body that cannot be read decodes as an invalid one. */
-export const bodyBytes = Effect.flatMap(webRequest, (request) =>
-  Effect.promise(() =>
-    request.arrayBuffer().then(
-      (buffer) => new Uint8Array(buffer),
-      () => new Uint8Array(),
-    ),
-  ),
-);
+/**
+ * Reads at most `maxBytes` of the request body as a stream, returning `undefined` when exceeded
+ * (without buffering unbounded memory) and an empty array when the body is missing or unreadable.
+ */
+export const readBodyBytes = (
+  maxBytes: number,
+): Effect.Effect<Uint8Array | undefined, never, HttpServerRequest.HttpServerRequest> =>
+  Effect.flatMap(webRequest, (request) => {
+    const contentLength = parseContentLength(request.headers.get("content-length"));
+    if (contentLength !== undefined && contentLength > maxBytes) {
+      if (request.body !== null && !request.body.locked) {
+        request.body.cancel().catch(() => undefined);
+      }
+      return Effect.succeed(undefined);
+    }
+    if (request.body === null) return Effect.succeed(new Uint8Array());
+    return Effect.tryPromise(() => Effect.runPromise(readAtMost(request.body!, maxBytes))).pipe(
+      Effect.orElseSucceed(() => new Uint8Array()),
+    );
+  });
+
+/**
+ * Reads up to `maxBytes` of the request body; an unreadable or oversized body becomes empty bytes,
+ * which JSON body decoders reject with 400 `invalid_request`.
+ */
+export const bodyBytesOf = (
+  maxBytes: number,
+): Effect.Effect<Uint8Array, never, HttpServerRequest.HttpServerRequest> =>
+  Effect.map(readBodyBytes(maxBytes), (bytes) => bytes ?? new Uint8Array());
+
+/** Small JSON request body, capped at `MAX_JSON_BODY_BYTES`. */
+export const bodyBytes = bodyBytesOf(MAX_JSON_BODY_BYTES);
 
 /** The `Cookie` header of the current request. */
 export const cookieHeader = Effect.map(webRequest, (request) => request.headers.get("cookie"));

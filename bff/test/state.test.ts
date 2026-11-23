@@ -242,6 +242,34 @@ describe("state with STATE_DB", () => {
     expect(db.rows.size).toBe(0);
   });
 
+  it("oversized_stream_to_put_state_is_cancelled_without_buffering_unbounded_bytes", async () => {
+    let pulled = 0;
+    let cancelled = false;
+    const chunk = new Uint8Array(8192).fill(0x61);
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulled += chunk.byteLength;
+        controller.enqueue(chunk);
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const req = request("PUT", "/api/state", {
+      cookie: await cookieFor(),
+      headers: { "content-type": "application/json" },
+      body: stream,
+    });
+    const db = new FakeD1();
+    const res = await send(req, { stateDb: db });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { code: string }).code).toBe("invalid_request");
+    expect(cancelled).toBe(true);
+    // ReadableStream's default highWaterMark of 1 may pre-pull one chunk ahead of the cancel.
+    expect(pulled).toBeLessThanOrEqual(MAX_STATE_BYTES + 2 * chunk.byteLength);
+    expect(db.rows.size).toBe(0);
+  });
+
   it("users_are_isolated_by_email", async () => {
     const db = new FakeD1();
     const env = testEnv({ ALLOWED_EMAILS: `${EMAIL},second@example.com` });

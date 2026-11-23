@@ -26,10 +26,12 @@ export const SessionLive = HttpApiBuilder.group(Api, "session", (handlers) =>
         };
       }),
     )
-    // `POST /api/auth/logout`: clear the cookie on this device. The Google grant is left alone.
+    // `POST /api/auth/logout`: clear the cookie and browser HTTP cache on this device. The Google grant is left alone.
     .handle("logout", () =>
       Effect.gen(function* () {
-        (yield* ResponseSink).setCookie(CLEAR_SESSION_COOKIE);
+        const sink = yield* ResponseSink;
+        sink.setCookie(CLEAR_SESSION_COOKIE);
+        sink.setHeader("clear-site-data", '"cache"');
       }),
     ),
 );

@@ -53,8 +53,10 @@ import { respond } from "./routes/respond.ts";
 import { RevisionContentLive } from "./routes/revision-content.ts";
 
 export const CSP =
-  "default-src 'self'; script-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'";
+  "default-src 'self'; script-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'";
 export const NOSNIFF = "nosniff";
+export const REFERRER_POLICY = "no-referrer";
+export const PERMISSIONS_POLICY = "camera=(), microphone=(), geolocation=()";
 /** Stops proxies from caching private Drive data or weakening strong `ETag`s via compression. */
 export const NO_STORE_NO_TRANSFORM = "no-store, no-transform";
 
@@ -120,6 +122,8 @@ export const withSecurityHeaders = (response: Response): Response => {
   const out = mutable(response);
   out.headers.set("content-security-policy", CSP);
   out.headers.set("x-content-type-options", NOSNIFF);
+  out.headers.set("referrer-policy", REFERRER_POLICY);
+  out.headers.set("permissions-policy", PERMISSIONS_POLICY);
   if (!out.headers.has("cache-control")) {
     out.headers.set("cache-control", NO_STORE_NO_TRANSFORM);
   }

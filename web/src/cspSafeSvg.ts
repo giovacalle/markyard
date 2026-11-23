@@ -74,10 +74,19 @@ async function runPatched<T>(task: () => Promise<T>): Promise<{ value: T; css: s
   }
 }
 
+const UNSAFE_HREF_SCHEME = /^(?:javascript|vbscript|data):/i;
+
+function isUnsafeHref(value: string): boolean {
+  // Strip ASCII whitespace and control chars before scheme matching (browsers ignore them).
+  // oxlint-disable-next-line no-control-regex
+  return UNSAFE_HREF_SCHEME.test(value.replace(/[\u0000-\u0020]+/g, ""));
+}
+
 /**
  * Mounts renderer SVG markup into `host`'s shadow root without inline style markup: `<style>`
  * contents and `css` become an adopted stylesheet, `style` attributes are re-applied through
- * CSSOM, and scripts or `on*` handlers are dropped. Parsing happens in an inert document.
+ * CSSOM, and scripts, `<foreignObject>`, `on*` handlers, or unsafe `href`/`xlink:href` schemes
+ * are dropped. Parsing happens in an inert document.
  */
 export function mountSvgInShadow(host: HTMLElement, svg: string, css: string): void {
   const parsed = new DOMParser().parseFromString(`<!doctype html><body>${svg}`, "text/html");
@@ -87,7 +96,7 @@ export function mountSvgInShadow(host: HTMLElement, svg: string, css: string): v
   }
 
   const styleText = [css];
-  for (const element of Array.from(root.querySelectorAll("style, script"))) {
+  for (const element of Array.from(root.querySelectorAll("style, script, foreignObject"))) {
     if (element.localName === "style") {
       styleText.push(element.textContent ?? "");
     }
@@ -97,7 +106,11 @@ export function mountSvgInShadow(host: HTMLElement, svg: string, css: string): v
   const sourceElements = [root, ...Array.from(root.querySelectorAll("*"))];
   const inlineStyles = sourceElements.map((element) => {
     for (const attribute of Array.from(element.attributes)) {
-      if (attribute.name.toLowerCase().startsWith("on")) {
+      const name = attribute.name.toLowerCase();
+      if (
+        name.startsWith("on") ||
+        ((name === "href" || name === "xlink:href") && isUnsafeHref(attribute.value))
+      ) {
         element.removeAttribute(attribute.name);
       }
     }

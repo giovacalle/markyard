@@ -567,6 +567,30 @@ describe("GET /api/link-preview", () => {
     expect((await jsonBody(loop))["code"]).toBe("upstream_error");
   });
 
+  it("rejects_public_origin_directly_on_redirect_and_in_metadata", async () => {
+    const directGoogle = fake([]);
+    const direct = await preview("https://notes.test/api/health", directGoogle);
+    expect(direct.status).toBe(400);
+    expect((await jsonBody(direct))["code"]).toBe("invalid_request");
+    expect(directGoogle.calls).toHaveLength(0);
+
+    const hopGoogle = fake([
+      ["https://evil.example/self", redirect(302, "https://notes.test/api/session")],
+    ]);
+    const hop = await preview("https://evil.example/self", hopGoogle);
+    expect(hop.status).toBe(400);
+    expect((await jsonBody(hop))["code"]).toBe("invalid_request");
+    expect(hopGoogle.calls).toHaveLength(1);
+
+    const meta = parseHeadMetadata(
+      `<meta property="og:image" content="https://notes.test/icons/icon-192.png">
+       <link rel="icon" href="https://notes.test/icons/icon-192.png">`,
+      "https://example.com/",
+      "https://notes.test",
+    );
+    expect(meta).toEqual({});
+  });
+
   it("maps_upstream_failures", async () => {
     const cases = [
       [text(404, ""), 404, "not_found"],
@@ -721,6 +745,16 @@ describe("GET /api/link-preview/image", () => {
     const res = await image("https://example.com/i.png", google);
     expect(res.status).toBe(400);
     expect(google.calls).toHaveLength(1);
+
+    const selfDirect = fake([]);
+    expect((await image("https://notes.test/icons/icon-192.png", selfDirect)).status).toBe(400);
+    expect(selfDirect.calls).toHaveLength(0);
+
+    const selfHop = fake([
+      ["https://example.com/self.png", redirect(302, "https://notes.test/api/files/f1/blob")],
+    ]);
+    expect((await image("https://example.com/self.png", selfHop)).status).toBe(400);
+    expect(selfHop.calls).toHaveLength(1);
   });
 
   it("needs_a_session", async () => {

@@ -75,4 +75,29 @@ describe("mountSvgInShadow", () => {
     expect(host.shadowRoot!.querySelector("g")!.hasAttribute("onclick")).toBe(false);
     expect(() => mountSvgInShadow(host, "<p>nope</p>", "")).toThrow();
   });
+
+  it("drops <foreignObject> and unsafe href/xlink:href schemes while preserving safe links", () => {
+    const host = document.createElement("div");
+    const svg =
+      '<svg xmlns:xlink="http://www.w3.org/1999/xlink">' +
+      "<foreignObject><div>injected</div></foreignObject>" +
+      '<a id="bad-js" href="javascript:alert(1)"></a>' +
+      '<a id="bad-ws" href=" \t\nJaVaScRiPt:alert(1)"></a>' +
+      '<a id="bad-data" xlink:href="data:text/html,boom"></a>' +
+      '<a id="bad-vb" href="vbscript:msgbox(1)"></a>' +
+      '<a id="safe-https" href="https://example.com"></a>' +
+      '<use id="safe-hash" xlink:href="#shape"></use>' +
+      "</svg>";
+
+    mountSvgInShadow(host, svg, "");
+
+    const shadow = host.shadowRoot!;
+    expect(shadow.querySelector("foreignObject")).toBeNull();
+    expect(shadow.querySelector("#bad-js")!.hasAttribute("href")).toBe(false);
+    expect(shadow.querySelector("#bad-ws")!.hasAttribute("href")).toBe(false);
+    expect(shadow.querySelector("#bad-data")!.hasAttribute("xlink:href")).toBe(false);
+    expect(shadow.querySelector("#bad-vb")!.hasAttribute("href")).toBe(false);
+    expect(shadow.querySelector("#safe-https")!.getAttribute("href")).toBe("https://example.com");
+    expect(shadow.querySelector("#safe-hash")!.getAttribute("xlink:href")).toBe("#shape");
+  });
 });

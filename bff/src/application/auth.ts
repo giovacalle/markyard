@@ -254,6 +254,12 @@ export const authorized = (
     const plaintext = yield* (yield* CookieSealer).unseal(raw);
     const session = plaintext === undefined ? undefined : decodeSession(parseJson(plaintext));
     if (session === undefined) return yield* sessionEnded;
+    if (
+      !config.allowAllEmails &&
+      !config.allowedEmails.includes(asciiLower(session.email.trim()))
+    ) {
+      return yield* sessionEnded;
+    }
 
     const entropy = yield* Entropy;
     const now = yield* entropy.nowSeconds;

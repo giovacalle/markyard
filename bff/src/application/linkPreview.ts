@@ -35,7 +35,7 @@ import {
 } from "../domain/linkPreview.ts";
 import { parseContentLength } from "../domain/files.ts";
 import { byteCapped } from "../infrastructure/streams.ts";
-import { ResponseSink, Upstream } from "./ports.ts";
+import { AppConfig, ResponseSink, Upstream } from "./ports.ts";
 
 export const BLOCKED_URL = "The link must be a public http or https URL.";
 export const NOT_A_PREVIEW_IMAGE = "Only PNG, JPEG, WebP, GIF and ICO images can be previewed.";
@@ -53,8 +53,20 @@ const discard = (response: Response): void => {
     response.body.cancel().catch(() => undefined);
 };
 
-const guarded = (raw: string | null): Effect.Effect<URL, InvalidRequest> => {
-  const url = validatePublicUrl(raw);
+/** The normalized origin of `PUBLIC_ORIGIN`, never fetched by the previewer to avoid self-loops. */
+const ownOrigin: Effect.Effect<string, never, AppConfig> = Effect.map(AppConfig, (config) => {
+  try {
+    return new URL(config.publicOrigin).origin;
+  } catch {
+    return config.publicOrigin;
+  }
+});
+
+const guarded = (
+  raw: string | null,
+  disallowedOrigin: string,
+): Effect.Effect<URL, InvalidRequest> => {
+  const url = validatePublicUrl(raw, disallowedOrigin);
   return url === undefined ? Effect.fail(invalidRequest(BLOCKED_URL)) : Effect.succeed(url);
 };
 
@@ -72,11 +84,12 @@ export interface Fetched {
 export const safeFetch = (
   start: URL,
   accept: string,
-): Effect.Effect<Fetched, FetchFailure, Upstream> =>
+): Effect.Effect<Fetched, FetchFailure, AppConfig | Upstream> =>
   Effect.gen(function* () {
     const upstream = yield* Upstream;
+    const selfOrigin = yield* ownOrigin;
     const signal = AbortSignal.timeout(FETCH_TIMEOUT_MS);
-    let current = start;
+    let current = yield* guarded(start.href, selfOrigin);
     for (let hop = 0; ; hop++) {
       const response = yield* upstream
         .send(
@@ -99,7 +112,7 @@ export const safeFetch = (
         } catch {
           return yield* Effect.fail(invalidRequest(BLOCKED_URL));
         }
-        current = yield* guarded(next);
+        current = yield* guarded(next, selfOrigin);
         continue;
       }
       if (response.status >= 200 && response.status < 300) return { response, finalUrl: current };
@@ -167,9 +180,10 @@ export interface LinkPreview extends HeadMetadata {
  */
 export const linkPreview = (
   rawUrl: string | null,
-): Effect.Effect<LinkPreview, FetchFailure, Upstream | ResponseSink> =>
+): Effect.Effect<LinkPreview, FetchFailure, AppConfig | Upstream | ResponseSink> =>
   Effect.gen(function* () {
-    const url = yield* guarded(rawUrl);
+    const selfOrigin = yield* ownOrigin;
+    const url = yield* guarded(rawUrl, selfOrigin);
     const { response, finalUrl } = yield* safeFetch(url, HTML_ACCEPT);
     const base = { url: url.href, finalUrl: finalUrl.href, hostname: finalUrl.hostname };
     const contentType = response.headers.get("content-type");
@@ -178,7 +192,7 @@ export const linkPreview = (
       discard(response);
     } else {
       const head = yield* readHead(response.body, decoderFor(contentType));
-      preview = { ...base, ...parseHeadMetadata(head, finalUrl.href) };
+      preview = { ...base, ...parseHeadMetadata(head, finalUrl.href, selfOrigin) };
     }
     (yield* ResponseSink).setHeader("cache-control", PREVIEW_CACHE_CONTROL);
     return preview;
@@ -197,9 +211,10 @@ export interface PreviewImage {
  */
 export const previewImage = (
   rawUrl: string | null,
-): Effect.Effect<PreviewImage, FetchFailure | TooLarge, Upstream> =>
+): Effect.Effect<PreviewImage, FetchFailure | TooLarge, AppConfig | Upstream> =>
   Effect.gen(function* () {
-    const url = yield* guarded(rawUrl);
+    const selfOrigin = yield* ownOrigin;
+    const url = yield* guarded(rawUrl, selfOrigin);
     const { response } = yield* safeFetch(url, IMAGE_ACCEPT);
     const mimeType = previewImageMimeOf(response.headers.get("content-type"));
     if (mimeType === undefined) {

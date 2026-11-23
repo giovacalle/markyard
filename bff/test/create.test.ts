@@ -270,6 +270,32 @@ describe("create", () => {
     expect(google.calls).toEqual([]);
   });
 
+  it("create_rejects_oversized_json_stream_before_buffering_unbounded_bytes", async () => {
+    const google = new FakeGoogle();
+    let cancelled = false;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.enqueue(new Uint8Array(1024).fill(0x78));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const req = request("POST", "/api/folders/folder-1/files", {
+      cookie: await signedInCookie(),
+      headers: {
+        "content-type": "application/json",
+        "content-length": String(50_000_000),
+      },
+      body: stream,
+    });
+    const res = await send(req, { google });
+    expect(res.status).toBe(413);
+    expect(((await res.json()) as Record<string, unknown>)["code"]).toBe("too_large");
+    expect(cancelled).toBe(true);
+    expect(google.calls).toEqual([]);
+  });
+
   it("create_in_missing_non_folder_or_trashed_folder_is_404", async () => {
     const cookie = await signedInCookie();
     const cases: Array<Scripted> = [

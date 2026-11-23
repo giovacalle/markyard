@@ -7,7 +7,7 @@ import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder";
 
 import { trashFile, updateFile } from "../../application/files.ts";
 import { Api } from "../api.ts";
-import { accessToken, pathId, vaultAccess, webRequest } from "../request.ts";
+import { accessToken, bodyBytes, pathId, vaultAccess } from "../request.ts";
 
 const PREFIX = "/api/files/";
 
@@ -16,9 +16,7 @@ export const FilesLive = HttpApiBuilder.group(Api, "files", (handlers) =>
     .handleRaw("updateFile", () =>
       Effect.gen(function* () {
         const { token, rootFolderId } = yield* vaultAccess;
-        const request = yield* webRequest;
-        const body = new Uint8Array(yield* Effect.promise(() => request.arrayBuffer()));
-        return yield* updateFile(token, rootFolderId, yield* pathId(PREFIX), body);
+        return yield* updateFile(token, rootFolderId, yield* pathId(PREFIX), yield* bodyBytes);
       }),
     )
     .handle("deleteFile", () =>

@@ -6,6 +6,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { sealSession } from "../src/application/auth.ts";
 import { CookieSealer } from "../src/application/ports.ts";
 import { encodeSession, MAX_COOKIE_NAME_VALUE_BYTES } from "../src/domain/session.ts";
+import { page } from "../src/http/routes/auth-pages.ts";
 import { importKeyring, makeCookieSealer } from "../src/infrastructure/cookie-seal.ts";
 
 import {
@@ -472,6 +473,54 @@ describe("session", () => {
       expect(urlLeaks(google, [AT, RT])).toEqual([]);
     }
   });
+
+  it("removing_email_from_allowed_emails_invalidates_active_and_expired_sessions", async () => {
+    const freshCookie = await sessionCookie(storedSession(NOW + 3600));
+    const expiredCookie = await sessionCookie(storedSession(NOW - 10));
+    const env = testEnv({ ALLOWED_EMAILS: "other@example.com" });
+
+    for (const [label, cookie] of [
+      ["fresh", freshCookie],
+      ["expired", expiredCookie],
+    ] as const) {
+      const google = new FakeGoogle();
+      const res = await send(sessionReq(cookie), { google, env });
+
+      expect(res.status, label).toBe(401);
+      expect(await res.clone().json(), label).toEqual(SESSION_ENDED);
+      expect(setCookies(res), label).toEqual([CLEAR_SESSION]);
+      expect(google.calls, label).toEqual([]);
+    }
+  });
+
+  it("allowed_emails_check_on_active_session_is_case_insensitive_and_honors_wildcard", async () => {
+    const mixedCaseCookie = await sessionCookie({
+      ...storedSession(NOW + 3600),
+      email: "Owner@Example.COM",
+    });
+    const resCase = await send(sessionReq(mixedCaseCookie), {
+      env: testEnv({ ALLOWED_EMAILS: "owner@example.com" }),
+    });
+    expect(resCase.status).toBe(200);
+
+    const anyCookie = await sessionCookie({
+      ...storedSession(NOW + 3600),
+      email: "anyone@example.com",
+    });
+    const resWildcard = await send(sessionReq(anyCookie), {
+      env: testEnv({ ALLOWED_EMAILS: "*" }),
+    });
+    expect(resWildcard.status).toBe(200);
+  });
+
+  it("auth_error_page_escapes_html_metacharacters", async () => {
+    const res = page(400, 'Bad <script>"title"</script>', "Msg & 'quotes' > <img src=x>", []);
+    const body = await res.text();
+    expect(body).toContain("<title>Bad &lt;script&gt;&quot;title&quot;&lt;/script&gt;</title>");
+    expect(body).toContain("<p>Msg &amp; &#39;quotes&#39; &gt; &lt;img src=x&gt;</p>");
+    expect(body).not.toContain("<script>");
+    expect(body).not.toContain("<img");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -515,6 +564,7 @@ describe("same-origin and logout", () => {
       expect(res.status).toBe(204);
       expect(await res.text()).toBe("");
       expect(setCookies(res)).toEqual([CLEAR_SESSION]);
+      expect(res.headers.get("clear-site-data")).toBe('"cache"');
       expect(google.calls).toEqual([]);
     }
   });
@@ -524,6 +574,7 @@ describe("same-origin and logout", () => {
 
     expect(res.status).toBe(204);
     expect(setCookies(res)).toEqual([CLEAR_SESSION]);
+    expect(res.headers.get("clear-site-data")).toBe('"cache"');
   });
 });
 

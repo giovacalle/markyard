@@ -8,6 +8,14 @@ import { callback, CLEAR_STATE_COOKIE, login } from "../../application/auth.ts";
 import { webRequest } from "../request.ts";
 import { respond } from "./respond.ts";
 
+const escapeHtml = (text: string): string =>
+  text
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+
 /** A small static HTML page for top-level navigations. It never echoes upstream content. */
 export const page = (
   status: number,
@@ -15,9 +23,11 @@ export const page = (
   message: string,
   cookies: ReadonlyArray<string>,
 ): Response => {
+  const safeTitle = escapeHtml(title);
+  const safeMessage = escapeHtml(message);
   const html =
-    `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${title}</title></head>` +
-    `<body><h1>${title}</h1><p>${message}</p><p><a href="/">Back to Markyard</a></p></body></html>`;
+    `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${safeTitle}</title></head>` +
+    `<body><h1>${safeTitle}</h1><p>${safeMessage}</p><p><a href="/">Back to Markyard</a></p></body></html>`;
   const headers = new Headers({ "content-type": "text/html; charset=utf-8" });
   for (const cookie of cookies) headers.append("set-cookie", cookie);
   return new Response(html, { status, headers });

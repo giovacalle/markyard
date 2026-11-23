@@ -4,14 +4,23 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vite-plus/test";
 
-import { CSP, misconfigured, NO_STORE_NO_TRANSFORM, NOSNIFF } from "../src/http/app.ts";
+import {
+  CSP,
+  misconfigured,
+  NO_STORE_NO_TRANSFORM,
+  NOSNIFF,
+  PERMISSIONS_POLICY,
+  REFERRER_POLICY,
+} from "../src/http/app.ts";
 import { FakeGoogle, get, send } from "./support/harness.ts";
 
 const expectSecurityHeaders = (res: Response) => {
   expect(res.headers.get("content-security-policy")).toBe(
-    "default-src 'self'; script-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+    "default-src 'self'; script-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
   );
   expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+  expect(res.headers.get("referrer-policy")).toBe("no-referrer");
+  expect(res.headers.get("permissions-policy")).toBe("camera=(), microphone=(), geolocation=()");
   expect(res.headers.get("cache-control")).toBe(NO_STORE_NO_TRANSFORM);
 };
 
@@ -41,7 +50,7 @@ describe("lib", () => {
   it("static_headers_file_matches_core_security_headers", () => {
     const raw = readFileSync(new URL("../../web/public/_headers", import.meta.url), "utf8");
     expect(raw).toBe(
-      `/*\n  Content-Security-Policy: ${CSP}\n  X-Content-Type-Options: ${NOSNIFF}\n`,
+      `/*\n  Content-Security-Policy: ${CSP}\n  X-Content-Type-Options: ${NOSNIFF}\n  Referrer-Policy: ${REFERRER_POLICY}\n  Permissions-Policy: ${PERMISSIONS_POLICY}\n`,
     );
   });
 

@@ -44,7 +44,10 @@ const NUMERIC_LABEL = /^(?:0x[0-9a-f]*|[0-9]+)$/i;
  * standard ones, IP literals of any form, single-label and trailing-dot names, and private names
  * (`localhost`, `*.localhost`, `*.local`, `*.internal`, `*.home.arpa`).
  */
-export const validatePublicUrl = (raw: string | null | undefined): URL | undefined => {
+export const validatePublicUrl = (
+  raw: string | null | undefined,
+  disallowedOrigin?: string,
+): URL | undefined => {
   if (raw === null || raw === undefined || raw.trim() === "") return undefined;
   let url: URL;
   try {
@@ -55,6 +58,7 @@ export const validatePublicUrl = (raw: string | null | undefined): URL | undefin
   if (url.protocol !== "http:" && url.protocol !== "https:") return undefined;
   if (url.username !== "" || url.password !== "") return undefined;
   if (!STANDARD_PORTS.has(url.port)) return undefined;
+  if (disallowedOrigin !== undefined && url.origin === disallowedOrigin) return undefined;
   const host = asciiLower(url.hostname);
   // IPv6 literals are bracketed; the parser turns every IPv4 form into a dotted quad.
   if (host === "" || host.includes("[") || host.includes(":")) return undefined;
@@ -215,14 +219,18 @@ const firstText = (
 const isSvgPath = (url: URL): boolean => /\.svgz?$/i.test(url.pathname);
 
 /** A reference resolved against the page and passed through the SSRF guard; never SVG. */
-const resolvePublic = (reference: string, base: string): URL | undefined => {
+const resolvePublic = (
+  reference: string,
+  base: string,
+  disallowedOrigin?: string,
+): URL | undefined => {
   let resolved: URL;
   try {
     resolved = new URL(reference.trim(), base);
   } catch {
     return undefined;
   }
-  const url = validatePublicUrl(resolved.href);
+  const url = validatePublicUrl(resolved.href, disallowedOrigin);
   return url === undefined || isSvgPath(url) ? undefined : url;
 };
 
@@ -242,7 +250,7 @@ const RASTER_ICON_PATH = /\.(?:png|ico|webp|jpe?g|gif)$/i;
  * `apple-touch-icon`, an icon known to be raster (by `type` or extension) before an unknown one,
  * document order otherwise. A `type` mentioning SVG or a `.svg` path is skipped.
  */
-const favicon = (html: string, base: string): URL | undefined => {
+const favicon = (html: string, base: string, disallowedOrigin?: string): URL | undefined => {
   const candidates: Array<{ url: URL; rank: number; index: number }> = [];
   tagsOf(html, "link").forEach((attributes, index) => {
     const rel = asciiLower(attributes.get("rel") ?? "").split(/\s+/);
@@ -254,7 +262,7 @@ const favicon = (html: string, base: string): URL | undefined => {
     if (type.includes("svg")) return;
     const href = attributes.get("href");
     if (href === undefined || href.trim() === "") return;
-    const url = resolvePublic(href, base);
+    const url = resolvePublic(href, base, disallowedOrigin);
     if (url === undefined) return;
     const raster = RASTER_ICON_TYPE.test(type) || RASTER_ICON_PATH.test(url.pathname);
     candidates.push({ url, rank: (isIcon ? 0 : 2) + (raster ? 0 : 1), index });
@@ -264,7 +272,11 @@ const favicon = (html: string, base: string): URL | undefined => {
 };
 
 /** The preview fields of a page's `<head>` HTML, fetched from `finalUrl`. */
-export const parseHeadMetadata = (html: string, finalUrl: string): HeadMetadata => {
+export const parseHeadMetadata = (
+  html: string,
+  finalUrl: string,
+  disallowedOrigin?: string,
+): HeadMetadata => {
   const head = stripOpaque(html);
   const meta = metaContents(head);
   const title = firstText(
@@ -279,10 +291,11 @@ export const parseHeadMetadata = (html: string, finalUrl: string): HeadMetadata 
   let image: URL | undefined;
   for (const key of IMAGE_KEYS) {
     const reference = meta.get(key);
-    image = reference === undefined ? undefined : resolvePublic(reference, finalUrl);
+    image =
+      reference === undefined ? undefined : resolvePublic(reference, finalUrl, disallowedOrigin);
     if (image !== undefined) break;
   }
-  const icon = favicon(head, finalUrl);
+  const icon = favicon(head, finalUrl, disallowedOrigin);
   return {
     ...(title === undefined ? {} : { title }),
     ...(description === undefined ? {} : { description }),
