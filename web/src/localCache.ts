@@ -342,10 +342,31 @@ export function writeCachedFile(fileId: string, text: string, revision: string):
 }
 
 /**
- * Updates the stored Drive revision for `fileId` across both `files` and `outbox` (e.g. after a
- * metadata-only rename bumps Drive's v2 ETag without changing the file's text).
+ * Updates the stored Drive revision for `fileId` in `files` only when no pending write exists in
+ * `outbox`. Returns `true` when the file was clean (no outbox entry), or `false` if an outbox
+ * entry prevented updating.
  */
-export function updateCachedFileRevision(fileId: string, revision: string): Promise<void> {
+export function updateCachedFileRevision(fileId: string, revision: string): Promise<boolean> {
+  return safe(async (db) => {
+    return await db.transaction("rw", [db.files, db.outbox], async () => {
+      const existingPending = await db.outbox.get(fileId);
+      if (existingPending !== undefined) {
+        return false;
+      }
+      const existingFile = await db.files.get(fileId);
+      if (existingFile !== undefined) {
+        await db.files.put({ ...existingFile, revision, updatedAt: Date.now() });
+      }
+      return true;
+    });
+  }, true);
+}
+
+/**
+ * Rebases both `files` and `outbox` for `fileId` onto `revision` after confirming Drive's current
+ * text still matches the queued edit's `baseText` (e.g. a metadata-only tag bump).
+ */
+export function rebasePendingWrite(fileId: string, revision: string): Promise<void> {
   return safe(async (db) => {
     await db.transaction("rw", [db.files, db.outbox], async () => {
       const now = Date.now();
@@ -394,6 +415,23 @@ export function writeCachedRemoteFile(
   }, undefined);
 }
 
+/**
+ * Removes a cached file from `files` only when no unsynced local write is pending for it.
+ * Returns the pending write if one prevented deletion.
+ */
+export function deleteCachedRemoteFile(fileId: string): Promise<PendingWrite | undefined> {
+  return safe(async (db) => {
+    return await db.transaction("rw", [db.files, db.outbox], async () => {
+      const pending = await db.outbox.get(fileId);
+      if (pending !== undefined) {
+        return pending;
+      }
+      await db.files.delete(fileId);
+      return undefined;
+    });
+  }, undefined);
+}
+
 export function deleteCachedFile(fileId: string): Promise<void> {
   return safe(async (db) => {
     await db.transaction("rw", [db.files, db.outbox], async () => {
@@ -415,6 +453,68 @@ export function deleteCachedFolderTree(folderIds: string[], fileIds: string[]): 
       }
     });
   }, undefined);
+}
+
+/**
+ * Walks cached folder listings in IndexedDB starting from `rootFolderId` (and any `knownFolderIds`),
+ * deletes the entire subtree's folders, cached files, and pending outbox entries atomically, and
+ * returns all deleted folder and file ids.
+ */
+export function deleteCachedSubtree(
+  rootFolderId: string,
+  knownFolderIds: readonly string[] = [],
+  knownFileIds: readonly string[] = [],
+): Promise<{ folderIds: string[]; fileIds: string[] }> {
+  const fallback = {
+    folderIds: Array.from(new Set([rootFolderId, ...knownFolderIds])),
+    fileIds: Array.from(new Set(knownFileIds)),
+  };
+  return safe(async (db) => {
+    return await db.transaction("rw", [db.folders, db.files, db.outbox], async () => {
+      const cachedFolders = await db.folders.toArray();
+      const byFolder = new Map<string, DriveNode[]>();
+      for (const folder of cachedFolders) {
+        byFolder.set(folder.folderId, folder.nodes);
+      }
+
+      const folderSet = new Set<string>();
+      const fileSet = new Set<string>(knownFileIds);
+
+      const walk = (id: string) => {
+        if (folderSet.has(id)) {
+          return;
+        }
+        folderSet.add(id);
+        const nodes = byFolder.get(id);
+        if (nodes === undefined) {
+          return;
+        }
+        for (const child of nodes) {
+          if (child.kind === "folder") {
+            walk(child.id);
+          } else {
+            fileSet.add(child.id);
+          }
+        }
+      };
+
+      walk(rootFolderId);
+      for (const id of knownFolderIds) {
+        walk(id);
+      }
+
+      const folderIds = Array.from(folderSet);
+      const fileIds = Array.from(fileSet);
+      if (folderIds.length > 0) {
+        await db.folders.bulkDelete(folderIds);
+      }
+      if (fileIds.length > 0) {
+        await db.files.bulkDelete(fileIds);
+        await db.outbox.bulkDelete(fileIds);
+      }
+      return { folderIds, fileIds };
+    });
+  }, fallback);
 }
 
 export function readPendingWrite(fileId: string): Promise<PendingWrite | undefined> {
@@ -500,6 +600,41 @@ export function deletePendingWrite(fileId: string): Promise<void> {
 }
 
 /**
+ * Deletes a pending write from `outbox` and reverts `files` back to its `baseText`/`baseRevision`
+ * (or deletes the cached file row when no `baseText` was recorded).
+ */
+export function discardPendingWrite(
+  fileId: string,
+): Promise<{ reverted: { text: string; revision: string } | null; hadPending: boolean }> {
+  return safe(
+    async (db) => {
+      return await db.transaction("rw", [db.files, db.outbox], async () => {
+        const pending = await db.outbox.get(fileId);
+        if (pending === undefined) {
+          return { reverted: null, hadPending: false };
+        }
+        await db.outbox.delete(fileId);
+        if (pending.baseText !== undefined) {
+          await db.files.put({
+            fileId,
+            text: pending.baseText,
+            revision: pending.baseRevision,
+            updatedAt: Date.now(),
+          });
+          return {
+            reverted: { text: pending.baseText, revision: pending.baseRevision },
+            hadPending: true,
+          };
+        }
+        await db.files.delete(fileId);
+        return { reverted: null, hadPending: true };
+      });
+    },
+    { reverted: null, hadPending: false },
+  );
+}
+
+/**
  * Forgets the current vault's cached folders, notes, pending edits and Drive cursors while keeping
  * the signed-in account (vault switch). The cloud state stamp goes too, so the new vault adopts the
  * cloud's state.
@@ -536,19 +671,30 @@ export function clearLocalCache(): Promise<void> {
  * Seeds React Query with locally cached data (marked stale via `CACHE_STALE_TIMESTAMP`) without
  * overwriting any data that has already arrived from the network, so the UI opens immediately
  * from IndexedDB while still revalidating against Drive in the background.
+ * Returns the cached `Session` when one exists, or `null` otherwise.
  */
 export async function hydrateQueryClient(
   queryClient: QueryClient,
   openFileId: string | null,
-): Promise<boolean> {
+  options?: { preserveOnUnauthenticated?: boolean },
+): Promise<Session | null> {
   const account = await readCachedAccount();
   if (account === undefined) {
-    return false;
+    return null;
   }
 
-  const seedIfEmpty = <T>(key: readonly unknown[], value: T) => {
+  const preserveOnUnauthenticated = options?.preserveOnUnauthenticated === true;
+
+  const seedIfEmpty = <T>(
+    key: readonly unknown[],
+    value: T,
+    allowWhenUnauthenticated = preserveOnUnauthenticated,
+  ) => {
     const state = queryClient.getQueryState(key);
-    if (state?.data !== undefined || isUnauthenticated(state?.error)) {
+    if (
+      state?.data !== undefined ||
+      (!allowWhenUnauthenticated && isUnauthenticated(state?.error))
+    ) {
       return;
     }
     queryClient.setQueryData(key, value, { updatedAt: CACHE_STALE_TIMESTAMP });
@@ -559,7 +705,9 @@ export async function hydrateQueryClient(
     ...(account.name !== undefined ? { name: account.name } : {}),
     ...(account.cloudSync === true ? { cloudSync: true } : {}),
   };
-  seedIfEmpty(["session"], session);
+  // Never clear an already-recorded 401 error on `["session"]`: the caller receives `session`
+  // directly so it can keep unsynced work visible while still showing the session-ended banner.
+  seedIfEmpty(["session"], session, false);
   if (account.root !== null) {
     seedIfEmpty(["root"], account.root);
   }
@@ -576,7 +724,7 @@ export async function hydrateQueryClient(
     seedIfEmpty(["files", openFileId, "content"], file);
   }
 
-  return true;
+  return session;
 }
 
 /**

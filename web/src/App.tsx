@@ -78,7 +78,7 @@ import {
   clearLocalCache,
   clearVaultCache,
   deleteCachedFile,
-  deleteCachedFolderTree,
+  deleteCachedSubtree,
   hydrateQueryClient,
   removeCachedChild,
   renameCachedChild,
@@ -568,11 +568,31 @@ function SessionContent({
     }
   }, [openFileId]);
 
+  const [hydrateState, setHydrateState] = useState<{
+    ready: boolean;
+    cachedSession: Session | null;
+  }>({ ready: false, cachedSession: null });
+
   useEffect(() => {
-    void hydrateQueryClient(queryClient, openFileId);
+    let active = true;
+    void (async () => {
+      // Load persisted outbox entries into SyncQueue first so pendingSyncCount is populated before
+      // any 401 response can decide whether to wipe local state.
+      await syncQueue.hydrate(false);
+      const hasPending = syncQueue.getSnapshot().pendingCount > 0;
+      const cachedSession = await hydrateQueryClient(queryClient, openFileId, {
+        preserveOnUnauthenticated: hasPending,
+      });
+      if (active) {
+        setHydrateState({ ready: true, cachedSession });
+      }
+    })();
+    return () => {
+      active = false;
+    };
     // Hydrate once on mount; subsequent opens read per-file cache in DocumentView.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [queryClient]);
+  }, [queryClient, syncQueue]);
 
   const { data, error, refetch } = useQuery({
     queryKey: ["session"],
@@ -582,10 +602,12 @@ function SessionContent({
       return session;
     },
   });
+  const hasUnsaved = dirty || pendingSyncCount > 0;
+  const session = data ?? (hasUnsaved ? (hydrateState.cachedSession ?? undefined) : undefined);
   const rootQuery = useQuery({
     queryKey: ["root"],
     queryFn: ({ signal }) => fetchAndCacheRoot(signal),
-    enabled: data !== undefined && data.needsVaultSetup !== true,
+    enabled: session !== undefined && session.needsVaultSetup !== true && !isUnauthenticated(error),
   });
 
   /**
@@ -625,23 +647,41 @@ function SessionContent({
     void resetVault(root);
   };
 
+  const clearLocalSession = () => {
+    syncQueue.resetAll();
+    driveChanges.reset();
+    vaultSync?.setPinned(false);
+    vaultSync?.reset();
+    clearRecentFiles();
+    forgetLastOpenFile();
+    clearExpandedFolders();
+    resetSettings();
+    setPaletteOpen(false);
+    setPaletteInitialQuery("");
+    setHydrateState({ ready: true, cachedSession: null });
+    void clearLocalCache();
+  };
+
   const signOutMutation = useMutation({
     mutationFn: signOut,
     onSuccess: () => {
-      syncQueue.resetAll();
-      driveChanges.reset();
-      vaultSync?.setPinned(false);
-      vaultSync?.reset();
-      clearRecentFiles();
-      forgetLastOpenFile();
-      clearExpandedFolders();
-      resetSettings();
-      setPaletteOpen(false);
-      setPaletteInitialQuery("");
-      void clearLocalCache();
+      clearLocalSession();
       void queryClient.resetQueries({ queryKey: ["session"] });
     },
   });
+
+  const handleClearLocalData = () => {
+    if (
+      hasUnsaved &&
+      !window.confirm("You have unsynced changes on this device. Clear local data anyway?")
+    ) {
+      return;
+    }
+    clearLocalSession();
+    signOutMutation.reset();
+    queryClient.clear();
+    void queryClient.resetQueries({ queryKey: ["session"] });
+  };
 
   const createNoteMutation = useMutation({
     mutationFn: async (input: CreateNoteInput) => {
@@ -707,11 +747,11 @@ function SessionContent({
     },
   });
 
-  const sessionEndedWithUnsaved = isUnauthenticated(error) && dirty && data !== undefined;
-  const isSignedOut = isUnauthenticated(error) && !sessionEndedWithUnsaved;
+  const sessionEndedWithUnsaved = isUnauthenticated(error) && hasUnsaved && session !== undefined;
+  const isSignedOut = isUnauthenticated(error) && hydrateState.ready && !sessionEndedWithUnsaved;
 
   useCloudStateSync({
-    enabled: data?.cloudSync === true && !isSignedOut,
+    enabled: data?.cloudSync === true && !isSignedOut && !isUnauthenticated(error),
     rootFolderId: rootQuery.data?.id,
     setTheme: onThemeChange,
   });
@@ -734,7 +774,7 @@ function SessionContent({
 
   // Global keyboard shortcuts: Cmd/Ctrl+K (Command Palette) and Cmd/Ctrl+\ (Toggle sidebar).
   useEffect(() => {
-    if (data === undefined || isSignedOut) {
+    if (session === undefined || isSignedOut) {
       return;
     }
     const handleGlobalKeyDown = (event: KeyboardEvent) => {
@@ -758,10 +798,10 @@ function SessionContent({
     };
     window.addEventListener("keydown", handleGlobalKeyDown, true);
     return () => window.removeEventListener("keydown", handleGlobalKeyDown, true);
-  }, [data, isSignedOut]);
+  }, [session, isSignedOut]);
 
   useEffect(() => {
-    if (data !== undefined && !isSignedOut) {
+    if (data !== undefined && !isSignedOut && !isUnauthenticated(error)) {
       void requestPersistentStorage();
       void syncQueue.hydrate(true);
       void driveChanges.hydrate();
@@ -772,9 +812,12 @@ function SessionContent({
         }
       }
     }
-  }, [data, isSignedOut, syncQueue, driveChanges, vaultSync]);
+  }, [data, error, isSignedOut, syncQueue, driveChanges, vaultSync]);
 
-  useDriveChangesPolling(driveChanges, data !== undefined && !isSignedOut && rootQuery.isSuccess);
+  useDriveChangesPolling(
+    driveChanges,
+    data !== undefined && !isSignedOut && !isUnauthenticated(error) && rootQuery.isSuccess,
+  );
 
   useEffect(() => {
     const handleOnline = () => {
@@ -787,14 +830,18 @@ function SessionContent({
 
   if (isSignedOut) {
     // With cached data, the 401 came after being signed in: say so.
-    return <SignIn ended={isSessionEnded(error) || data !== undefined} />;
+    return (
+      <SignIn
+        ended={isSessionEnded(error) || data !== undefined || hydrateState.cachedSession !== null}
+      />
+    );
   }
 
-  if (data?.needsVaultSetup === true) {
+  if (session?.needsVaultSetup === true) {
     return (
       <VaultOnboarding
-        email={data.email}
-        name={data.name}
+        email={session.email}
+        name={session.name}
         signingOut={signOutMutation.isPending}
         onSignOut={() => signOutMutation.mutate()}
         onPicked={handleVaultPicked}
@@ -802,7 +849,7 @@ function SessionContent({
     );
   }
 
-  if (data !== undefined) {
+  if (session !== undefined) {
     const isOffline = !online || networkOffline;
     const offlineMessage = isOffline
       ? pendingSyncCount > 0
@@ -953,7 +1000,7 @@ function SessionContent({
     };
 
     const handleDeleted = (fileId: string) => {
-      void syncQueue.discardFile(fileId);
+      void syncQueue.cancelDeletedFile(fileId);
       removeRecentFile(fileId);
       removeChild(queryClient, fileId);
       void removeCachedChild(fileId);
@@ -1010,23 +1057,45 @@ function SessionContent({
 
     const handleFolderDeleted = (folderId: string) => {
       const { folderIds, fileIds } = collectDescendantIds(queryClient, folderId);
+      const seenFiles = new Set(fileIds);
+      const seenFolders = new Set(folderIds);
       removeChild(queryClient, folderId);
       void removeCachedChild(folderId);
       for (const fileId of fileIds) {
-        void syncQueue.discardFile(fileId);
+        void syncQueue.cancelDeletedFile(fileId);
         removeRecentFile(fileId);
         queryClient.removeQueries({ queryKey: ["files", fileId, "content"] });
       }
       for (const dirId of folderIds) {
         queryClient.removeQueries({ queryKey: childrenKey(dirId) });
       }
-      void deleteCachedFolderTree(folderIds, fileIds);
-      if (createdFile !== null && fileIds.includes(createdFile.id)) {
+      if (createdFile !== null && seenFiles.has(createdFile.id)) {
         setCreatedFile(null);
       }
-      if (openFileId !== null && fileIds.includes(openFileId)) {
+      if (openFileId !== null && seenFiles.has(openFileId)) {
         openFile(null);
       }
+      void deleteCachedSubtree(folderId, folderIds, fileIds).then((deleted) => {
+        for (const fileId of deleted.fileIds) {
+          if (seenFiles.has(fileId)) {
+            continue;
+          }
+          void syncQueue.cancelDeletedFile(fileId);
+          removeRecentFile(fileId);
+          queryClient.removeQueries({ queryKey: ["files", fileId, "content"] });
+          if (createdFile?.id === fileId) {
+            setCreatedFile(null);
+          }
+          if (openFileId === fileId) {
+            openFile(null);
+          }
+        }
+        for (const dirId of deleted.folderIds) {
+          if (!seenFolders.has(dirId)) {
+            queryClient.removeQueries({ queryKey: childrenKey(dirId) });
+          }
+        }
+      });
     };
 
     const handleDropMove = (node: DriveNode, targetFolderId: string) => {
@@ -1222,9 +1291,9 @@ function SessionContent({
               )}
 
               <AccountPopover
-                email={data.email}
-                name={data.name}
-                cloudSync={data.cloudSync}
+                email={session.email}
+                name={session.name}
+                cloudSync={session.cloudSync}
                 theme={theme}
                 onThemeChange={onThemeChange}
                 signingOut={signOutMutation.isPending}
@@ -1232,11 +1301,26 @@ function SessionContent({
                 onOpenSettings={() => setSettingsOpen(true)}
               />
 
-              {signOutMutation.isError && (
-                <p className="mt-2 px-2 text-xs text-red-600 dark:text-red-400" role="alert">
-                  Unable to sign out. Try again.
-                </p>
-              )}
+              {signOutMutation.isError &&
+                (signOutMutation.error instanceof TypeError ? (
+                  <div
+                    className="mt-2 space-y-1.5 rounded-lg border border-red-200 bg-red-50 p-2 text-xs text-red-700 dark:border-red-900/60 dark:bg-red-950/50 dark:text-red-300"
+                    role="alert"
+                  >
+                    <p>Unable to sign out while offline.</p>
+                    <button
+                      type="button"
+                      onClick={handleClearLocalData}
+                      className="font-medium text-red-800 underline dark:text-red-200"
+                    >
+                      Clear local data
+                    </button>
+                  </div>
+                ) : (
+                  <p className="mt-2 px-2 text-xs text-red-600 dark:text-red-400" role="alert">
+                    Unable to sign out. Try again.
+                  </p>
+                ))}
             </section>
           </aside>
 
@@ -1435,7 +1519,7 @@ function SessionContent({
             }}
             theme={theme}
             onThemeChange={onThemeChange}
-            cloudSync={data.cloudSync}
+            cloudSync={session.cloudSync}
             vaultPinned={vaultState.pinned}
             onPinVaultChange={vaultSync ? (pinned) => vaultSync.setPinned(pinned) : undefined}
             pendingSyncCount={pendingSyncCount}
@@ -1453,7 +1537,7 @@ function SessionContent({
     );
   }
 
-  if (error) {
+  if (error && !isUnauthenticated(error)) {
     return (
       <main className="flex min-h-dvh items-center justify-center bg-neutral-50 p-6 dark:bg-neutral-950">
         <section

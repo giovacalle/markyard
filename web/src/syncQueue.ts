@@ -17,10 +17,13 @@ import {
 import {
   completePendingWrite,
   deletePendingWrite,
+  discardPendingWrite,
   readAllPendingWrites,
   readPendingWrite,
+  rebasePendingWrite,
   updateCachedFileRevision,
   upsertPendingWrite,
+  writeCachedFile,
   type PendingWrite,
 } from "./localCache";
 
@@ -67,6 +70,12 @@ type RemoteSnapshot = { text: string; revision: string };
 interface SyncSnapshot {
   byFile: ReadonlyMap<string, FileSyncState>;
   pendingCount: number;
+  discardVersions: ReadonlyMap<string, number>;
+}
+
+interface EpochToken {
+  global: number;
+  file: number;
 }
 
 export class SyncQueue {
@@ -76,16 +85,30 @@ export class SyncQueue {
   private readonly listeners = new Set<() => void>();
   private readonly states = new Map<string, FileSyncState>();
   private readonly inFlight = new Map<string, Promise<void>>();
+  private readonly inFlightControllers = new Map<string, AbortController>();
   private readonly renaming = new Map<string, Promise<void>>();
   private readonly writeChains = new Map<string, Promise<unknown>>();
   private readonly syncedRevisions = new Map<string, string>();
   /** Drive text that `syncedRevisions` names, when known (it becomes a queued edit's base text). */
   private readonly syncedTexts = new Map<string, string>();
+  /** Files whose `syncedRevisions` came from our own confirmed upload (safe for rapid chaining). */
+  private readonly syncedBySelf = new Set<string>();
+  /** Files explicitly deleted in this session; suppresses stale unmount flushes and late writes. */
+  private readonly deletedFiles = new Set<string>();
+  /** Bumped when a SyncInspector discard reverts a file so open sessions adopt the reverted text. */
+  private readonly discardVersions = new Map<string, number>();
   /** Bumped by every local write and acknowledged upload: stale background reads compare it. */
   private readonly generations = new Map<string, number>();
+  /** Global and per-file cancellation epochs: bumped by `resetAll`, `discardFile`, `cancelDeletedFile`. */
+  private globalEpoch = 0;
+  private readonly fileEpochs = new Map<string, number>();
   private readonly retryTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly retryAttempts = new Map<string, number>();
-  private snapshot: SyncSnapshot = { byFile: new Map(), pendingCount: 0 };
+  private snapshot: SyncSnapshot = {
+    byFile: new Map(),
+    pendingCount: 0,
+    discardVersions: new Map(),
+  };
   private disposed = false;
 
   constructor(
@@ -95,6 +118,54 @@ export class SyncQueue {
     this.queryClient = queryClient;
     this.onNetworkError = callbacks?.onNetworkError;
     this.onNetworkSuccess = callbacks?.onNetworkSuccess;
+  }
+
+  /** Monotonic counter bumped on `resetAll()` (sign-out / vault switch). */
+  get sessionEpoch(): number {
+    return this.globalEpoch;
+  }
+
+  /** Whether `fileId` was explicitly deleted in the current session. */
+  isDeleted(fileId: string): boolean {
+    return this.deletedFiles.has(fileId);
+  }
+
+  /** Monotonic discard counter for `fileId`, bumped when SyncInspector discards local edits. */
+  discardVersion(fileId: string): number {
+    return this.discardVersions.get(fileId) ?? 0;
+  }
+
+  private captureEpoch(fileId: string): EpochToken {
+    return { global: this.globalEpoch, file: this.fileEpochs.get(fileId) ?? 0 };
+  }
+
+  private isCurrent(fileId: string, token: EpochToken): boolean {
+    return (
+      !this.disposed &&
+      this.globalEpoch === token.global &&
+      (this.fileEpochs.get(fileId) ?? 0) === token.file
+    );
+  }
+
+  private bumpFileEpoch(fileId: string): void {
+    this.fileEpochs.set(fileId, (this.fileEpochs.get(fileId) ?? 0) + 1);
+  }
+
+  private abortInFlight(fileId: string): void {
+    const controller = this.inFlightControllers.get(fileId);
+    if (controller !== undefined) {
+      this.inFlightControllers.delete(fileId);
+      controller.abort();
+    }
+    this.inFlight.delete(fileId);
+  }
+
+  private abortAllInFlight(): void {
+    for (const controller of this.inFlightControllers.values()) {
+      controller.abort();
+    }
+    this.inFlightControllers.clear();
+    this.inFlight.clear();
   }
 
   subscribe = (listener: () => void): (() => void) => {
@@ -123,6 +194,7 @@ export class SyncQueue {
     this.snapshot = {
       byFile: new Map(this.states),
       pendingCount,
+      discardVersions: new Map(this.discardVersions),
     };
     for (const listener of this.listeners) {
       listener();
@@ -157,12 +229,22 @@ export class SyncQueue {
     this.generations.set(fileId, this.writeGeneration(fileId) + 1);
   }
 
-  private setSynced(fileId: string, revision: string, text: string | undefined): void {
+  private setSynced(
+    fileId: string,
+    revision: string,
+    text: string | undefined,
+    bySelf = false,
+  ): void {
     this.syncedRevisions.set(fileId, revision);
     if (text === undefined) {
       this.syncedTexts.delete(fileId);
     } else {
       this.syncedTexts.set(fileId, text);
+    }
+    if (bySelf) {
+      this.syncedBySelf.add(fileId);
+    } else {
+      this.syncedBySelf.delete(fileId);
     }
   }
 
@@ -193,6 +275,7 @@ export class SyncQueue {
     }
     this.retryAttempts.set(fileId, attempt);
     const delay = retryDelayMs(attempt, error);
+    const epoch = this.captureEpoch(fileId);
     this.setFileState(fileId, {
       status: "error",
       error,
@@ -202,7 +285,7 @@ export class SyncQueue {
       fileId,
       setTimeout(() => {
         this.retryTimers.delete(fileId);
-        if (!this.disposed) {
+        if (this.isCurrent(fileId, epoch)) {
           void this.flushFile(fileId, { force: true, automatic: true });
         }
       }, delay),
@@ -216,6 +299,8 @@ export class SyncQueue {
    */
   private async reconcile(
     entry: PendingWrite,
+    epoch: EpochToken,
+    signal?: AbortSignal,
   ): Promise<
     | { kind: "done"; remote: RemoteSnapshot }
     | { kind: "rebased" }
@@ -224,9 +309,12 @@ export class SyncQueue {
   > {
     let remote: RemoteSnapshot;
     try {
-      remote = await fetchContent(entry.fileId);
+      remote = await fetchContent(entry.fileId, signal);
     } catch (error) {
       return { kind: "unreachable", error };
+    }
+    if (!this.isCurrent(entry.fileId, epoch)) {
+      return { kind: "conflict" };
     }
     if (remote.revision.length === 0) {
       return { kind: "conflict" };
@@ -235,9 +323,12 @@ export class SyncQueue {
       return { kind: "done", remote };
     }
     if (entry.baseText !== undefined && remote.text === entry.baseText) {
-      await this.chainWrite(entry.fileId, () =>
-        updateCachedFileRevision(entry.fileId, remote.revision),
-      );
+      await this.chainWrite(entry.fileId, async () => {
+        if (!this.isCurrent(entry.fileId, epoch)) {
+          return;
+        }
+        await rebasePendingWrite(entry.fileId, remote.revision);
+      });
       return { kind: "rebased" };
     }
     return { kind: "conflict" };
@@ -260,12 +351,16 @@ export class SyncQueue {
    * background sync if online.
    */
   async hydrate(canSyncNow: boolean): Promise<void> {
+    const globalEpoch = this.globalEpoch;
     const entries = await readAllPendingWrites();
-    if (this.disposed || entries.length === 0) {
+    if (this.disposed || this.globalEpoch !== globalEpoch || entries.length === 0) {
       return;
     }
     let changed = false;
     for (const entry of entries) {
+      if (this.deletedFiles.has(entry.fileId)) {
+        continue;
+      }
       if (!this.states.has(entry.fileId)) {
         this.states.set(entry.fileId, { status: "pending" });
         changed = true;
@@ -288,23 +383,37 @@ export class SyncQueue {
     fallbackRevision: string,
     fallbackBaseText?: string,
   ): void {
-    if (this.disposed) {
+    if (this.disposed || this.deletedFiles.has(fileId)) {
       return;
     }
     const synced = this.syncedRevisions.get(fileId);
-    const revision = synced ?? fallbackRevision;
-    const baseText = synced !== undefined ? this.syncedTexts.get(fileId) : fallbackBaseText;
+    const syncedText = this.syncedTexts.get(fileId);
+    // Only inherit `syncedRevisions` when the caller has no tag, already names that tag, is
+    // chaining on our own confirmed upload, or proves its base text matches the observed remote
+    // revision. Otherwise keep the caller's tag so an unrelated background GET never masks a 412.
+    const canInheritSynced =
+      synced !== undefined &&
+      (fallbackRevision.length === 0 ||
+        synced === fallbackRevision ||
+        this.syncedBySelf.has(fileId) ||
+        (fallbackBaseText !== undefined && syncedText === fallbackBaseText));
+    const revision = canInheritSynced ? synced : fallbackRevision;
+    const baseText = canInheritSynced ? (syncedText ?? fallbackBaseText) : fallbackBaseText;
+    const epoch = this.captureEpoch(fileId);
     this.bumpGeneration(fileId);
     this.cancelRetry(fileId);
     this.retryAttempts.delete(fileId);
     this.queryClient.setQueryData(["files", fileId, "content"], { text, revision });
     this.setFileState(fileId, isOnline() ? { status: "syncing" } : { status: "pending" });
 
-    const writePromise = this.chainWrite(fileId, () =>
-      upsertPendingWrite(fileId, text, revision, baseText),
-    );
-    void writePromise.then(() => {
-      if (this.disposed) {
+    const writePromise = this.chainWrite(fileId, async () => {
+      if (!this.isCurrent(fileId, epoch)) {
+        return undefined;
+      }
+      return upsertPendingWrite(fileId, text, revision, baseText);
+    });
+    void writePromise.then((written) => {
+      if (written === undefined || !this.isCurrent(fileId, epoch)) {
         return;
       }
       if (isOnline()) {
@@ -321,31 +430,31 @@ export class SyncQueue {
    * overriding it later.
    */
   observeRemoteRevision(fileId: string, revision: string, text?: string): void {
-    if (this.disposed || revision.length === 0) {
+    if (this.disposed || this.deletedFiles.has(fileId) || revision.length === 0) {
       return;
     }
     if (this.inFlight.has(fileId) || this.renaming.has(fileId)) {
       return;
     }
     const state = this.states.get(fileId);
-    if (state?.status === "pending" || state?.status === "syncing") {
+    if (state?.status === "pending" || state?.status === "syncing" || state?.status === "error") {
       return;
     }
-    this.setSynced(fileId, revision, text);
+    this.setSynced(fileId, revision, text, false);
   }
 
   /**
    * Renames a file while serialized against any in-flight content upload for the same file, then
-   * propagates Drive's refreshed ETag to memory, IndexedDB (files + outbox), and React Query so
-   * the next save does not hit a false 412 conflict.
+   * propagates Drive's refreshed ETag for clean files. Files with pending/errored edits keep their
+   * outbox `baseRevision` so `reconcile()` verifies Drive's text before rebasing.
    */
   renameFile(fileId: string, name: string): Promise<{ node: DriveNode; revision: string }> {
     return this.patchMetadata(fileId, () => apiRenameFile(fileId, name));
   }
 
   /**
-   * Moves a file to another folder, serialized like a rename: Drive answers a fresh ETag for the
-   * same text, which every local copy adopts so the next save does not hit a false 412.
+   * Moves a file to another folder, serialized like a rename: clean files adopt Drive's fresh ETag,
+   * while queued/conflicted files keep their outbox `baseRevision` for safe reconciliation.
    */
   moveFile(fileId: string, parentId: string): Promise<{ node: DriveNode; revision: string }> {
     return this.patchMetadata(fileId, () => apiMoveFile(fileId, parentId));
@@ -374,15 +483,36 @@ export class SyncQueue {
         await activePut.catch(() => undefined);
       }
 
+      const epoch = this.captureEpoch(fileId);
       const result = await call();
-      if (!this.disposed && result.revision.length > 0) {
-        // A rename or move only touches metadata: the text that the fresh tag names is unchanged.
-        this.setSynced(fileId, result.revision, this.syncedTexts.get(fileId));
-        await this.chainWrite(fileId, () => updateCachedFileRevision(fileId, result.revision));
-        this.queryClient.setQueryData<{ text: string; revision: string }>(
-          ["files", fileId, "content"],
-          (prev) => (prev === undefined ? prev : { ...prev, revision: result.revision }),
-        );
+      if (this.isCurrent(fileId, epoch) && result.revision.length > 0) {
+        const state = this.states.get(fileId);
+        const hasQueued =
+          state?.status === "pending" || state?.status === "syncing" || state?.status === "error";
+        if (!hasQueued) {
+          const updatedClean = await this.chainWrite(fileId, async () => {
+            if (!this.isCurrent(fileId, epoch)) {
+              return false;
+            }
+            return updateCachedFileRevision(fileId, result.revision);
+          });
+          if (updatedClean && this.isCurrent(fileId, epoch)) {
+            const latest = this.states.get(fileId);
+            const stillClean =
+              latest?.status !== "pending" &&
+              latest?.status !== "syncing" &&
+              latest?.status !== "error";
+            if (stillClean) {
+              // PATCH does not return Drive's current text: clear `syncedTexts` so a dirty draft
+              // on an unseen remote edit still reconciles against Drive instead of clobbering it.
+              this.setSynced(fileId, result.revision, undefined, false);
+              this.queryClient.setQueryData<{ text: string; revision: string }>(
+                ["files", fileId, "content"],
+                (prev) => (prev === undefined ? prev : { ...prev, revision: result.revision }),
+              );
+            }
+          }
+        }
       }
       return result;
     } finally {
@@ -401,7 +531,7 @@ export class SyncQueue {
     fileId: string,
     { force = false, automatic = false }: { force?: boolean; automatic?: boolean } = {},
   ): Promise<void> {
-    if (this.disposed) {
+    if (this.disposed || this.deletedFiles.has(fileId)) {
       return Promise.resolve();
     }
     if (!automatic) {
@@ -414,9 +544,13 @@ export class SyncQueue {
       return existing;
     }
 
+    const epoch = this.captureEpoch(fileId);
+    const controller = new AbortController();
+    this.inFlightControllers.set(fileId, controller);
+
     const run = (async () => {
-      let reconciled = false;
-      while (!this.disposed) {
+      let reconciledSeq: number | null = null;
+      while (this.isCurrent(fileId, epoch)) {
         const pendingRename = this.renaming.get(fileId);
         if (pendingRename !== undefined) {
           await pendingRename.catch(() => undefined);
@@ -426,7 +560,7 @@ export class SyncQueue {
         if (pendingWrite !== undefined) {
           await pendingWrite.catch(() => undefined);
         }
-        if (this.disposed) {
+        if (!this.isCurrent(fileId, epoch)) {
           return;
         }
         // Re-check rename gate in case a rename started while awaiting IndexedDB writes.
@@ -434,7 +568,7 @@ export class SyncQueue {
           continue;
         }
         const entry = await readPendingWrite(fileId);
-        if (entry === undefined) {
+        if (entry === undefined || !this.isCurrent(fileId, epoch)) {
           return;
         }
         const currentState = this.states.get(fileId);
@@ -459,21 +593,32 @@ export class SyncQueue {
               // No usable tag (the BFF would answer 428): reconcile against Drive instead.
               throw new ApiError(428, "precondition_required", "Missing revision tag.");
             }
-            newRevision = await saveContent(entry.fileId, entry.text, entry.baseRevision);
+            newRevision = await saveContent(
+              entry.fileId,
+              entry.text,
+              entry.baseRevision,
+              controller.signal,
+            );
           } catch (error) {
-            if (reconciled || !(isConflict(error) || isPreconditionRequired(error))) {
+            if (!this.isCurrent(fileId, epoch)) {
+              return;
+            }
+            if (
+              reconciledSeq === entry.seq ||
+              !(isConflict(error) || isPreconditionRequired(error))
+            ) {
               throw error;
             }
-            reconciled = true;
-            const outcome = await this.reconcile(entry);
-            if (this.disposed) {
+            reconciledSeq = entry.seq;
+            const outcome = await this.reconcile(entry, epoch, controller.signal);
+            if (!this.isCurrent(fileId, epoch)) {
               return;
             }
             if (outcome.kind === "rebased") {
               continue;
             }
-            if (outcome.kind === "unreachable" && !isConflict(error)) {
-              // The read that would settle it failed: let the transient-retry path take over.
+            if (outcome.kind === "unreachable") {
+              // Propagate the read error (401, 404, 429, 5xx, network) instead of masking it as 412.
               throw outcome.error;
             }
             if (outcome.kind !== "done") {
@@ -488,21 +633,24 @@ export class SyncQueue {
             newRevision = outcome.remote.revision;
             syncedText = outcome.remote.text;
           }
-          if (this.disposed) {
+          if (!this.isCurrent(fileId, epoch)) {
             return;
           }
           this.onNetworkSuccess?.();
           this.retryAttempts.delete(fileId);
           this.bumpGeneration(fileId);
-          this.setSynced(fileId, newRevision, syncedText);
-          const next = await this.chainWrite(fileId, () =>
-            completePendingWrite(fileId, entry.seq, entry.text, newRevision),
-          );
-          if (this.disposed) {
+          this.setSynced(fileId, newRevision, syncedText, true);
+          const next = await this.chainWrite(fileId, async () => {
+            if (!this.isCurrent(fileId, epoch)) {
+              return undefined;
+            }
+            return completePendingWrite(fileId, entry.seq, entry.text, newRevision);
+          });
+          if (next === undefined || !this.isCurrent(fileId, epoch)) {
             return;
           }
           this.queryClient.setQueryData(["files", fileId, "content"], {
-            text: next ? next.text : entry.text,
+            text: next !== null ? next.text : entry.text,
             revision: newRevision,
           });
           if (next === null) {
@@ -511,7 +659,7 @@ export class SyncQueue {
           }
           // A newer local edit arrived while the PUT was in flight: loop immediately with the new ETag.
         } catch (error) {
-          if (this.disposed) {
+          if (!this.isCurrent(fileId, epoch)) {
             return;
           }
           if (error instanceof TypeError) {
@@ -525,7 +673,12 @@ export class SyncQueue {
         }
       }
     })().finally(() => {
-      this.inFlight.delete(fileId);
+      if (this.inFlight.get(fileId) === run) {
+        this.inFlight.delete(fileId);
+      }
+      if (this.inFlightControllers.get(fileId) === controller) {
+        this.inFlightControllers.delete(fileId);
+      }
     });
 
     this.inFlight.set(fileId, run);
@@ -540,34 +693,120 @@ export class SyncQueue {
     if (this.disposed || !isOnline()) {
       return;
     }
+    const globalEpoch = this.globalEpoch;
     const entries = await readAllPendingWrites();
-    if (this.disposed) {
+    if (this.disposed || this.globalEpoch !== globalEpoch) {
       return;
     }
-    await Promise.all(entries.map((entry) => this.flushFile(entry.fileId)));
+    await Promise.all(
+      entries
+        .filter((entry) => !this.deletedFiles.has(entry.fileId))
+        .map((entry) => this.flushFile(entry.fileId)),
+    );
   }
 
+  /**
+   * Discards any queued local write for `fileId`, cancelling any in-flight PUT.
+   * When `confirmedRevision` is omitted (SyncInspector "Discard"), reverts `db.files` and React
+   * Query to the outbox entry's `baseText`/`baseRevision` (or removes the cached file if unknown)
+   * and signals any open session to adopt the reverted content.
+   */
   discardFile(fileId: string, confirmedRevision?: string, confirmedText?: string): Promise<void> {
+    this.bumpFileEpoch(fileId);
+    this.abortInFlight(fileId);
     this.cancelRetry(fileId);
     this.retryAttempts.delete(fileId);
     this.bumpGeneration(fileId);
+    const epoch = this.captureEpoch(fileId);
+    const generation = this.writeGeneration(fileId);
     if (confirmedRevision !== undefined) {
-      this.setSynced(fileId, confirmedRevision, confirmedText);
+      this.setSynced(fileId, confirmedRevision, confirmedText, false);
+      this.setFileState(fileId, IDLE_STATE);
+      return this.chainWrite(fileId, async () => {
+        if (!this.isCurrent(fileId, epoch)) {
+          return;
+        }
+        await deletePendingWrite(fileId);
+        if (confirmedText !== undefined) {
+          await writeCachedFile(fileId, confirmedText, confirmedRevision);
+        }
+      });
     }
+    this.syncedBySelf.delete(fileId);
+    this.setFileState(fileId, IDLE_STATE);
+    return this.chainWrite(fileId, async () => {
+      if (!this.isCurrent(fileId, epoch)) {
+        return;
+      }
+      const { reverted, hadPending } = await discardPendingWrite(fileId);
+      if (!this.isCurrent(fileId, epoch) || this.writeGeneration(fileId) !== generation) {
+        return;
+      }
+      if (reverted !== null) {
+        if (reverted.revision.length > 0) {
+          this.setSynced(fileId, reverted.revision, reverted.text, false);
+        } else {
+          this.syncedRevisions.delete(fileId);
+          this.syncedTexts.delete(fileId);
+        }
+        this.queryClient.setQueryData(["files", fileId, "content"], reverted);
+        this.discardVersions.set(fileId, (this.discardVersions.get(fileId) ?? 0) + 1);
+        this.emit();
+        if (isOnline()) {
+          void this.queryClient.invalidateQueries({
+            queryKey: ["files", fileId, "content"],
+            exact: true,
+          });
+        }
+      } else if (hadPending) {
+        this.syncedRevisions.delete(fileId);
+        this.syncedTexts.delete(fileId);
+        this.discardVersions.set(fileId, (this.discardVersions.get(fileId) ?? 0) + 1);
+        this.emit();
+        this.queryClient.removeQueries({
+          queryKey: ["files", fileId, "content"],
+          exact: true,
+        });
+      }
+    });
+  }
+
+  /**
+   * Permanently cancels any queued or in-flight sync for a deleted file so neither an in-flight
+   * PUT nor an unmounting editor can resurrect it in the cache or outbox.
+   */
+  cancelDeletedFile(fileId: string): Promise<void> {
+    this.deletedFiles.add(fileId);
+    this.bumpFileEpoch(fileId);
+    this.abortInFlight(fileId);
+    this.cancelRetry(fileId);
+    this.retryAttempts.delete(fileId);
+    this.bumpGeneration(fileId);
+    this.syncedRevisions.delete(fileId);
+    this.syncedTexts.delete(fileId);
+    this.syncedBySelf.delete(fileId);
     this.setFileState(fileId, IDLE_STATE);
     return this.chainWrite(fileId, () => deletePendingWrite(fileId));
   }
 
   resetAll(): void {
+    this.globalEpoch += 1;
+    this.fileEpochs.clear();
+    this.abortAllInFlight();
     this.cancelAllRetries();
     this.states.clear();
     this.syncedRevisions.clear();
     this.syncedTexts.clear();
+    this.syncedBySelf.clear();
+    this.deletedFiles.clear();
+    this.discardVersions.clear();
     this.emit();
   }
 
   dispose(): void {
     this.disposed = true;
+    this.globalEpoch += 1;
+    this.abortAllInFlight();
     this.cancelAllRetries();
     this.listeners.clear();
   }
@@ -587,6 +826,12 @@ export function useFileSyncState(fileId: string): FileSyncState {
   const queue = useSyncQueue();
   const snapshot = useSyncExternalStore(queue.subscribe, queue.getSnapshot, queue.getSnapshot);
   return snapshot.byFile.get(fileId) ?? IDLE_STATE;
+}
+
+export function useFileDiscardVersion(fileId: string): number {
+  const queue = useSyncQueue();
+  const snapshot = useSyncExternalStore(queue.subscribe, queue.getSnapshot, queue.getSnapshot);
+  return snapshot.discardVersions.get(fileId) ?? 0;
 }
 
 /** Every file the queue tracks, by id: pending, syncing, failed, or just synced. */

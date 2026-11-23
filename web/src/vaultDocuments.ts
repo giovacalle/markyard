@@ -2,7 +2,12 @@ import type { QueryClient } from "@tanstack/react-query";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { type DriveNode, fetchChildren, fetchContent } from "./api";
-import { readAllCachedFiles, readAllPendingWrites, writeCachedFolder } from "./localCache";
+import {
+  readAllCachedFiles,
+  readAllPendingWrites,
+  writeCachedFolder,
+  writeCachedRemoteFile,
+} from "./localCache";
 import type { SyncQueue } from "./syncQueue";
 import { isTemplatesFolder, type TemplateNote } from "./templates";
 import { childrenKey, collectIndexedTree } from "./treeCache";
@@ -146,6 +151,7 @@ export async function readTemplates(
       }
       try {
         const remote = await fetchContent(note.id, signal);
+        void writeCachedRemoteFile(note.id, remote.text, remote.revision);
         return { id: note.id, name: note.name, text: remote.text };
       } catch {
         return null;

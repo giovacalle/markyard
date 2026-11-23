@@ -639,9 +639,10 @@ describe("edit and save", () => {
     server.use(
       http.get("/api/files/:id/content", () => {
         getCalls += 1;
-        return getCalls === 1
-          ? contentResponse("initial")
-          : HttpResponse.json({ code: "not_found", message: "Gone" }, { status: 404 });
+        if (getCalls === 1) return contentResponse("initial");
+        // Call 2 is the queue's post-412 check (Drive differs: real conflict); call 3 is Compare.
+        if (getCalls === 2) return contentResponse("remote", '"etag-9"');
+        return HttpResponse.json({ code: "not_found", message: "Gone" }, { status: 404 });
       }),
       http.put("/api/files/:id/content", () =>
         HttpResponse.json({ code: "conflict", message: "Conflict" }, { status: 412 }),
@@ -828,6 +829,48 @@ describe("edit and save", () => {
       await clearLocalCache();
       server.resetHandlers();
     }
+  });
+
+  it("allows editing and saving again after a 413 too_large error once the draft is shortened", async () => {
+    history.replaceState(null, "", "/?file=doc-id");
+    signedInWithRoot();
+    const puts: string[] = [];
+    server.use(
+      http.get("/api/files/:id/content", () => contentResponse("start", '"etag-1"')),
+      http.put("/api/files/:id/content", async ({ request }) => {
+        const body = await request.text();
+        puts.push(body);
+        if (body.length > 10) {
+          return HttpResponse.json({ code: "too_large", message: "Too big" }, { status: 413 });
+        }
+        return new HttpResponse(null, { status: 204, headers: { ETag: '"etag-2"' } });
+      }),
+    );
+
+    render(<App />);
+    const editor = await enterEditor();
+    const view = await getEditorView(editor);
+    await vi.waitFor(() => expect(view.state.doc.toString()).toBe("start"));
+
+    // Oversized edit hits 413; pressing Cmd+S without changing text does not resend it.
+    act(() => {
+      view.dispatch({ changes: { from: 0, to: 5, insert: "way too large payload" } });
+    });
+    pressSave();
+    expect(await within(editor).findByRole("alert")).toHaveTextContent("larger than 10 MB");
+    pressSave();
+    expect(puts).toEqual(["way too large payload"]);
+
+    // Shortening the draft unblocks saving and clears the 413 alert.
+    act(() => {
+      view.dispatch({
+        changes: { from: 0, to: view.state.doc.length, insert: "short" },
+      });
+    });
+    pressSave();
+    expect(await within(editor).findByText("Saved")).toBeInTheDocument();
+    expect(within(editor).queryByRole("alert")).not.toBeInTheDocument();
+    expect(puts).toEqual(["way too large payload", "short"]);
   });
 
   it("flushes edits automatically without confirmation when switching files", async () => {

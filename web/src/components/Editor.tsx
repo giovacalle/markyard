@@ -406,6 +406,7 @@ interface ImageHandlers {
 export function Editor({
   initialText,
   onChange,
+  onUploadingChange,
   editorRef,
   autoFocus = false,
   active = true,
@@ -414,6 +415,8 @@ export function Editor({
 }: {
   initialText: string;
   onChange: (text: string) => void;
+  /** Called when inline image uploads start or finish (`true` while at least one is in flight). */
+  onUploadingChange?: (uploading: boolean) => void;
   editorRef?: RefObject<EditorHandle | null>;
   autoFocus?: boolean;
   /**
@@ -467,6 +470,12 @@ export function Editor({
   useEffect(() => {
     onChangeRef.current = onChange;
   }, [onChange]);
+
+  useEffect(() => {
+    onUploadingChange?.(uploading > 0);
+  }, [uploading, onUploadingChange]);
+
+  useEffect(() => () => onUploadingChange?.(false), [onUploadingChange]);
 
   useEffect(() => {
     const host = hostRef.current;

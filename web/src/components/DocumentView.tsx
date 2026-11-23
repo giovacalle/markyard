@@ -34,9 +34,10 @@ import {
   parseFrontmatterEditable,
   splitFrontmatter,
 } from "../frontmatter";
+import { hasUploadPlaceholder } from "../imageUploads";
 import {
   CACHE_STALE_TIMESTAMP,
-  deleteCachedFile,
+  deleteCachedRemoteFile,
   readAllCachedFiles,
   readCachedFile,
   renameCachedChild,
@@ -44,7 +45,12 @@ import {
   writeCachedRemoteFile,
 } from "../localCache";
 import { useExternalChange, useOptionalDriveChanges } from "../driveChanges";
-import { isPermanentSyncError, useFileSyncState, useSyncQueue } from "../syncQueue";
+import {
+  isPermanentSyncError,
+  useFileDiscardVersion,
+  useFileSyncState,
+  useSyncQueue,
+} from "../syncQueue";
 import { renameChild, useNodeFolderPath, useNodeName } from "../treeCache";
 import type { HeadingItem } from "../commandSearch";
 import { toggleViewPref, useViewPrefs } from "../viewPrefs";
@@ -314,8 +320,8 @@ function DocumentContent({
   const { data, error, refetch } = useQuery({
     queryKey: ["files", fileId, "content"],
     queryFn: async ({ signal }) => {
+      const generation = syncQueue.writeGeneration(fileId);
       try {
-        const generation = syncQueue.writeGeneration(fileId);
         const fresh = await fetchContent(fileId, signal);
         const current = queryClient.getQueryData<{ text: string; revision: string }>([
           "files",
@@ -335,7 +341,18 @@ function DocumentContent({
         return fresh;
       } catch (err) {
         if (isNotFound(err)) {
-          void deleteCachedFile(fileId);
+          const current = queryClient.getQueryData<{ text: string; revision: string }>([
+            "files",
+            fileId,
+            "content",
+          ]);
+          if (current !== undefined && syncQueue.writeGeneration(fileId) !== generation) {
+            return current;
+          }
+          const pending = await deleteCachedRemoteFile(fileId);
+          if (pending !== undefined) {
+            return { text: pending.text, revision: pending.baseRevision };
+          }
         }
         throw err;
       }
@@ -685,6 +702,9 @@ function DocumentSession({
   const queryClient = useQueryClient();
   const syncQueue = useSyncQueue();
   const syncState = useFileSyncState(fileId);
+  const discardVersion = useFileDiscardVersion(fileId);
+  const sessionEpochRef = useRef(syncQueue.sessionEpoch);
+  const prevDiscardVersionRef = useRef(discardVersion);
   const canvasRef = useRef<HTMLDivElement>(null);
   const editorHandleRef = useRef<EditorHandle | null>(null);
   const startRenameRef = useRef<(() => void) | null>(null);
@@ -700,6 +720,7 @@ function DocumentSession({
   const [mergeRemote, setMergeRemote] = useState<{ text: string; revision: string } | null>(null);
   const [rawYamlMode, setRawYamlMode] = useState(false);
   const [vaultTags, setVaultTags] = useState<string[]>([]);
+  const [uploadingImages, setUploadingImages] = useState(false);
   const frontmatter = useMemo(() => parseFrontmatter(draft), [draft]);
   const editableFrontmatter = useMemo(() => parseFrontmatterEditable(draft), [draft]);
   const split = useMemo(() => splitFrontmatter(draft), [draft]);
@@ -719,6 +740,9 @@ function DocumentSession({
   const hasUnflushedDraft = draft !== localSavedText;
   const saveError = syncState.status === "error" ? syncState.error : null;
   const permanentError = saveError !== null && isPermanentSyncError(saveError);
+  // A 413 `too_large` error refuses the oversized payload, not a shortened edit the user makes next.
+  const blocksNewSave = permanentError && !isTooLarge(saveError);
+  const hasActiveUploadPlaceholder = uploadingImages && hasUploadPlaceholder(draft);
   const isSyncing = syncState.status === "syncing";
   const isPendingLocal = syncState.status === "pending";
   const isSynced = syncState.status === "synced";
@@ -728,10 +752,23 @@ function DocumentSession({
   const prevRemoteRef = useRef(remote);
   // Apply background Drive updates seamlessly when clean; never clobber unsaved edits or local saves.
   useEffect(() => {
-    if (remote === prevRemoteRef.current) {
+    const discarded = discardVersion !== prevDiscardVersionRef.current;
+    if (discarded) {
+      prevDiscardVersionRef.current = discardVersion;
+    }
+    if (!discarded && remote === prevRemoteRef.current) {
       return;
     }
     prevRemoteRef.current = remote;
+    if (discarded) {
+      setBase(remote);
+      setLocalSavedText(remote.text);
+      draftRef.current = remote.text;
+      frontmatterRawRef.current = splitFrontmatter(remote.text).frontmatterRaw;
+      setDraft(remote.text);
+      setEditorGeneration((n) => n + 1);
+      return;
+    }
     if (isSynced && remote.text === localSavedText) {
       setBase(remote);
       return;
@@ -740,14 +777,19 @@ function DocumentSession({
       setBase(remote);
       return;
     }
+    if (hasUnflushedDraft || isPendingLocal || isSyncing || saveError !== null) {
+      return;
+    }
     if (remote.text === base.text && remote.revision !== base.revision) {
       setBase((prev) => ({ ...prev, revision: remote.revision }));
       return;
     }
-    if (hasUnflushedDraft || isPendingLocal || isSyncing || saveError !== null) {
-      return;
-    }
-    if (remote.revision !== base.revision || remote.text !== base.text) {
+    if (
+      remote.revision !== base.revision ||
+      remote.text !== base.text ||
+      remote.text !== draft ||
+      remote.text !== localSavedText
+    ) {
       setBase(remote);
       setLocalSavedText(remote.text);
       draftRef.current = remote.text;
@@ -757,6 +799,7 @@ function DocumentSession({
     }
   }, [
     remote,
+    discardVersion,
     draft,
     localSavedText,
     hasUnflushedDraft,
@@ -827,17 +870,23 @@ function DocumentSession({
   const localSavedTextRef = useRef(localSavedText);
   const baseRevisionRef = useRef(base.revision);
   const baseTextRef = useRef(base.text);
-  const permanentErrorRef = useRef(permanentError);
+  const blocksNewSaveRef = useRef(blocksNewSave);
   const reloadingRef = useRef(reloadMutation.isPending);
   draftRef.current = draft;
   localSavedTextRef.current = localSavedText;
   baseRevisionRef.current = base.revision;
   baseTextRef.current = base.text;
-  permanentErrorRef.current = permanentError;
+  blocksNewSaveRef.current = blocksNewSave;
   reloadingRef.current = reloadMutation.isPending;
 
   const flushPendingDraft = useCallback(() => {
-    if (permanentErrorRef.current || reloadingRef.current) {
+    if (
+      blocksNewSaveRef.current ||
+      reloadingRef.current ||
+      syncQueue.sessionEpoch !== sessionEpochRef.current ||
+      syncQueue.isDeleted(fileId) ||
+      syncQueue.discardVersion(fileId) !== prevDiscardVersionRef.current
+    ) {
       return;
     }
     const currentDraft = draftRef.current;
@@ -868,7 +917,7 @@ function DocumentSession({
   const canSave =
     (hasUnflushedDraft || (saveError !== null && !permanentError)) &&
     !reloadMutation.isPending &&
-    !permanentError;
+    !blocksNewSave;
 
   const triggerSave = useCallback(() => {
     if (!canSave) {
@@ -881,14 +930,25 @@ function DocumentSession({
 
   // Local-first autosave: flushes edits into IndexedDB and starts background Drive sync after a pause.
   useEffect(() => {
-    if (!hasUnflushedDraft || reloadMutation.isPending || permanentError) {
+    if (
+      !hasUnflushedDraft ||
+      reloadMutation.isPending ||
+      blocksNewSave ||
+      hasActiveUploadPlaceholder
+    ) {
       return;
     }
     const timer = window.setTimeout(() => {
       triggerSave();
     }, AUTOSAVE_DELAY_MS);
     return () => window.clearTimeout(timer);
-  }, [hasUnflushedDraft, reloadMutation.isPending, permanentError, triggerSave]);
+  }, [
+    hasUnflushedDraft,
+    reloadMutation.isPending,
+    blocksNewSave,
+    hasActiveUploadPlaceholder,
+    triggerSave,
+  ]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -908,10 +968,11 @@ function DocumentSession({
       if (nextDraft === base.text && saveError !== null) {
         localSavedTextRef.current = base.text;
         setLocalSavedText(base.text);
+        queryClient.setQueryData(["files", fileId, "content"], base);
         void syncQueue.discardFile(fileId, base.revision, base.text);
       }
     },
-    [base.text, base.revision, saveError, syncQueue, fileId],
+    [base, saveError, queryClient, syncQueue, fileId],
   );
 
   // Preview checkbox toggles (and restored versions) are complete edits: store and sync them
@@ -920,7 +981,7 @@ function DocumentSession({
     (nextText: string) => {
       setDraft(nextText);
       draftRef.current = nextText;
-      if (permanentErrorRef.current || reloadingRef.current) {
+      if (blocksNewSaveRef.current || reloadingRef.current) {
         return;
       }
       localSavedTextRef.current = nextText;
@@ -1278,7 +1339,7 @@ function DocumentSession({
                 hasKnownName={hasKnownName}
                 startRenameRef={startRenameRef}
                 onRenamed={(node, revision) => {
-                  if (revision) {
+                  if (revision && !hasLocalWorkRef.current) {
                     setBase((prev) => ({ ...prev, revision }));
                   }
                   onRenamed(node);
@@ -1465,6 +1526,7 @@ function DocumentSession({
                   text={editorText}
                   active={!isPreview && mergeRemote === null}
                   onChange={handleEditorChange}
+                  onUploadingChange={setUploadingImages}
                   editorRef={editorHandleRef}
                   autoFocus={focusOnEnter}
                   aboveEditor={

@@ -223,6 +223,26 @@ describe("App", () => {
     expect(screen.getByText("owner@example.com")).toBeInTheDocument();
   });
 
+  it("offers a Clear local data fallback when sign out fails offline", async () => {
+    let online = true;
+    server.use(
+      http.get("/api/session", () => (online ? signedIn() : HttpResponse.error())),
+      http.post("/api/auth/logout", () => HttpResponse.error()),
+    );
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /Account: owner@example\.com/ }));
+    online = false;
+    fireEvent.click(await screen.findByRole("button", { name: "Sign out" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Unable to sign out while offline.");
+    fireEvent.click(within(alert).getByRole("button", { name: "Clear local data" }));
+
+    expect(await screen.findByText("Unable to reach the server.")).toBeInTheDocument();
+    expect(screen.queryByText("owner@example.com")).not.toBeInTheDocument();
+  });
+
   it("a 401 after being signed in returns to the sign-in screen with a message", async () => {
     server.use(http.get("/api/session", () => signedIn()));
     render(<App />);

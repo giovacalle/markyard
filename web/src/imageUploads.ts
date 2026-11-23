@@ -52,6 +52,13 @@ export const imagePlaceholders = StateField.define<ReadonlyMap<number, Placehold
   },
 });
 
+const UPLOAD_PLACEHOLDER_PATTERN = /!\[Uploading [^\]]*…\]\(\)/;
+
+/** Whether `text` currently contains an image upload placeholder (`![Uploading …]()`). */
+export function hasUploadPlaceholder(text: string): boolean {
+  return UPLOAD_PLACEHOLDER_PATTERN.test(text);
+}
+
 /** Escapes text for a Markdown image alt (`![…]`). */
 function escapeAlt(text: string): string {
   return text.replace(/[\\[\]]/g, "\\$&").replace(/[\r\n]+/g, " ");

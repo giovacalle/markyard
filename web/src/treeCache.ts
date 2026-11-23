@@ -315,7 +315,7 @@ export function getFolderChildNames(queryClient: QueryClient, folderId: string):
   return list === undefined ? [] : list.map((node) => node.name);
 }
 
-/** Collects `folderId` plus all cached descendant folder and file ids under it. */
+/** Collects `folderId` plus all cached descendant folder and file ids under it (tree + vault index). */
 export function collectDescendantIds(
   queryClient: QueryClient,
   folderId: string,
@@ -325,6 +325,22 @@ export function collectDescendantIds(
   const visitedFolders = new Set<string>();
   const seenFiles = new Set<string>();
 
+  const index = queryClient.getQueryData<VaultIndex>(VAULT_INDEX_KEY);
+  const indexedFoldersByParent = new Map<string, string[]>();
+  const indexedFilesByParent = new Map<string, string[]>();
+  if (index !== undefined) {
+    for (const folder of index.folders) {
+      const list = indexedFoldersByParent.get(folder.parentId) ?? [];
+      list.push(folder.id);
+      indexedFoldersByParent.set(folder.parentId, list);
+    }
+    for (const file of index.files) {
+      const list = indexedFilesByParent.get(file.parentId) ?? [];
+      list.push(file.id);
+      indexedFilesByParent.set(file.parentId, list);
+    }
+  }
+
   const walk = (id: string) => {
     if (visitedFolders.has(id)) {
       return;
@@ -332,15 +348,23 @@ export function collectDescendantIds(
     visitedFolders.add(id);
     folderIds.push(id);
     const children = queryClient.getQueryData<DriveNode[]>(childrenKey(id));
-    if (!children) {
-      return;
+    if (children !== undefined) {
+      for (const child of children) {
+        if (child.kind === "folder") {
+          walk(child.id);
+        } else if (!seenFiles.has(child.id)) {
+          seenFiles.add(child.id);
+          fileIds.push(child.id);
+        }
+      }
     }
-    for (const child of children) {
-      if (child.kind === "folder") {
-        walk(child.id);
-      } else if (!seenFiles.has(child.id)) {
-        seenFiles.add(child.id);
-        fileIds.push(child.id);
+    for (const childFolderId of indexedFoldersByParent.get(id) ?? []) {
+      walk(childFolderId);
+    }
+    for (const childFileId of indexedFilesByParent.get(id) ?? []) {
+      if (!seenFiles.has(childFileId)) {
+        seenFiles.add(childFileId);
+        fileIds.push(childFileId);
       }
     }
   };

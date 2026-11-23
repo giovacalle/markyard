@@ -4,7 +4,12 @@ import { HttpResponse, http } from "msw";
 import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vite-plus/test";
 import { App } from "./App";
-import { updateChangesState, writeCachedSession } from "./localCache";
+import {
+  readCachedFile,
+  readPendingWrite,
+  updateChangesState,
+  writeCachedSession,
+} from "./localCache";
 import { VAULT_PIN_STORAGE_KEY } from "./vaultSync";
 
 const server = setupServer();
@@ -222,6 +227,14 @@ describe("Sync & offline inspector", () => {
       expect(within(inspector).queryByRole("listitem", { name: "a.md" })).not.toBeInTheDocument(),
     );
     expect(within(inspector).getByRole("status")).toHaveTextContent("All changes synced");
+
+    // Discarding reverts db.outbox, db.files, and the open editor back to the base text.
+    await vi.waitFor(async () => {
+      expect(await readPendingWrite("doc-1")).toBeUndefined();
+      expect(await readCachedFile("doc-1")).toEqual({ text: "start", revision: '"r1"' });
+      expect((await getEditorView(editor)).state.doc.toString()).toBe("start");
+    });
+    expect(within(editor).queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("pins the vault offline and reports its coverage", async () => {
