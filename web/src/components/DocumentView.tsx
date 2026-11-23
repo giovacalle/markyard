@@ -27,10 +27,17 @@ import {
   type Revision,
 } from "../api";
 import { normalizeFileName, stripMarkdownExtension } from "../fileName";
-import { parseFrontmatter } from "../frontmatter";
+import {
+  extractFrontmatterTags,
+  joinFrontmatter,
+  parseFrontmatter,
+  parseFrontmatterEditable,
+  splitFrontmatter,
+} from "../frontmatter";
 import {
   CACHE_STALE_TIMESTAMP,
   deleteCachedFile,
+  readAllCachedFiles,
   readCachedFile,
   renameCachedChild,
   writeCachedFile,
@@ -46,6 +53,7 @@ import type { EditorHandle } from "./Editor";
 import { HistoryIcon, LockIcon, PanelRightIcon, UnlockIcon } from "./icons";
 import { InfoDrawer } from "./InfoDrawer";
 import { PropertiesBar } from "./PropertiesBar";
+import { PropertiesEditor } from "./PropertiesEditor";
 import { RetryScope, type OnRetry } from "./RetryScope";
 import { formatRevisionDate, VersionHistoryDialog } from "./VersionHistoryDialog";
 
@@ -188,7 +196,7 @@ function isInteractiveTarget(target: EventTarget | null): boolean {
   }
   return (
     target.closest(
-      'button, a, input, textarea, select, [role="toolbar"], [role="alert"], [role="dialog"]',
+      'button, a, input, textarea, select, summary, details, [data-properties-editor], [role="toolbar"], [role="alert"], [role="dialog"]',
     ) !== null
   );
 }
@@ -690,7 +698,23 @@ function DocumentSession({
   const [draft, setDraft] = useState(remote.text);
   const [editorGeneration, setEditorGeneration] = useState(0);
   const [mergeRemote, setMergeRemote] = useState<{ text: string; revision: string } | null>(null);
+  const [rawYamlMode, setRawYamlMode] = useState(false);
+  const [vaultTags, setVaultTags] = useState<string[]>([]);
   const frontmatter = useMemo(() => parseFrontmatter(draft), [draft]);
+  const editableFrontmatter = useMemo(() => parseFrontmatterEditable(draft), [draft]);
+  const split = useMemo(() => splitFrontmatter(draft), [draft]);
+  const isPreview = mode === "preview";
+  const editorActive = !isPreview && mergeRemote === null;
+  const editorText = rawYamlMode ? draft : split.body;
+  const rawYamlModeRef = useRef(rawYamlMode);
+  rawYamlModeRef.current = rawYamlMode;
+  // Pinned to the frontmatter prefix CodeMirror's current buffer is split against. Never
+  // overwritten while the editor is active (typing YAML or a leading newline into the body must
+  // not shift the prefix out from under CM6); refreshed only when CM6 is hidden or explicitly synced.
+  const frontmatterRawRef = useRef(split.frontmatterRaw);
+  if (!editorActive) {
+    frontmatterRawRef.current = split.frontmatterRaw;
+  }
 
   const hasUnflushedDraft = draft !== localSavedText;
   const saveError = syncState.status === "error" ? syncState.error : null;
@@ -726,6 +750,8 @@ function DocumentSession({
     if (remote.revision !== base.revision || remote.text !== base.text) {
       setBase(remote);
       setLocalSavedText(remote.text);
+      draftRef.current = remote.text;
+      frontmatterRawRef.current = splitFrontmatter(remote.text).frontmatterRaw;
       setDraft(remote.text);
       setEditorGeneration((n) => n + 1);
     }
@@ -766,6 +792,8 @@ function DocumentSession({
       void syncQueue.discardFile(fileId, fresh.revision, fresh.text);
       setBase(fresh);
       setLocalSavedText(fresh.text);
+      draftRef.current = fresh.text;
+      frontmatterRawRef.current = splitFrontmatter(fresh.text).frontmatterRaw;
       setDraft(fresh.text);
       setEditorGeneration((n) => n + 1);
       queryClient.setQueryData(["files", fileId, "content"], fresh);
@@ -788,6 +816,7 @@ function DocumentSession({
     setBase(mergeRemote);
     localSavedTextRef.current = merged;
     draftRef.current = merged;
+    frontmatterRawRef.current = splitFrontmatter(merged).frontmatterRaw;
     setLocalSavedText(merged);
     setDraft(merged);
     setEditorGeneration((n) => n + 1);
@@ -874,6 +903,7 @@ function DocumentSession({
 
   const handleDraftChange = useCallback(
     (nextDraft: string) => {
+      draftRef.current = nextDraft;
       setDraft(nextDraft);
       if (nextDraft === base.text && saveError !== null) {
         localSavedTextRef.current = base.text;
@@ -937,7 +967,9 @@ function DocumentSession({
   // note's current Drive tag, so a concurrent change on Drive still surfaces as a conflict.
   const handleRestore = (text: string, revision: Revision) => {
     setHistoryOpen(false);
-    editorHandleRef.current?.replaceText(text);
+    const nextSplit = splitFrontmatter(text);
+    frontmatterRawRef.current = nextSplit.frontmatterRaw;
+    editorHandleRef.current?.replaceText(rawYamlModeRef.current ? text : nextSplit.body);
     handleToggleTask(text);
     setRestoredFrom(formatRevisionDate(revision.modifiedTime));
   };
@@ -947,9 +979,42 @@ function DocumentSession({
     if (text === draftRef.current) {
       return;
     }
-    editorHandleRef.current?.replaceText(text);
+    const nextSplit = splitFrontmatter(text);
+    frontmatterRawRef.current = nextSplit.frontmatterRaw;
+    editorHandleRef.current?.replaceText(rawYamlModeRef.current ? text : nextSplit.body);
     handleToggleTask(text);
   };
+  const handleEditorChange = useCallback(
+    (nextEditorText: string) => {
+      const nextDraft = rawYamlModeRef.current
+        ? nextEditorText
+        : joinFrontmatter(frontmatterRawRef.current, nextEditorText);
+      handleDraftChange(nextDraft);
+    },
+    [handleDraftChange],
+  );
+  const handleFrontmatterChange = useCallback(
+    (nextDraft: string) => {
+      const nextSplit = splitFrontmatter(nextDraft);
+      frontmatterRawRef.current = nextSplit.frontmatterRaw;
+      handleDraftChange(nextDraft);
+      editorHandleRef.current?.syncText(rawYamlModeRef.current ? nextDraft : nextSplit.body);
+    },
+    [handleDraftChange],
+  );
+  const handleToggleRawYaml = useCallback((nextRaw: boolean) => {
+    rawYamlModeRef.current = nextRaw;
+    setRawYamlMode(nextRaw);
+    const currentDraft = draftRef.current;
+    const nextSplit = splitFrontmatter(currentDraft);
+    frontmatterRawRef.current = nextSplit.frontmatterRaw;
+    if (nextRaw) {
+      editorHandleRef.current?.syncText(currentDraft, 0);
+      editorHandleRef.current?.focus(false);
+    } else {
+      editorHandleRef.current?.syncText(nextSplit.body);
+    }
+  }, []);
   useEffect(() => {
     if (externalChange === null) {
       return;
@@ -980,7 +1045,6 @@ function DocumentSession({
     onRetry(() => compareMutation.mutate());
   };
 
-  const isPreview = mode === "preview";
   // Becomes true on the first switch to Editor and stays true for this note's session.
   const [editorWarm, setEditorWarm] = useState(!isPreview);
   if (!isPreview && !editorWarm) {
@@ -997,6 +1061,46 @@ function DocumentSession({
     });
   }, [readOnly]);
 
+  // Collect locally cached vault tags for PropertiesEditor autocomplete (no network requests).
+  useEffect(() => {
+    if (isPreview) {
+      return;
+    }
+    let active = true;
+    void readAllCachedFiles().then((cached) => {
+      if (!active) {
+        return;
+      }
+      const byLower = new Map<string, string>();
+      const addFrom = (text: string) => {
+        for (const tag of extractFrontmatterTags(text)) {
+          const lower = tag.toLowerCase();
+          if (!byLower.has(lower)) {
+            byLower.set(lower, tag);
+          }
+        }
+      };
+      for (const file of cached) {
+        addFrom(file.text);
+      }
+      for (const [, entry] of queryClient.getQueriesData<{ text: string }>({
+        queryKey: ["files"],
+      })) {
+        if (entry?.text !== undefined) {
+          addFrom(entry.text);
+        }
+      }
+      setVaultTags(
+        Array.from(byLower.values()).sort((a, b) =>
+          a.localeCompare(b, undefined, { sensitivity: "accent" }),
+        ),
+      );
+    });
+    return () => {
+      active = false;
+    };
+  }, [isPreview, queryClient]);
+
   const jumpToHeading = useCallback(
     ({ line, index }: Pick<HeadingItem, "line" | "index">) => {
       if (isPreview) {
@@ -1009,7 +1113,9 @@ function DocumentSession({
         }
         return;
       }
-      editorHandleRef.current?.goToLine(line);
+      const prefixLines = (frontmatterRawRef.current.match(/\r\n|\r|\n/g) ?? []).length;
+      const targetLine = rawYamlModeRef.current ? line : Math.max(1, line - prefixLines);
+      editorHandleRef.current?.goToLine(targetLine);
     },
     [isPreview],
   );
@@ -1325,7 +1431,7 @@ function DocumentSession({
                 onCompare={() => onRetry(() => compareMutation.mutate())}
               />
             )}
-            {frontmatter !== null && (
+            {isPreview && mergeRemote === null && frontmatter !== null && (
               <PropertiesBar frontmatter={frontmatter} onTagClick={onTagClick} />
             )}
             {mergeRemote !== null ? (
@@ -1355,12 +1461,22 @@ function DocumentSession({
               >
                 <EditorSlot
                   key={editorGeneration}
-                  initialText={draft}
-                  text={draft}
+                  initialText={editorText}
+                  text={editorText}
                   active={!isPreview && mergeRemote === null}
-                  onChange={handleDraftChange}
+                  onChange={handleEditorChange}
                   editorRef={editorHandleRef}
                   autoFocus={focusOnEnter}
+                  aboveEditor={
+                    <PropertiesEditor
+                      text={draft}
+                      frontmatter={editableFrontmatter}
+                      rawMode={rawYamlMode}
+                      vaultTags={vaultTags}
+                      onChange={handleFrontmatterChange}
+                      onToggleRawMode={handleToggleRawYaml}
+                    />
+                  }
                 />
               </div>
             )}

@@ -1,13 +1,16 @@
-import { foldedRanges } from "@codemirror/language";
+import { foldedRanges, syntaxTree } from "@codemirror/language";
 import { EditorView } from "@codemirror/view";
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { createRef } from "react";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
-import { Editor } from "./components/Editor";
+import { Editor, type EditorHandle } from "./components/Editor";
 import { getViewPrefs, setViewPref } from "./viewPrefs";
 
-function mountEditor(initialText: string) {
+function mountEditor(initialText: string, extra?: Partial<Parameters<typeof Editor>[0]>) {
   const onChange = vi.fn<(text: string) => void>();
-  const { getByTestId, unmount } = render(<Editor initialText={initialText} onChange={onChange} />);
+  const { getByTestId, unmount } = render(
+    <Editor initialText={initialText} onChange={onChange} {...extra} />,
+  );
   const textbox =
     getByTestId("editor-host").shadowRoot?.querySelector<HTMLElement>('[role="textbox"]');
   const view = textbox ? EditorView.findFromDOM(textbox) : null;
@@ -47,15 +50,48 @@ function paste(view: EditorView, text: string) {
 }
 
 describe("Editor", () => {
-  it("folds leading frontmatter on open without touching its bytes", () => {
-    const text = "---\r\ntitle: T\r\ntags: [a]\r\n---\r\n# Body\r\n";
+  it("parses YAML frontmatter as YAML (not Setext H2) and leaves it unfolded on open", () => {
+    const text = "---\r\nstatus: ready\r\ntags: test\r\n---\r\n# Body\r\n";
     const { view, onChange } = mountEditor(text);
 
     const folds: { from: number; to: number }[] = [];
     foldedRanges(view.state).between(0, view.state.doc.length, (from, to) => {
       folds.push({ from, to });
     });
-    expect(folds).toEqual([{ from: 3, to: view.state.doc.line(4).to }]);
+    expect(folds).toEqual([]);
+    expect(onChange).not.toHaveBeenCalled();
+
+    const nodeNames: string[] = [];
+    syntaxTree(view.state).iterate({
+      enter: (node) => {
+        nodeNames.push(node.name);
+      },
+    });
+    expect(nodeNames).toContain("Frontmatter");
+    expect(nodeNames).toContain("Key");
+    expect(nodeNames).not.toContain("SetextHeading2");
+  });
+
+  it("renders aboveEditor between the formatting toolbar and the editor host", () => {
+    mountEditor("# Body", {
+      aboveEditor: <div data-testid="properties-slot">Properties slot</div>,
+    });
+    const toolbar = screen.getByRole("toolbar", { name: "Markdown formatting" });
+    const slot = screen.getByTestId("properties-slot");
+    const host = screen.getByTestId("editor-host");
+
+    expect(toolbar.compareDocumentPosition(slot) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(slot.compareDocumentPosition(host) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("syncs buffer text without emitting onChange via editorRef.syncText", () => {
+    const ref = createRef<EditorHandle>();
+    const { view, onChange } = mountEditor("Body", { editorRef: ref });
+    act(() => {
+      ref.current?.syncText("---\nstatus: ready\n---\n\nBody", 12);
+    });
+    expect(view.state.doc.toString()).toBe("---\nstatus: ready\n---\n\nBody");
+    expect(view.state.selection.main.head).toBe(12);
     expect(onChange).not.toHaveBeenCalled();
   });
 

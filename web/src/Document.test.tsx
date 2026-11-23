@@ -609,7 +609,7 @@ describe("open and preview a Markdown file", () => {
     expect(heading).not.toContainElement(pathEl);
   });
 
-  it("renders `#`-prefixed block tags cleanly and opens tag search when clicking a PropertiesBar tag pill", async () => {
+  it("renders `#`-prefixed block tags cleanly in written order, opens Properties by default, and opens tag search on click", async () => {
     signedInWithRoot();
     const markdown = [
       "---",
@@ -617,6 +617,7 @@ describe("open and preview a Markdown file", () => {
       "tags:",
       "  - #work",
       "  - #ops",
+      "status: ready",
       "---",
       "# Plan",
     ].join("\n");
@@ -633,13 +634,19 @@ describe("open and preview a Markdown file", () => {
 
     const preview = await screen.findByRole("region", { name: "Preview" });
     const properties = await within(preview).findByRole("group", { name: "Properties" });
+    const summary = properties.querySelector("summary")!;
+    expect(properties).toHaveAttribute("open");
+    // Tags are rendered in their own row in written order, not hoisted into `<summary>`.
+    expect(within(summary).queryByRole("button", { name: "#work" })).toBeNull();
+    const termLabels = Array.from(properties.querySelectorAll("dt")).map((dt) => dt.textContent);
+    expect(termLabels).toEqual(["title", "tags", "status"]);
+
     const workPill = within(properties).getByRole("button", { name: "#work" });
     expect(within(properties).queryByText("##work")).not.toBeInTheDocument();
-    expect(properties).not.toHaveAttribute("open");
 
     // Clicking the tag pill does not toggle `<details>` or switch to Edit, and opens Cmd+K pre-filled with `tag:work`.
     fireEvent.click(workPill);
-    expect(properties).not.toHaveAttribute("open");
+    expect(properties).toHaveAttribute("open");
     expect(screen.getByRole("region", { name: "Preview" })).toBeInTheDocument();
 
     const palette = await screen.findByRole("dialog", { name: "Command palette" });

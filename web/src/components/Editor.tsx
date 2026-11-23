@@ -8,14 +8,8 @@ import {
   undo,
 } from "@codemirror/commands";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
-import {
-  foldEffect,
-  foldGutter,
-  foldKeymap,
-  foldService,
-  HighlightStyle,
-  syntaxHighlighting,
-} from "@codemirror/language";
+import { yamlFrontmatter, yamlLanguage } from "@codemirror/lang-yaml";
+import { foldGutter, foldKeymap, HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import {
   Annotation,
   Compartment,
@@ -27,13 +21,12 @@ import {
 import { EditorView, keymap } from "@codemirror/view";
 import { tags as t } from "@lezer/highlight";
 import { Toolbar, ToolbarButton, ToolbarSeparator } from "@ui-sdk/react/toolbar";
-import { type RefObject, useEffect, useRef, useState } from "react";
+import { type ReactNode, type RefObject, useEffect, useRef, useState } from "react";
 import { ATTACHMENT_TYPES, uploadAttachment } from "../api";
 import { getSettings } from "../settings";
 import { type CompletionSources, pkmCompletions } from "../editorCompletion";
 import { focusMode, typewriterMode } from "../editorModes";
 import { dragHasFiles, imageFiles, imagePlaceholders, insertImages } from "../imageUploads";
-import { parseFrontmatter } from "../frontmatter";
 import {
   continueListItem,
   cycleHeading,
@@ -74,14 +67,6 @@ function detectLineSeparator(text: string): string {
   return /\r\n|\n|\r/.exec(text)?.[0] ?? "\n";
 }
 
-/** Range that folds leading frontmatter down to its first line, or `null`. */
-function frontmatterFoldRange(state: EditorState): { from: number; to: number } | null {
-  const frontmatter = parseFrontmatter(state.doc.toString());
-  return frontmatter === null
-    ? null
-    : { from: state.doc.line(1).to, to: state.doc.line(frontmatter.endLine).to };
-}
-
 const MARKDOWN_EDITING = [
   Prec.high(
     keymap.of([
@@ -91,9 +76,6 @@ const MARKDOWN_EDITING = [
   ),
   foldGutter(),
   keymap.of(foldKeymap),
-  Prec.high(
-    foldService.of((state, lineStart) => (lineStart === 0 ? frontmatterFoldRange(state) : null)),
-  ),
   EditorView.domEventHandlers({
     paste: (event, view) => {
       const spec = smartPaste(view.state, event.clipboardData?.getData("text/plain") ?? "");
@@ -291,8 +273,24 @@ const MARKDOWN_HIGHLIGHT = HighlightStyle.define([
   },
   { tag: [t.link, t.url], color: "var(--cm-link, #2563eb)", textDecoration: "underline" },
   { tag: t.quote, color: "var(--cm-quote, #525252)", fontStyle: "italic" },
-  { tag: [t.processingInstruction, t.meta], color: "var(--cm-muted, #737373)" },
+  { tag: t.processingInstruction, color: "var(--cm-muted, #737373)" },
+  { tag: t.propertyName, color: "var(--cm-yaml-key, #0369a1)" },
+  { tag: t.string, color: "var(--cm-yaml-string, #047857)" },
+  { tag: [t.number, t.bool, t.null, t.atom], color: "var(--cm-yaml-atom, #b45309)" },
+  { tag: t.comment, color: "var(--cm-yaml-comment, #737373)", fontStyle: "italic" },
+  {
+    tag: [t.meta, t.separator, t.punctuation, t.squareBracket, t.brace],
+    color: "var(--cm-yaml-fence, var(--cm-muted, #737373))",
+  },
 ]);
+
+const YAML_HIGHLIGHT = HighlightStyle.define(
+  [
+    { tag: t.content, color: "var(--cm-yaml-string, #047857)" },
+    { tag: [t.labelName, t.typeName, t.keyword], color: "var(--cm-yaml-atom, #b45309)" },
+  ],
+  { scope: yamlLanguage },
+);
 
 const EDITOR_THEME = EditorView.theme({
   "&": {
@@ -390,6 +388,12 @@ export interface EditorHandle {
    * reporting it through `onChange`: the caller already owns the new text.
    */
   replaceText: (text: string) => void;
+  /**
+   * Syncs the editor buffer to `text` without recording an undo entry or firing `onChange`
+   * (e.g. when switching between Visual body-only and Raw YAML full-doc mode), optionally moving
+   * the cursor to `cursorPos`.
+   */
+  syncText: (text: string, cursorPos?: number) => void;
 }
 
 const IMAGE_ACCEPT = ATTACHMENT_TYPES.join(",");
@@ -406,6 +410,7 @@ export function Editor({
   autoFocus = false,
   active = true,
   text,
+  aboveEditor,
 }: {
   initialText: string;
   onChange: (text: string) => void;
@@ -419,6 +424,8 @@ export function Editor({
   active?: boolean;
   /** The note's current text, for catching up after it changed while the editor was hidden. */
   text?: string;
+  /** Optional content rendered between the formatting toolbar and the CodeMirror editor surface. */
+  aboveEditor?: ReactNode;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -549,8 +556,9 @@ export function Editor({
       doc: initialTextRef.current,
       extensions: [
         EDITOR_THEME,
-        markdown({ base: markdownLanguage }),
+        yamlFrontmatter({ content: markdown({ base: markdownLanguage }) }),
         syntaxHighlighting(MARKDOWN_HIGHLIGHT),
+        syntaxHighlighting(YAML_HIGHLIGHT),
         history(),
         imagePlaceholders,
         imageEvents,
@@ -575,10 +583,6 @@ export function Editor({
     const shadow = host.shadowRoot ?? host.attachShadow({ mode: "open" });
     const view = new EditorView({ state, parent: shadow, root: shadow });
     viewRef.current = view;
-    const frontmatterFold = frontmatterFoldRange(view.state);
-    if (frontmatterFold !== null) {
-      view.dispatch({ effects: foldEffect.of(frontmatterFold) });
-    }
     if (editorRef) {
       editorRef.current = {
         focus: (toEnd = false) => {
@@ -597,7 +601,14 @@ export function Editor({
           });
           view.focus();
         },
-        replaceText: (text: string) => syncDocument(view, text, true),
+        replaceText: (nextText: string) => syncDocument(view, nextText, true),
+        syncText: (nextText: string, cursorPos?: number) => {
+          syncDocument(view, nextText, false);
+          if (cursorPos !== undefined) {
+            const clamped = Math.max(0, Math.min(cursorPos, view.state.doc.length));
+            view.dispatch({ selection: EditorSelection.cursor(clamped) });
+          }
+        },
       };
     }
     if (autoFocusRef.current) {
@@ -861,6 +872,8 @@ export function Editor({
           <TypewriterIcon className="size-3.5" />
         </ToolbarButton>
       </Toolbar>
+
+      {aboveEditor}
 
       <input
         ref={fileInputRef}
