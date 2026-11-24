@@ -239,6 +239,7 @@ describe("cloud state sync", () => {
         theme: "light",
         rootFolderId: "root-id",
         attachmentsFolder: "Media",
+        showAttachmentsFolder: false,
         dailyNotesFolder: "Daily",
         templatesFolder: "Snippets",
         defaultMode: "edit",
@@ -252,6 +253,7 @@ describe("cloud state sync", () => {
     await vi.waitFor(() =>
       expect(getSettings()).toEqual({
         attachmentsFolder: "Media",
+        showAttachmentsFolder: false,
         dailyNotesFolder: "Daily",
         templatesFolder: "Snippets",
         defaultMode: "edit",
@@ -275,6 +277,7 @@ describe("cloud state sync", () => {
     act(() =>
       updateSettings({
         attachmentsFolder: "Media",
+        showAttachmentsFolder: false,
         dailyNotesFolder: "Daily",
         templatesFolder: "Snippets",
         defaultMode: "edit",
@@ -288,6 +291,7 @@ describe("cloud state sync", () => {
       theme: "light",
       rootFolderId: "root-id",
       attachmentsFolder: "Media",
+      showAttachmentsFolder: false,
       dailyNotesFolder: "Daily",
       templatesFolder: "Snippets",
       defaultMode: "edit",

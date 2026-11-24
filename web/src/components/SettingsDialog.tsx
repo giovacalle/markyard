@@ -379,6 +379,12 @@ function SettingsBody({
           placeholder={DEFAULT_SETTINGS.attachmentsFolder}
           help="Uploaded images go here, directly under the vault folder."
         />
+        <Switch
+          label="Show attachments folder"
+          description="Show the attachments folder in the file tree, move picker and command palette."
+          checked={settings.showAttachmentsFolder}
+          onChange={(showAttachmentsFolder) => updateSettings({ showAttachmentsFolder })}
+        />
         <FolderField
           settingKey="dailyNotesFolder"
           label="Daily notes folder"

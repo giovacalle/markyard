@@ -3,6 +3,7 @@ import { HttpResponse, http } from "msw";
 import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vite-plus/test";
 import { App } from "./App";
+import { updateSettings } from "./settings";
 
 const server = setupServer();
 
@@ -252,7 +253,7 @@ describe("moving notes and folders", () => {
     );
   });
 
-  it("excludes the root attachments folder and its subfolders from move destinations", async () => {
+  it("includes the root attachments folder by default and excludes it when hidden in Settings", async () => {
     vault();
     server.use(
       http.get("/api/vault/index", () =>
@@ -279,6 +280,17 @@ describe("moving notes and folders", () => {
     await screen.findByText("a.md");
 
     const dialog = await openMovePicker("a.md");
+    await vi.waitFor(() =>
+      expect(optionPaths(dialog)).toEqual([
+        "Notes / _attachments",
+        "Notes / _attachments / 2026",
+        "Notes / Archive",
+        "Notes / Projects",
+        "Notes / Projects / _attachments",
+      ]),
+    );
+
+    act(() => updateSettings({ showAttachmentsFolder: false }));
     await vi.waitFor(() =>
       expect(optionPaths(dialog)).toEqual([
         "Notes / Archive",

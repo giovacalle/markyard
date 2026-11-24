@@ -715,7 +715,7 @@ describe("lazy tree expansion", () => {
     expect(screen.queryByRole("treeitem", { name: /nested/ })).not.toBeInTheDocument();
   });
 
-  it("hides the root attachments folder (default and custom) while keeping nested same-name folders", async () => {
+  it("shows the root attachments folder by default and hides it (default or custom) when disabled", async () => {
     signedInWithRoot();
     server.use(
       http.get("/api/folders/root-id/children", () =>
@@ -738,7 +738,12 @@ describe("lazy tree expansion", () => {
     render(<App />);
     await screen.findByRole("tree", { name: "Notes" });
 
-    // Default `_attachments` at root is hidden; `Media` and `Docs` stay visible.
+    // By default `showAttachmentsFolder` is on, so root `_attachments` is visible.
+    expect(screen.getByRole("treeitem", { name: /_attachments/ })).toBeInTheDocument();
+    expect(screen.getByRole("treeitem", { name: /Media/ })).toBeInTheDocument();
+
+    // Turning the setting off hides root `_attachments` while keeping `Media` and `Docs`.
+    act(() => updateSettings({ showAttachmentsFolder: false }));
     expect(screen.queryByRole("treeitem", { name: /_attachments/ })).not.toBeInTheDocument();
     expect(screen.getByRole("treeitem", { name: /Media/ })).toBeInTheDocument();
 
@@ -752,7 +757,8 @@ describe("lazy tree expansion", () => {
     expect(screen.getAllByRole("treeitem", { name: /_attachments/ })).toHaveLength(2);
   });
 
-  it("shows the empty state when the root only contains the attachments folder", async () => {
+  it("shows the empty state when the root only contains a hidden attachments folder", async () => {
+    updateSettings({ showAttachmentsFolder: false });
     signedInWithRoot();
     server.use(
       http.get("/api/folders/root-id/children", () =>

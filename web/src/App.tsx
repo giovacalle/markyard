@@ -1288,24 +1288,28 @@ function SessionContent({
             } ${mobileSidebarOpen ? "translate-x-0" : "-translate-x-full"}`}
           >
             <div className="flex min-h-12 shrink-0 items-center justify-between gap-2 border-b border-neutral-200 px-3.5 py-2 dark:border-neutral-800">
-              <h1
-                className="truncate text-sm font-semibold tracking-tight text-neutral-900 dark:text-neutral-100"
-                title={rootTitle}
-              >
-                {rootTitle}
-              </h1>
-              <div className="flex shrink-0 items-center gap-0.5">
-                <SyncInspector {...syncInspectorProps} className="hidden md:inline-flex" />
-                <button
-                  type="button"
-                  aria-label="Collapse sidebar"
-                  title="Collapse sidebar"
-                  onClick={handleHideSidebar}
-                  className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-neutral-500 transition-colors hover:bg-neutral-200/70 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+              <div className="flex min-w-0 items-center gap-1">
+                <h1
+                  className="truncate text-sm font-semibold tracking-tight text-neutral-900 dark:text-neutral-100"
+                  title={rootTitle}
                 >
-                  <PanelLeftIcon className="size-4" />
-                </button>
+                  {rootTitle}
+                </h1>
+                <SyncInspector
+                  {...syncInspectorProps}
+                  align="start"
+                  className="hidden md:inline-flex"
+                />
               </div>
+              <button
+                type="button"
+                aria-label="Collapse sidebar"
+                title="Collapse sidebar"
+                onClick={handleHideSidebar}
+                className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-neutral-500 transition-colors hover:bg-neutral-200/70 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+              >
+                <PanelLeftIcon className="size-4" />
+              </button>
             </div>
 
             <div className="shrink-0 border-b border-neutral-200 px-2.5 py-2 dark:border-neutral-800">

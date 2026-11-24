@@ -218,7 +218,7 @@ function RootFolderContent({
   selectedId: string | null;
   revealPath?: readonly string[];
 }) {
-  const { attachmentsFolder } = useSettings();
+  const { attachmentsFolder, showAttachmentsFolder } = useSettings();
   const { data, error, refetch } = useChildren(folderId);
 
   if (data === undefined) {
@@ -245,9 +245,11 @@ function RootFolderContent({
     );
   }
 
-  const visible = visibleNodes(data).filter(
-    (node) => !isRootAttachmentsFolder(node, folderId, folderId, attachmentsFolder),
-  );
+  const visible = showAttachmentsFolder
+    ? visibleNodes(data)
+    : visibleNodes(data).filter(
+        (node) => !isRootAttachmentsFolder(node, folderId, folderId, attachmentsFolder),
+      );
   if (visible.length === 0) {
     return (
       <p className="px-2 py-1.5 text-sm text-neutral-500 dark:text-neutral-400">

@@ -14,6 +14,7 @@ describe("settings store", () => {
     expect(getSettings()).toEqual(DEFAULT_SETTINGS);
     expect(DEFAULT_SETTINGS).toEqual({
       attachmentsFolder: "_attachments",
+      showAttachmentsFolder: true,
       dailyNotesFolder: "",
       templatesFolder: "Templates",
       defaultMode: "preview",
@@ -37,7 +38,12 @@ describe("settings store", () => {
   it("ignores corrupt or invalid stored values", () => {
     localStorage.setItem(
       SETTINGS_STORAGE_KEY,
-      JSON.stringify({ attachmentsFolder: "a/b", defaultMode: "nope", linkPreviewsEnabled: 1 }),
+      JSON.stringify({
+        attachmentsFolder: "a/b",
+        showAttachmentsFolder: "yes",
+        defaultMode: "nope",
+        linkPreviewsEnabled: 1,
+      }),
     );
     resetSettings({ keepStorage: true });
     expect(getSettings()).toEqual(DEFAULT_SETTINGS);

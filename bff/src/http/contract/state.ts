@@ -18,6 +18,7 @@ export const UserStateSchema = Schema.Struct({
   infoDrawerOpen: Schema.optionalKey(Schema.Boolean),
   rootFolderId: Schema.optionalKey(Schema.NullOr(Schema.String)),
   attachmentsFolder: Schema.optionalKey(Schema.String),
+  showAttachmentsFolder: Schema.optionalKey(Schema.Boolean),
   dailyNotesFolder: Schema.optionalKey(Schema.String),
   templatesFolder: Schema.optionalKey(Schema.String),
   defaultMode: Schema.optionalKey(Schema.Literals(["preview", "edit"])),

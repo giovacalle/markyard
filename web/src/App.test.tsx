@@ -169,10 +169,17 @@ describe("App", () => {
     render(<App />);
 
     const sidebar = await screen.findByRole("complementary", { name: "Sidebar" });
-    expect(await screen.findByRole("heading", { level: 1, name: "Notes" })).toBeInTheDocument();
+    const heading = await screen.findByRole("heading", { level: 1, name: "Notes" });
+    expect(heading).toBeInTheDocument();
     expect(screen.queryByText("Markyard")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+    // Sync status sits next to the vault name rather than beside the sidebar collapse toggle.
+    const syncButton = within(sidebar).getByRole("button", { name: /^Sync status:/ });
+    expect(heading.parentElement).toContainElement(syncButton);
+    const collapseButton = within(sidebar).getByRole("button", { name: "Collapse sidebar" });
+    expect(heading.parentElement).not.toContainElement(collapseButton);
+
+    fireEvent.click(collapseButton);
     expect(sidebar).toHaveAttribute("hidden");
 
     fireEvent.click(screen.getByRole("button", { name: "Open sidebar" }));

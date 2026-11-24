@@ -25,6 +25,8 @@ export interface UserState {
   readonly rootFolderId?: string | null;
   /** The image attachments folder directly under the vault root. */
   readonly attachmentsFolder?: string;
+  /** Whether the root attachments folder is shown in the tree and folder pickers. */
+  readonly showAttachmentsFolder?: boolean;
   /** Where daily notes go: `""` is the vault root, otherwise a folder directly under it. */
   readonly dailyNotesFolder?: string;
   readonly templatesFolder?: string;
@@ -50,6 +52,7 @@ const FLAGS = [
   "focusMode",
   "typewriterMode",
   "infoDrawerOpen",
+  "showAttachmentsFolder",
   "linkPreviewsEnabled",
 ] as const;
 /** Folder-name settings; only `dailyNotesFolder` may be `""` (the vault root). */

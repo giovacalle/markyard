@@ -11,6 +11,8 @@ export type DefaultMode = "preview" | "edit";
 export interface AppSettings {
   /** Root subfolder that receives uploaded images. */
   attachmentsFolder: string;
+  /** Whether the root attachments folder is shown in the file tree, move picker and command palette. */
+  showAttachmentsFolder: boolean;
   /** Root subfolder for daily notes; empty means the vault root. */
   dailyNotesFolder: string;
   /** Root subfolder whose notes are templates. */
@@ -23,6 +25,7 @@ export interface AppSettings {
 
 export const DEFAULT_SETTINGS: Readonly<AppSettings> = Object.freeze({
   attachmentsFolder: "_attachments",
+  showAttachmentsFolder: true,
   dailyNotesFolder: "",
   templatesFolder: "Templates",
   defaultMode: "preview",
@@ -80,6 +83,9 @@ export function sanitizeSettings(raw: unknown): Partial<AppSettings> {
   folder("templatesFolder");
   if (isDefaultMode(input.defaultMode)) {
     out.defaultMode = input.defaultMode;
+  }
+  if (typeof input.showAttachmentsFolder === "boolean") {
+    out.showAttachmentsFolder = input.showAttachmentsFolder;
   }
   if (typeof input.linkPreviewsEnabled === "boolean") {
     out.linkPreviewsEnabled = input.linkPreviewsEnabled;

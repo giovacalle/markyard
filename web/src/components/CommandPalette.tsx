@@ -211,7 +211,7 @@ export function CommandPalette({
 }) {
   const queryClient = useQueryClient();
   const opsQueue = useOptionalOpsQueue();
-  const { attachmentsFolder } = useSettings();
+  const { attachmentsFolder, showAttachmentsFolder } = useSettings();
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const listboxId = useId();
@@ -223,7 +223,7 @@ export function CommandPalette({
   const [driveHits, setDriveHits] = useState<SearchHit[]>([]);
   const [searchingDrive, setSearchingDrive] = useState(false);
 
-  // Reset state, load local full-text cache, and warm unexpanded folders whenever opened.
+  // Reset state and load local full-text cache whenever opened.
   useEffect(() => {
     if (!open) {
       return;
@@ -260,40 +260,48 @@ export function CommandPalette({
       inputRef.current?.focus();
     }, 0);
 
-    // Opportunistically warm unexpanded folders in cache so nested notes show up in local search.
+    return () => {
+      active = false;
+      window.clearTimeout(focusTimer);
+    };
+  }, [open, initialQuery]);
+
+  // Opportunistically warm unexpanded folders in cache so nested notes show up in local search.
+  useEffect(() => {
+    if (!open || offline) {
+      return;
+    }
+    let active = true;
     const warmController = new AbortController();
-    if (!offline) {
-      const { folders } = collectIndexedTree(queryClient);
-      const unloaded = folders
-        .filter(
-          (f) =>
-            !isLocalId(f.node.id) &&
-            !isHiddenAttachmentsFolder(f, attachmentsFolder) &&
-            queryClient.getQueryData(childrenKey(f.node.id)) === undefined,
-        )
-        .slice(0, MAX_WARM_FOLDERS);
-      if (unloaded.length > 0) {
-        void Promise.allSettled(
-          unloaded.map(async (f) => {
-            const raw = await fetchChildren(f.node.id, warmController.signal);
-            const nodes = opsQueue !== null ? opsQueue.overlayListing(f.node.id, raw) : raw;
-            queryClient.setQueryData(childrenKey(f.node.id), nodes);
-            void writeCachedFolder(f.node.id, nodes);
-          }),
-        ).then(() => {
-          if (active) {
-            setTreeVersion((v) => v + 1);
-          }
-        });
-      }
+    const { folders } = collectIndexedTree(queryClient);
+    const unloaded = folders
+      .filter(
+        (f) =>
+          !isLocalId(f.node.id) &&
+          (showAttachmentsFolder || !isHiddenAttachmentsFolder(f, attachmentsFolder)) &&
+          queryClient.getQueryData(childrenKey(f.node.id)) === undefined,
+      )
+      .slice(0, MAX_WARM_FOLDERS);
+    if (unloaded.length > 0) {
+      void Promise.allSettled(
+        unloaded.map(async (f) => {
+          const raw = await fetchChildren(f.node.id, warmController.signal);
+          const nodes = opsQueue !== null ? opsQueue.overlayListing(f.node.id, raw) : raw;
+          queryClient.setQueryData(childrenKey(f.node.id), nodes);
+          void writeCachedFolder(f.node.id, nodes);
+        }),
+      ).then(() => {
+        if (active) {
+          setTreeVersion((v) => v + 1);
+        }
+      });
     }
 
     return () => {
       active = false;
-      window.clearTimeout(focusTimer);
       warmController.abort();
     };
-  }, [open, initialQuery, offline, queryClient, opsQueue, attachmentsFolder]);
+  }, [open, offline, queryClient, opsQueue, attachmentsFolder, showAttachmentsFolder]);
 
   const trimmed = query.trim();
   const isCommandMode = trimmed.startsWith(">");
@@ -362,7 +370,9 @@ export function CommandPalette({
     }
     void treeVersion;
     const { notes, folders: allFolders } = collectIndexedTree(queryClient);
-    const folders = allFolders.filter((f) => !isHiddenAttachmentsFolder(f, attachmentsFolder));
+    const folders = showAttachmentsFolder
+      ? allFolders
+      : allFolders.filter((f) => !isHiddenAttachmentsFolder(f, attachmentsFolder));
     const notesById = new Map(notes.map((n) => [n.node.id, n]));
     const todayName = todayNoteName();
 
@@ -1046,6 +1056,7 @@ export function CommandPalette({
     treeVersion,
     queryClient,
     attachmentsFolder,
+    showAttachmentsFolder,
     defaultTargetFolder,
     rootFolder,
     openFileId,

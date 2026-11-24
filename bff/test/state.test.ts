@@ -113,6 +113,7 @@ describe("state with STATE_DB", () => {
     const settings = {
       rootFolderId: "vault-1",
       attachmentsFolder: "  assets ",
+      showAttachmentsFolder: false,
       dailyNotesFolder: "",
       templatesFolder: "Templates",
       defaultMode: "edit",
@@ -221,6 +222,7 @@ describe("state with STATE_DB", () => {
       ["templates empty", { state: { templatesFolder: "" }, updatedAt: 1 }],
       ["templates number", { state: { templatesFolder: 3 }, updatedAt: 1 }],
       ["bad mode", { state: { defaultMode: "split" }, updatedAt: 1 }],
+      ["bad show attachments", { state: { showAttachmentsFolder: "yes" }, updatedAt: 1 }],
       ["bad link previews", { state: { linkPreviewsEnabled: "on" }, updatedAt: 1 }],
       ["state array", { state: [], updatedAt: 1 }],
       ["state missing", { updatedAt: 1 }],

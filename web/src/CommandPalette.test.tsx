@@ -14,6 +14,7 @@ import {
   todayNoteName,
 } from "./commandSearch";
 import { clearLocalCache, writeCachedFile } from "./localCache";
+import { updateSettings } from "./settings";
 
 const server = setupServer();
 
@@ -466,7 +467,8 @@ describe("Command Palette (Cmd+K)", () => {
     }
   });
 
-  it("skips warming the root attachments folder and omits it from folder commands", async () => {
+  it("skips warming the root attachments folder and omits it from folder commands when hidden in Settings", async () => {
+    updateSettings({ showAttachmentsFolder: false });
     const fetchedFolders: string[] = [];
     server.use(
       http.get("/api/session", () => HttpResponse.json({ email: "owner@example.com" })),
@@ -503,6 +505,13 @@ describe("Command Palette (Cmd+K)", () => {
 
     fireEvent.change(input, { target: { value: ">_attachments" } });
     expect(within(dialog).queryByRole("option", { name: /New note in _attachments/ })).toBeNull();
+
+    // Turning the setting back on includes the attachments folder in warming and palette commands.
+    act(() => updateSettings({ showAttachmentsFolder: true }));
+    expect(
+      within(dialog).getByRole("option", { name: /New note in _attachments/ }),
+    ).toBeInTheDocument();
+    await vi.waitFor(() => expect(fetchedFolders).toContain("att-root"));
   });
 
   it("searches frontmatter tags via `tag:` operator and regular local search", async () => {

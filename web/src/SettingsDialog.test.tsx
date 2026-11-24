@@ -152,6 +152,14 @@ describe("Settings dialog", () => {
     fireEvent.click(within(mode).getByRole("radio", { name: "Edit" }));
     expect(getSettings().defaultMode).toBe("edit");
 
+    const showAttachments = within(dialog).getByRole("switch", {
+      name: "Show attachments folder",
+    });
+    expect(showAttachments).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(showAttachments);
+    expect(showAttachments).toHaveAttribute("aria-checked", "false");
+    expect(getSettings().showAttachmentsFolder).toBe(false);
+
     const previews = within(dialog).getByRole("switch", { name: "URL link previews" });
     expect(previews).toHaveAttribute("aria-checked", "true");
     fireEvent.click(previews);

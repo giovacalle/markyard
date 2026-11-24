@@ -75,17 +75,16 @@ function OpenMoveDialog({
     retry: false,
   });
 
-  const { attachmentsFolder } = useSettings();
+  const { attachmentsFolder, showAttachmentsFolder } = useSettings();
   const targets = useMemo(() => {
     void index.data;
-    const folders = withoutRootAttachmentsFolder(
-      knownFolders(queryClient),
-      rootId,
-      attachmentsFolder,
-    );
+    const allFolders = knownFolders(queryClient);
+    const folders = showAttachmentsFolder
+      ? allFolders
+      : withoutRootAttachmentsFolder(allFolders, rootId, attachmentsFolder);
     const item = { id: node.id, kind: node.kind, parentId: knownParentId(queryClient, node.id) };
     return moveTargets(folders, rootId, item);
-  }, [index.data, queryClient, node, rootId, attachmentsFolder]);
+  }, [index.data, queryClient, node, rootId, attachmentsFolder, showAttachmentsFolder]);
 
   const results = useMemo(() => {
     if (query.trim().length === 0) {

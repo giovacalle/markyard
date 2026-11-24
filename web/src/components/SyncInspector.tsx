@@ -74,6 +74,7 @@ const ROW_BUTTON_CLASS =
 export function SyncInspector({
   offline,
   className = "",
+  align = "end",
   onRetry,
   onRetryOp,
   onRetryAll,
@@ -84,6 +85,7 @@ export function SyncInspector({
 }: {
   offline: boolean;
   className?: string;
+  align?: "start" | "center" | "end";
   onRetry: (fileId: string) => void;
   onRetryOp?: (opId: string) => void;
   onRetryAll: () => void;
@@ -179,7 +181,7 @@ export function SyncInspector({
 
       <PopoverContent
         side="bottom"
-        align="end"
+        align={align}
         sideOffset={6}
         className="z-50 w-80 max-w-[calc(100vw-1rem)] rounded-xl border border-neutral-200 bg-white p-3 text-neutral-900 shadow-lg outline-none dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-100"
       >

@@ -21,6 +21,7 @@ export interface CloudUserState {
   infoDrawerOpen?: boolean;
   rootFolderId?: string | null;
   attachmentsFolder?: string;
+  showAttachmentsFolder?: boolean;
   dailyNotesFolder?: string;
   templatesFolder?: string;
   defaultMode?: "preview" | "edit";
