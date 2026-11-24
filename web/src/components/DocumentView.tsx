@@ -235,6 +235,7 @@ export function DocumentView({
   onFileRenamed,
   onNotFound,
   onTagClick,
+  onRevealInTree,
 }: {
   fileId: string;
   /** Stable key kept across `local:` → real Drive ID remap so CodeMirror never unmounts. */
@@ -253,6 +254,8 @@ export function DocumentView({
   /** Drive answered 404 for this note's content. */
   onNotFound?: (fileId: string) => void;
   onTagClick?: (tag: string) => void;
+  /** Expands the file tree down to this note and scrolls it into view. */
+  onRevealInTree?: () => void;
 }) {
   return (
     <RetryScope className="flex min-h-0 flex-1 flex-col">
@@ -273,6 +276,7 @@ export function DocumentView({
           onFileRenamed={onFileRenamed}
           onNotFound={onNotFound}
           onTagClick={onTagClick}
+          onRevealInTree={onRevealInTree}
           onRetry={onRetry}
         />
       )}
@@ -296,6 +300,7 @@ function DocumentContent({
   onFileRenamed,
   onNotFound,
   onTagClick,
+  onRevealInTree,
   onRetry,
 }: {
   fileId: string;
@@ -314,6 +319,7 @@ function DocumentContent({
   /** Drive answered 404 for this note's content. */
   onNotFound?: (fileId: string) => void;
   onTagClick?: (tag: string) => void;
+  onRevealInTree?: () => void;
   onRetry: OnRetry;
 }) {
   const queryClient = useQueryClient();
@@ -463,6 +469,7 @@ function DocumentContent({
           onDirtyChange={onDirtyChange}
           onRenamed={handleRenamed}
           onTagClick={onTagClick}
+          onRevealInTree={onRevealInTree}
           onRetry={onRetry}
         />
       ) : (
@@ -482,15 +489,7 @@ function DocumentContent({
                   <h2 className="truncate text-sm font-semibold text-neutral-900 dark:text-neutral-100">
                     {fileName}
                   </h2>
-                  {folderPath.length > 0 && (
-                    <span
-                      data-testid="document-path"
-                      title={folderPath}
-                      className="truncate text-[11px] leading-tight text-neutral-400 dark:text-neutral-500"
-                    >
-                      {folderPath}
-                    </span>
-                  )}
+                  <FolderPath path={folderPath} onReveal={onRevealInTree} />
                 </div>
               </div>
               <div className="flex shrink-0 items-center gap-2">
@@ -686,6 +685,40 @@ function RenameableTitle({
   );
 }
 
+/** The note's folder path under its name; a button that reveals the note in the tree when it can. */
+function FolderPath({
+  path,
+  onReveal,
+  className = "",
+}: {
+  path: string;
+  onReveal?: () => void;
+  className?: string;
+}) {
+  if (path.length === 0) {
+    return null;
+  }
+  const base = `truncate text-left text-[11px] leading-tight text-neutral-400 dark:text-neutral-500 ${className}`;
+  if (onReveal === undefined) {
+    return (
+      <span data-testid="document-path" title={path} className={base}>
+        {path}
+      </span>
+    );
+  }
+  return (
+    <button
+      type="button"
+      data-testid="document-path"
+      title={`Show in file tree: ${path}`}
+      onClick={onReveal}
+      className={`${base} max-w-full cursor-pointer self-start rounded-sm underline-offset-2 transition-colors hover:text-neutral-700 hover:underline focus-visible:outline-2 focus-visible:outline-blue-600 dark:hover:text-neutral-300`}
+    >
+      {path}
+    </button>
+  );
+}
+
 function DocumentSession({
   fileId,
   fileName,
@@ -703,6 +736,7 @@ function DocumentSession({
   onDirtyChange,
   onRenamed,
   onTagClick,
+  onRevealInTree,
   onRetry,
 }: {
   fileId: string;
@@ -721,6 +755,7 @@ function DocumentSession({
   onDirtyChange: (dirty: boolean) => void;
   onRenamed: (node: DriveNode, previousName?: string) => void;
   onTagClick?: (tag: string) => void;
+  onRevealInTree?: () => void;
   onRetry: OnRetry;
 }) {
   const queryClient = useQueryClient();
@@ -1382,15 +1417,7 @@ function DocumentSession({
                   onRenamed(node, previousName);
                 }}
               />
-              {folderPath.length > 0 && (
-                <span
-                  data-testid="document-path"
-                  title={folderPath}
-                  className="truncate px-1 text-[11px] leading-tight text-neutral-400 dark:text-neutral-500"
-                >
-                  {folderPath}
-                </span>
-              )}
+              <FolderPath path={folderPath} onReveal={onRevealInTree} className="px-1" />
             </div>
             <span className="shrink-0 text-xs text-neutral-500 dark:text-neutral-400" role="status">
               {statusText}

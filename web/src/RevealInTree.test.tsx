@@ -170,6 +170,57 @@ describe("reveal the open note in the file tree", () => {
     await vi.waitFor(() => expect(scrolled).toContain(deep));
   });
 
+  it("re-reveals the open note, collapsed after opening it, when its folder path is clicked", async () => {
+    nestedDrive();
+    render(<App />);
+    const projects = await screen.findByRole("treeitem", { name: /Projects/ });
+    fireEvent.click(within(projects).getByText("Projects"));
+    const driveNotes = await screen.findByRole("treeitem", { name: /drive-notes/ });
+    fireEvent.click(within(driveNotes).getByText("drive-notes"));
+    const deep = await screen.findByRole("treeitem", { name: /deep\.md/ });
+    fireEvent.click(within(deep).getByText("deep.md"));
+    const docRegion = await screen.findByRole("region", { name: "Preview" });
+    // Collapse both folders after opening the note: the plain reveal does not undo that.
+    fireEvent.click(within(driveNotes).getByText("drive-notes"));
+    fireEvent.click(within(projects).getByText("Projects"));
+    expect(projects).toHaveAttribute("aria-expanded", "false");
+    expect(scrolled).not.toContain(deep);
+
+    const pathButton = await within(docRegion).findByRole("button", {
+      name: "Projects / drive-notes",
+    });
+    expect(pathButton).toHaveAttribute("title", "Show in file tree: Projects / drive-notes");
+    fireEvent.click(pathButton);
+
+    await vi.waitFor(() => expect(projects).toHaveAttribute("aria-expanded", "true"));
+    expect(driveNotes).toHaveAttribute("aria-expanded", "true");
+    await vi.waitFor(() => expect(scrolled).toContain(deep));
+    // The note's row flashes briefly so the eye finds it.
+    expect(within(deep).getByText("deep.md").closest("[data-reveal-flash]")).not.toBeNull();
+  });
+
+  it("reopens a collapsed sidebar when the folder path is clicked", async () => {
+    nestedDrive();
+    render(<App />);
+    const sidebar = await screen.findByRole("complementary", { name: "Sidebar" });
+    const projects = await screen.findByRole("treeitem", { name: /Projects/ });
+    fireEvent.click(within(projects).getByText("Projects"));
+    const driveNotes = await screen.findByRole("treeitem", { name: /drive-notes/ });
+    fireEvent.click(within(driveNotes).getByText("drive-notes"));
+    const deep = await screen.findByRole("treeitem", { name: /deep\.md/ });
+    fireEvent.click(within(deep).getByText("deep.md"));
+    const docRegion = await screen.findByRole("region", { name: "Preview" });
+
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Collapse sidebar" }));
+    expect(sidebar).toHaveAttribute("hidden");
+
+    fireEvent.click(
+      await within(docRegion).findByRole("button", { name: "Projects / drive-notes" }),
+    );
+    expect(sidebar).not.toHaveAttribute("hidden");
+    await vi.waitFor(() => expect(scrolled).toContain(deep));
+  });
+
   it("does not scroll the tree when the note is picked in the tree itself", async () => {
     nestedDrive();
     render(<App />);

@@ -1,6 +1,17 @@
 @import "tailwindcss";
 @custom-variant dark (&:where(.dark, .dark *));
 
+@theme {
+  /* A file-tree row revealed on demand; duration matches REVEAL_FLASH_MS in FileTree.tsx. */
+  --animate-reveal-flash: reveal-flash 1.2s ease-out;
+  @keyframes reveal-flash {
+    0%,
+    35% {
+      background-color: var(--reveal-flash-bg);
+    }
+  }
+}
+
 :root {
   color-scheme: light;
   --cm-bg: transparent;
@@ -19,6 +30,7 @@
   --cm-yaml-atom: #b45309;
   --cm-yaml-comment: #737373;
   --cm-yaml-fence: #a1a1a1;
+  --reveal-flash-bg: #bfdbfe;
 }
 
 :root.dark {
@@ -39,6 +51,7 @@
   --cm-yaml-atom: #ffd230;
   --cm-yaml-comment: #a1a1a1;
   --cm-yaml-fence: #737373;
+  --reveal-flash-bg: rgba(59, 130, 246, 0.35);
 }
 
 @layer components {

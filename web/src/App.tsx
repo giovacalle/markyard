@@ -208,6 +208,7 @@ function RootFolder({
   onDropMove,
   selectedId,
   revealPath,
+  revealRequest,
 }: {
   onOpen: (id: string) => void;
   onCreateInFolder: (folder: FolderTarget) => void;
@@ -219,6 +220,7 @@ function RootFolder({
   onDropMove: (node: DriveNode, targetFolderId: string) => void;
   selectedId: string | null;
   revealPath?: readonly string[];
+  revealRequest?: number;
 }) {
   return (
     <RetryScope>
@@ -235,6 +237,7 @@ function RootFolder({
           onDropMove={onDropMove}
           selectedId={selectedId}
           revealPath={revealPath}
+          revealRequest={revealRequest}
         />
       )}
     </RetryScope>
@@ -253,6 +256,7 @@ function RootFolderContent({
   onDropMove,
   selectedId,
   revealPath,
+  revealRequest,
 }: {
   onRetry: OnRetry;
   onOpen: (id: string) => void;
@@ -265,6 +269,7 @@ function RootFolderContent({
   onDropMove: (node: DriveNode, targetFolderId: string) => void;
   selectedId: string | null;
   revealPath?: readonly string[];
+  revealRequest?: number;
 }) {
   const { data, error, refetch } = useQuery({
     queryKey: ["root"],
@@ -287,6 +292,7 @@ function RootFolderContent({
           onDropMove={onDropMove}
           selectedId={selectedId}
           revealPath={revealPath}
+          revealRequest={revealRequest}
         />
       </section>
     );
@@ -497,6 +503,8 @@ function SessionContent({
   const [dirty, setDirty] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  // Bumped by clicking the open note's folder path: the tree reveals the note again.
+  const [revealRequest, setRevealRequest] = useState(0);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [paletteInitialQuery, setPaletteInitialQuery] = useState("");
   const [createdFile, setCreatedFile] = useState<{ id: string; name: string } | null>(null);
@@ -1007,6 +1015,11 @@ function SessionContent({
       }
     };
 
+    const handleRevealInTree = () => {
+      handleShowSidebar();
+      setRevealRequest((prev) => prev + 1);
+    };
+
     const handleOpenFile = (id: string, path?: readonly string[]) => {
       setRevealHint(path === undefined ? null : { id, path });
       setOpenPanel(null);
@@ -1378,6 +1391,7 @@ function SessionContent({
                 onDropMove={handleDropMove}
                 selectedId={openFileId}
                 revealPath={revealHint?.id === openFileId ? revealHint.path : undefined}
+                revealRequest={revealRequest}
               />
             </nav>
 
@@ -1504,6 +1518,7 @@ function SessionContent({
                 onFileRenamed={handleFileRenamed}
                 onNotFound={handleNotFound}
                 onTagClick={(tag) => openPalette(`tag:${tag}`)}
+                onRevealInTree={handleRevealInTree}
               />
             ) : (
               <>

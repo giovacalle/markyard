@@ -86,6 +86,9 @@ function useChildren(folderId: string) {
   return useQuery(childrenQuery(folderId, queryClient, opsQueue));
 }
 
+/** How long a revealed row stays flagged; matches `--animate-reveal-flash` in `index.css`. */
+const REVEAL_FLASH_MS = 1200;
+
 function prefersReducedMotion(): boolean {
   return (
     typeof window.matchMedia === "function" &&
@@ -106,6 +109,8 @@ interface TreeContextValue {
   onDeleteFile?: (file: DriveNode) => void;
   onMove?: (node: DriveNode) => void;
   drag: TreeDrag | null;
+  /** The row briefly highlighted after an explicit reveal. */
+  flashId: string | null;
 }
 
 /** Drag-and-drop moves inside the tree. */
@@ -144,6 +149,7 @@ export function FileTree({
   onDropMove,
   selectedId = null,
   revealPath,
+  revealRequest,
 }: {
   folderId: string;
   label: string;
@@ -163,6 +169,11 @@ export function FileTree({
    * note whose folders the tree has not loaded yet.
    */
   revealPath?: readonly string[];
+  /**
+   * Bump to reveal `selectedId` again on demand (expand its folders, scroll, flash its row), even
+   * after the user collapsed them or picked the note in the tree.
+   */
+  revealRequest?: number;
 }) {
   return (
     <RetryScope>
@@ -181,6 +192,7 @@ export function FileTree({
           onDropMove={onDropMove}
           selectedId={selectedId}
           revealPath={revealPath}
+          revealRequest={revealRequest}
         />
       )}
     </RetryScope>
@@ -201,6 +213,7 @@ function RootFolderContent({
   onDropMove,
   selectedId,
   revealPath,
+  revealRequest,
 }: {
   folderId: string;
   label: string;
@@ -217,6 +230,7 @@ function RootFolderContent({
   onDropMove?: (node: DriveNode, targetFolderId: string) => void;
   selectedId: string | null;
   revealPath?: readonly string[];
+  revealRequest?: number;
 }) {
   const { attachmentsFolder, showAttachmentsFolder } = useSettings();
   const { data, error, refetch } = useChildren(folderId);
@@ -273,6 +287,7 @@ function RootFolderContent({
       onDropMove={onDropMove}
       selectedId={selectedId}
       revealPath={revealPath}
+      revealRequest={revealRequest}
     />
   );
 }
@@ -291,6 +306,7 @@ function RootTree({
   onDropMove,
   selectedId,
   revealPath,
+  revealRequest,
 }: {
   rootFolderId: string;
   label: string;
@@ -307,6 +323,7 @@ function RootTree({
   onDropMove?: (node: DriveNode, targetFolderId: string) => void;
   selectedId: string | null;
   revealPath?: readonly string[];
+  revealRequest?: number;
 }) {
   const queryClient = useQueryClient();
   const opsQueue = useOptionalOpsQueue();
@@ -356,6 +373,10 @@ function RootTree({
   const [scrollTarget, setScrollTarget] = useState<string | null>(null);
   // A note picked in the tree is already in view: only notes opened elsewhere are revealed.
   const pickedInTreeRef = useRef<string | null>(null);
+  // The last `revealRequest` acted on: a newer one forces a reveal of the selected note.
+  const handledRevealRef = useRef(revealRequest);
+  const flashOnScrollRef = useRef(false);
+  const [flashId, setFlashId] = useState<string | null>(null);
 
   const showExpanded = (nextExpanded: string[]) => {
     expandedRef.current = nextExpanded;
@@ -401,7 +422,8 @@ function RootTree({
   // Reveal the open note: expand the folders above it, then scroll it into view. Runs when the
   // selection changes (Cmd+K, a restored note, `?file=`), so collapsing a folder later sticks.
   useEffect(() => {
-    if (selectedId === null || selectedId === pickedInTreeRef.current) {
+    const forced = revealRequest !== handledRevealRef.current;
+    if (selectedId === null || (!forced && selectedId === pickedInTreeRef.current)) {
       return;
     }
     pickedInTreeRef.current = null;
@@ -409,6 +431,10 @@ function RootTree({
     const reveal = (ancestors: string[]) => {
       if (cancelled) {
         return;
+      }
+      if (forced) {
+        handledRevealRef.current = revealRequest;
+        flashOnScrollRef.current = true;
       }
       const current = expandedRef.current;
       const missing = ancestors.filter((id) => !current.includes(id));
@@ -477,7 +503,7 @@ function RootTree({
     };
     // handleExpandedChange only touches state setters and refs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedId, revealKey, rootFolderId, queryClient, opsQueue]);
+  }, [selectedId, revealKey, revealRequest, rootFolderId, queryClient, opsQueue]);
 
   // The note's row may render only after its folders' listings load: scroll once it is there.
   useEffect(() => {
@@ -496,6 +522,10 @@ function RootTree({
         block: "nearest",
         behavior: prefersReducedMotion() ? "auto" : "smooth",
       });
+      if (flashOnScrollRef.current) {
+        flashOnScrollRef.current = false;
+        setFlashId(scrollTarget);
+      }
       setScrollTarget(null);
       return true;
     };
@@ -517,6 +547,14 @@ function RootTree({
       window.clearTimeout(giveUp);
     };
   }, [scrollTarget]);
+
+  useEffect(() => {
+    if (flashId === null) {
+      return;
+    }
+    const timer = window.setTimeout(() => setFlashId(null), REVEAL_FLASH_MS);
+    return () => window.clearTimeout(timer);
+  }, [flashId]);
 
   const handleCreateInFolder = onCreateInFolder
     ? (folder: DriveNode) => {
@@ -564,6 +602,7 @@ function RootTree({
         onDeleteFile,
         onMove,
         drag,
+        flashId,
       }}
     >
       <div
@@ -622,6 +661,7 @@ function Nodes({ nodes, parentId }: { nodes: DriveNode[]; parentId: string }) {
     onDeleteFile,
     onMove,
     drag,
+    flashId,
   } = useTreeContext();
   const duplicates = duplicateNames(nodes);
 
@@ -650,6 +690,7 @@ function Nodes({ nodes, parentId }: { nodes: DriveNode[]; parentId: string }) {
               draggable={draggable || undefined}
               data-drop-target={drag?.dropTargetId === node.id && isFolder ? "true" : undefined}
               data-dragging={drag?.dragging?.node.id === node.id ? "true" : undefined}
+              data-reveal-flash={flashId === node.id ? "true" : undefined}
               onDragStart={
                 draggable
                   ? (event) => {
@@ -701,7 +742,7 @@ function Nodes({ nodes, parentId }: { nodes: DriveNode[]; parentId: string }) {
                 event.stopPropagation();
                 setOpenMenuId(node.id);
               }}
-              className="group flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-1.5 text-neutral-700 select-none hover:bg-neutral-200/60 [[role=treeitem]:focus-visible>&]:outline-2 [[role=treeitem]:focus-visible>&]:outline-blue-600 data-[selected]:bg-neutral-200/90 data-[selected]:font-medium data-[selected]:text-neutral-950 data-[disabled]:cursor-not-allowed data-[disabled]:text-neutral-400 data-[disabled]:hover:bg-transparent data-[dragging]:opacity-50 data-[drop-target]:bg-blue-100 data-[drop-target]:outline-2 data-[drop-target]:outline-blue-500 dark:text-neutral-300 dark:data-[drop-target]:bg-blue-950/60 dark:hover:bg-neutral-800/70 dark:data-[selected]:bg-neutral-800 dark:data-[selected]:text-neutral-50 dark:data-[disabled]:text-neutral-600"
+              className="group flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-1.5 text-neutral-700 select-none hover:bg-neutral-200/60 [[role=treeitem]:focus-visible>&]:outline-2 [[role=treeitem]:focus-visible>&]:outline-blue-600 data-[selected]:bg-neutral-200/90 data-[selected]:font-medium data-[selected]:text-neutral-950 data-[disabled]:cursor-not-allowed data-[disabled]:text-neutral-400 data-[disabled]:hover:bg-transparent data-[dragging]:opacity-50 data-[drop-target]:bg-blue-100 data-[drop-target]:outline-2 data-[drop-target]:outline-blue-500 data-[reveal-flash]:motion-safe:animate-reveal-flash dark:text-neutral-300 dark:data-[drop-target]:bg-blue-950/60 dark:hover:bg-neutral-800/70 dark:data-[selected]:bg-neutral-800 dark:data-[selected]:text-neutral-50 dark:data-[disabled]:text-neutral-600"
             >
               {isFolder ? (
                 <TreeItemIndicator className="inline-flex size-4 shrink-0 items-center justify-center text-neutral-400 transition-transform data-[expanded]:rotate-90 dark:text-neutral-500">
