@@ -239,6 +239,76 @@ describe("Command Palette (Cmd+K)", () => {
     expect(screen.queryByRole("dialog", { name: "Command palette" })).not.toBeInTheDocument();
   });
 
+  it("drives results with ui-sdk Command keyboard navigation and closes on one Escape", async () => {
+    server.use(
+      http.get("/api/session", () => HttpResponse.json({ email: "owner@example.com" })),
+      http.get("/api/root", () => HttpResponse.json(node("root-id", "Notes", "folder"))),
+      http.get("/api/folders/root-id/children", () =>
+        HttpResponse.json({
+          nodes: [node("a-id", "alpha.md", "markdown"), node("b-id", "beta.md", "markdown")],
+        }),
+      ),
+      http.get("/api/search", () => HttpResponse.json({ results: [] })),
+    );
+
+    render(<App />);
+    await screen.findByRole("treeitem", { name: /alpha\.md/ });
+
+    pressCmdK();
+    const dialog = await screen.findByRole("dialog", { name: "Command palette" });
+    expect(dialog).toHaveAttribute("data-slot", "dialog-content");
+    const input = within(dialog).getByRole("combobox", { name: "Search notes and commands" });
+    expect(input).toHaveAttribute("data-slot", "command-input");
+    expect(input).toHaveFocus();
+
+    await vi.waitFor(() => {
+      const options = within(dialog).getAllByRole("option");
+      expect(options.length).toBeGreaterThan(2);
+      for (const option of options) {
+        expect(option).toHaveAttribute("data-slot", "command-item");
+      }
+      expect(options[0]).toHaveAttribute("aria-selected", "true");
+    });
+
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    const options = within(dialog).getAllByRole("option");
+    expect(options[1]).toHaveAttribute("aria-selected", "true");
+    expect(options[0]).not.toHaveAttribute("aria-selected", "true");
+    expect(document.activeElement).toBe(input);
+
+    // ArrowUp twice from the second option wraps to the last one.
+    fireEvent.keyDown(input, { key: "ArrowUp" });
+    fireEvent.keyDown(input, { key: "ArrowUp" });
+    expect(options[options.length - 1]).toHaveAttribute("aria-selected", "true");
+
+    // A query change moves the highlight back to the first result.
+    fireEvent.change(input, { target: { value: ">theme" } });
+    await vi.waitFor(() => {
+      const themed = within(dialog).getAllByRole("option");
+      expect(themed[0]).toHaveAccessibleName(/^Theme:/);
+      expect(themed[0]).toHaveAttribute("aria-selected", "true");
+    });
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    fireEvent.change(input, { target: { value: ">theme:" } });
+    await vi.waitFor(() => {
+      expect(within(dialog).getAllByRole("option")[0]).toHaveAttribute("aria-selected", "true");
+    });
+
+    // Nothing matches: the empty message sits outside the results listbox.
+    fireEvent.change(input, { target: { value: ">zzqqxx" } });
+    const listbox = within(dialog).getByRole("listbox", { name: "Search results" });
+    const empty = await within(dialog).findByText("No matching commands.");
+    expect(listbox).not.toContainElement(empty);
+
+    // A non-empty query still closes the palette in one Escape.
+    fireEvent.change(input, { target: { value: "alp" } });
+    expect(input).toHaveValue("alp");
+    fireEvent.keyDown(input, { key: "Escape" });
+    await vi.waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Command palette" })).not.toBeInTheDocument();
+    });
+  });
+
   it("merges local full-text snippets from IndexedDB with remote Google Drive /api/search hits", async () => {
     await writeCachedFile("a-id", "# Alpha\n\nThis note mentions quantum computing.\n", '"e-1"');
 

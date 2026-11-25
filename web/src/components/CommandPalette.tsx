@@ -1,5 +1,15 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandGroupLabel,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@ui-sdk/react/command";
+import { Dialog, DialogBackdrop, DialogContent } from "@ui-sdk/react/dialog";
+import {
   type ReactNode,
   useCallback,
   useEffect,
@@ -236,10 +246,8 @@ export function CommandPalette({
   const opsQueue = useOptionalOpsQueue();
   const { attachmentsFolder, showAttachmentsFolder } = useSettings();
   const inputRef = useRef<HTMLInputElement>(null);
-  const listRef = useRef<HTMLDivElement>(null);
-  const listboxId = useId();
+  const resultsLabelId = useId();
   const [query, setQuery] = useState("");
-  const [activeIndex, setActiveIndex] = useState(0);
   const [cachedFiles, setCachedFiles] = useState<CachedFile[]>([]);
   const [recentIds, setRecentIds] = useState<string[]>([]);
   const [treeVersion, setTreeVersion] = useState(0);
@@ -290,7 +298,6 @@ export function CommandPalette({
       return;
     }
     setQuery(initialQuery);
-    setActiveIndex(0);
     setDriveHits([]);
     setSearchingDrive(false);
     setRecentIds(getRecentFileIds());
@@ -529,7 +536,6 @@ export function CommandPalette({
         quick: true,
         onSelect: () => {
           setQuery("#");
-          setActiveIndex(0);
           inputRef.current?.focus();
         },
       });
@@ -775,7 +781,6 @@ export function CommandPalette({
               icon: <HashIcon className="size-4" />,
               onSelect: () => {
                 setQuery(`tag:${label}`);
-                setActiveIndex(0);
                 inputRef.current?.focus();
               },
             };
@@ -1269,61 +1274,20 @@ export function CommandPalette({
     onJumpToHeading,
   ]);
 
-  const clampedActive = items.length === 0 ? -1 : Math.min(activeIndex, items.length - 1);
-
-  useEffect(() => {
-    if (!open || clampedActive < 0) {
-      return;
-    }
-    const el = listRef.current?.querySelector<HTMLElement>(`[data-index="${clampedActive}"]`);
-    el?.scrollIntoView?.({ block: "nearest" });
-  }, [open, clampedActive]);
-
   if (!open) {
     return null;
   }
 
-  const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      event.stopPropagation();
-      onClose();
-      return;
-    }
-    if (event.key === "ArrowDown") {
-      event.preventDefault();
-      if (items.length > 0) {
-        setActiveIndex((prev) => (prev + 1) % items.length);
-      }
-      return;
-    }
-    if (event.key === "ArrowUp") {
-      event.preventDefault();
-      if (items.length > 0) {
-        setActiveIndex((prev) => (prev - 1 + items.length) % items.length);
-      }
-      return;
-    }
-    if (event.key === "Enter") {
-      if (clampedActive >= 0 && items[clampedActive]) {
-        event.preventDefault();
-        items[clampedActive].onSelect();
-      }
-    }
-  };
-
-  // Group items sequentially by section while preserving flat indices for keyboard navigation.
-  const sections: { title: string; entries: { item: PaletteItem; flatIndex: number }[] }[] = [];
-  items.forEach((item, flatIndex) => {
+  // Group items sequentially by section, keeping the computed order (filtering is app-side).
+  const sections: { title: string; items: PaletteItem[] }[] = [];
+  for (const item of items) {
     const last = sections[sections.length - 1];
     if (last && last.title === item.section) {
-      last.entries.push({ item, flatIndex });
+      last.items.push(item);
     } else {
-      sections.push({ title: item.section, entries: [{ item, flatIndex }] });
+      sections.push({ title: item.section, items: [item] });
     }
-  });
-
-  const activeItemId = clampedActive >= 0 ? `${listboxId}-opt-${clampedActive}` : undefined;
+  }
 
   const emptyMessage = isHeadingMode
     ? openFileId === null
@@ -1340,127 +1304,118 @@ export function CommandPalette({
           : "No matching notes or commands.";
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-neutral-950/45 px-3 pt-[12vh] backdrop-blur-[1px] sm:px-4"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) {
+    <Dialog
+      open
+      onOpenChange={(next) => {
+        if (!next) {
           onClose();
         }
       }}
     >
-      <div
-        role="dialog"
-        aria-modal="true"
+      <DialogBackdrop className="fixed inset-0 z-50 bg-neutral-950/45 backdrop-blur-[1px]" />
+      {/* initialFocus="none": the layout effect above focuses the input inside the opening tap. */}
+      <DialogContent
+        initialFocus="none"
         aria-label="Command palette"
-        className="flex w-full max-w-xl flex-col overflow-hidden rounded-xl border border-neutral-200 bg-white shadow-2xl dark:border-neutral-800 dark:bg-neutral-900"
+        className="fixed top-[12vh] left-1/2 z-50 flex w-[calc(100vw-1.5rem)] max-w-xl -translate-x-1/2 flex-col overflow-hidden rounded-xl border border-neutral-200 bg-white shadow-2xl outline-none sm:w-[calc(100vw-2rem)] dark:border-neutral-800 dark:bg-neutral-900"
       >
-        <div className="flex items-center gap-2.5 border-b border-neutral-200 px-3.5 py-2.5 dark:border-neutral-800">
-          {isHeadingMode || isTagMode ? (
-            <HashIcon className="size-4 shrink-0 text-blue-600 dark:text-blue-400" />
-          ) : (
-            <SearchIcon className="size-4 shrink-0 text-neutral-400 dark:text-neutral-500" />
-          )}
-          <input
-            ref={inputRef}
-            type="text"
-            role="combobox"
-            aria-expanded="true"
-            aria-controls={listboxId}
-            aria-activedescendant={activeItemId}
-            aria-label="Search notes and commands"
-            placeholder="Search notes, content, tag:, > commands, # headings…"
-            value={query}
-            onChange={(event) => {
-              setQuery(event.target.value);
-              setActiveIndex(0);
-            }}
-            onKeyDown={handleKeyDown}
-            className="min-w-0 flex-1 border-0 bg-transparent text-sm text-neutral-900 placeholder:text-neutral-400 focus:outline-none dark:text-neutral-100 dark:placeholder:text-neutral-500"
-          />
-          {searchingDrive && (
-            <span
-              className="shrink-0 text-[11px] text-neutral-400 dark:text-neutral-500"
-              role="status"
-            >
-              Searching Drive…
-            </span>
-          )}
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close command palette"
-            className="rounded border border-neutral-200 px-1.5 py-0.5 text-[11px] font-medium text-neutral-500 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800"
-          >
-            Esc
-          </button>
-        </div>
-
-        <div
-          ref={listRef}
-          id={listboxId}
-          role="listbox"
-          aria-label="Search results"
-          className="max-h-[55vh] overflow-y-auto p-1.5"
+        <Command
+          filter={false}
+          query={query}
+          onQueryChange={(next, details) => {
+            // Escape closes the palette in one press, even with a query (ui-sdk would clear it first).
+            if (details.reason === "escape-key") {
+              onClose();
+              return;
+            }
+            setQuery(next);
+          }}
+          className="flex min-h-0 flex-col"
         >
-          {sections.length === 0 ? (
-            <p className="px-3 py-8 text-center text-sm text-neutral-500 dark:text-neutral-400">
-              {emptyMessage}
-            </p>
-          ) : (
-            sections.map((section) => (
-              <div key={section.title} className="mb-1.5 last:mb-0">
-                <div className="px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wider text-neutral-400 dark:text-neutral-500">
+          <div className="flex items-center gap-2.5 border-b border-neutral-200 px-3.5 py-2.5 dark:border-neutral-800">
+            {isHeadingMode || isTagMode ? (
+              <HashIcon className="size-4 shrink-0 text-blue-600 dark:text-blue-400" />
+            ) : (
+              <SearchIcon className="size-4 shrink-0 text-neutral-400 dark:text-neutral-500" />
+            )}
+            <CommandInput
+              ref={inputRef}
+              aria-label="Search notes and commands"
+              placeholder="Search notes, content, tag:, > commands, # headings…"
+              className="min-w-0 flex-1 border-0 bg-transparent text-sm text-neutral-900 placeholder:text-neutral-400 focus:outline-none dark:text-neutral-100 dark:placeholder:text-neutral-500"
+            />
+            {searchingDrive && (
+              <span
+                className="shrink-0 text-[11px] text-neutral-400 dark:text-neutral-500"
+                role="status"
+              >
+                Searching Drive…
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close command palette"
+              className="rounded border border-neutral-200 px-1.5 py-0.5 text-[11px] font-medium text-neutral-500 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800"
+            >
+              Esc
+            </button>
+          </div>
+
+          <CommandEmpty className="text-center text-sm text-neutral-500 data-empty:px-3 data-empty:py-8 dark:text-neutral-400">
+            {emptyMessage}
+          </CommandEmpty>
+          {/* CommandList names itself after the input; keep the list's own name. */}
+          <span id={resultsLabelId} hidden>
+            Search results
+          </span>
+          <CommandList
+            aria-labelledby={resultsLabelId}
+            className="max-h-[55vh] overflow-y-auto p-1.5 empty:p-0"
+          >
+            {sections.map((section) => (
+              <CommandGroup key={section.title} className="mb-1.5 last:mb-0">
+                <CommandGroupLabel className="px-2.5 py-1 text-[11px] font-semibold tracking-wider text-neutral-400 uppercase dark:text-neutral-500">
                   {section.title}
-                </div>
-                {section.entries.map(({ item, flatIndex }) => {
-                  const isActive = flatIndex === clampedActive;
-                  return (
-                    <button
-                      key={item.id}
-                      id={`${listboxId}-opt-${flatIndex}`}
-                      type="button"
-                      role="option"
-                      aria-label={item.subtitle ? `${item.label} — ${item.subtitle}` : item.label}
-                      aria-selected={isActive}
-                      data-index={flatIndex}
-                      onMouseEnter={() => setActiveIndex(flatIndex)}
-                      onMouseDown={(event) => event.preventDefault()}
-                      onClick={() => item.onSelect()}
-                      className={`flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors ${
-                        isActive
-                          ? "bg-neutral-100 text-neutral-950 dark:bg-neutral-800 dark:text-neutral-50"
-                          : "text-neutral-700 hover:bg-neutral-50 dark:text-neutral-200 dark:hover:bg-neutral-800/60"
-                      }`}
-                    >
-                      <span className="mt-0.5 shrink-0 text-neutral-400 dark:text-neutral-500">
-                        {item.icon}
+                </CommandGroupLabel>
+                {section.items.map((item) => (
+                  <CommandItem
+                    key={item.id}
+                    value={item.id}
+                    aria-label={item.subtitle ? `${item.label} — ${item.subtitle}` : item.label}
+                    onSelect={() => {
+                      item.onSelect();
+                    }}
+                    className="flex w-full cursor-pointer items-start gap-2.5 rounded-lg px-2.5 py-2 text-left text-neutral-700 transition-colors data-highlighted:bg-neutral-100 data-highlighted:text-neutral-950 dark:text-neutral-200 dark:data-highlighted:bg-neutral-800 dark:data-highlighted:text-neutral-50"
+                  >
+                    <span className="mt-0.5 shrink-0 text-neutral-400 dark:text-neutral-500">
+                      {item.icon}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-medium">
+                        <HighlightedText text={item.label} indices={item.matchIndices} />
                       </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm font-medium">
-                          <HighlightedText text={item.label} indices={item.matchIndices} />
-                        </span>
-                        {item.snippet ? (
-                          <SnippetLine snippet={item.snippet} />
-                        ) : (
-                          item.subtitle && (
-                            <span className="block truncate text-xs text-neutral-500 dark:text-neutral-400">
-                              {item.subtitle}
-                            </span>
-                          )
-                        )}
-                      </span>
-                      {item.badge && (
-                        <span className="mt-0.5 shrink-0 rounded bg-neutral-200/70 px-1.5 py-0.5 text-[11px] font-medium text-neutral-600 dark:bg-neutral-700/80 dark:text-neutral-300">
-                          {item.badge}
-                        </span>
+                      {item.snippet ? (
+                        <SnippetLine snippet={item.snippet} />
+                      ) : (
+                        item.subtitle && (
+                          <span className="block truncate text-xs text-neutral-500 dark:text-neutral-400">
+                            {item.subtitle}
+                          </span>
+                        )
                       )}
-                    </button>
-                  );
-                })}
-              </div>
-            ))
-          )}
-        </div>
+                    </span>
+                    {item.badge && (
+                      <span className="mt-0.5 shrink-0 rounded bg-neutral-200/70 px-1.5 py-0.5 text-[11px] font-medium text-neutral-600 dark:bg-neutral-700/80 dark:text-neutral-300">
+                        {item.badge}
+                      </span>
+                    )}
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            ))}
+          </CommandList>
+        </Command>
 
         <div className="hidden items-center justify-between gap-3 border-t border-neutral-200 bg-neutral-50/70 px-3.5 py-1.5 text-[11px] text-neutral-500 sm:flex dark:border-neutral-800 dark:bg-neutral-900/80 dark:text-neutral-400">
           <div className="flex items-center gap-3">
@@ -1472,7 +1427,7 @@ export function CommandPalette({
           </div>
           <span>{modShortcut("K")}</span>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
