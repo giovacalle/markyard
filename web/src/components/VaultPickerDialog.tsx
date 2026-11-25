@@ -7,6 +7,7 @@ import {
   DialogDescription,
   DialogTitle,
 } from "@ui-sdk/react/dialog";
+import { Listbox, ListboxItem, ListboxItemIndicator } from "@ui-sdk/react/listbox";
 import { type FormEvent, useId, useState } from "react";
 import {
   ApiError,
@@ -58,7 +59,6 @@ export function VaultPicker({
   onPicked: (root: DriveNode) => void;
 }) {
   const queryClient = useQueryClient();
-  const listId = useId();
   const newFolderId = useId();
   const [trail, setTrail] = useState<Crumb[]>([MY_DRIVE]);
   const [selected, setSelected] = useState<DriveNode | null>(null);
@@ -168,19 +168,17 @@ export function VaultPicker({
         </ol>
       </nav>
 
-      <ul
-        id={listId}
-        aria-label={`Folders in ${current.name}`}
+      <div
         aria-busy={folders.isPending}
         className="max-h-72 min-h-32 overflow-y-auto rounded-lg border border-neutral-200 p-1 dark:border-neutral-800"
       >
         {folders.isPending && (
-          <li role="status" className="px-2.5 py-2 text-sm text-neutral-500 dark:text-neutral-400">
+          <p role="status" className="px-2.5 py-2 text-sm text-neutral-500 dark:text-neutral-400">
             Loading folders…
-          </li>
+          </p>
         )}
         {folders.isError && (
-          <li className="flex items-center justify-between gap-2 px-2.5 py-2 text-sm">
+          <div className="flex items-center justify-between gap-2 px-2.5 py-2 text-sm">
             <span role="alert" className="text-red-600 dark:text-red-400">
               {errorMessage(folders.error, "Unable to load your Drive folders.")}
             </span>
@@ -191,54 +189,70 @@ export function VaultPicker({
             >
               Retry
             </button>
-          </li>
+          </div>
         )}
         {folders.isSuccess && list.length === 0 && (
-          <li className="px-2.5 py-2 text-sm text-neutral-500 dark:text-neutral-400">
+          <p className="px-2.5 py-2 text-sm text-neutral-500 dark:text-neutral-400">
             No folders here yet.
-          </li>
+          </p>
         )}
-        {list.map((folder) => {
-          const isSelected = selected?.id === folder.id;
-          return (
-            <li key={folder.id} className="flex items-center gap-1">
-              <button
-                type="button"
-                aria-pressed={isSelected}
-                disabled={busy}
-                onClick={() => setSelected(isSelected ? null : folder)}
-                onDoubleClick={() => navigate([...trail, { id: folder.id, name: folder.name }])}
-                className={`flex min-w-0 flex-1 items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm transition-colors disabled:opacity-60 ${
-                  isSelected
-                    ? "bg-blue-50 text-blue-900 dark:bg-blue-950/60 dark:text-blue-100"
-                    : "hover:bg-neutral-100 dark:hover:bg-neutral-800"
-                }`}
-              >
-                <FolderIcon className="size-4 shrink-0 text-neutral-400" />
-                <span className="min-w-0 flex-1 truncate" title={folder.name}>
-                  {folder.name}
-                </span>
-                {folder.id === currentRootId && (
-                  <span className="shrink-0 rounded-full bg-neutral-100 px-1.5 py-0.5 text-[10px] font-medium text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300">
-                    Current vault
+        {list.length > 0 && (
+          // Options may not hold buttons, so each row's "Open" button sits in a sibling column
+          // with the same fixed row height.
+          <div className="flex gap-1">
+            <Listbox
+              aria-label={`Folders in ${current.name}`}
+              deselectable
+              disabled={busy}
+              value={selected?.id ?? null}
+              onValueChange={(id) => setSelected(list.find((folder) => folder.id === id) ?? null)}
+              className="min-w-0 flex-1"
+            >
+              {list.map((folder) => (
+                <ListboxItem
+                  key={folder.id}
+                  value={folder.id}
+                  onDoubleClick={() => {
+                    if (!busy) {
+                      navigate([...trail, { id: folder.id, name: folder.name }]);
+                    }
+                  }}
+                  className="flex h-8 cursor-pointer items-center gap-2 rounded-md px-2.5 text-left text-sm transition-colors outline-none focus-visible:outline-2 focus-visible:outline-blue-600 data-disabled:cursor-default data-disabled:opacity-60 data-selected:bg-blue-50 data-selected:text-blue-900 not-data-selected:hover:bg-neutral-100 dark:data-selected:bg-blue-950/60 dark:data-selected:text-blue-100 dark:not-data-selected:hover:bg-neutral-800"
+                >
+                  <FolderIcon className="size-4 shrink-0 text-neutral-400" />
+                  <span className="min-w-0 flex-1 truncate" title={folder.name}>
+                    {folder.name}
                   </span>
-                )}
-                {isSelected && <CheckIcon className="size-4 shrink-0 text-blue-600" />}
-              </button>
-              <button
-                type="button"
-                aria-label={`Open ${folder.name}`}
-                title={`Open ${folder.name}`}
-                disabled={busy}
-                onClick={() => navigate([...trail, { id: folder.id, name: folder.name }])}
-                className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 disabled:opacity-50 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
-              >
-                <ChevronIcon className="size-4" />
-              </button>
-            </li>
-          );
-        })}
-      </ul>
+                  {folder.id === currentRootId && (
+                    <span className="shrink-0 rounded-full bg-neutral-100 px-1.5 py-0.5 text-[10px] font-medium text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300">
+                      Current vault
+                    </span>
+                  )}
+                  <ListboxItemIndicator className="shrink-0">
+                    <CheckIcon className="size-4 text-blue-600" />
+                  </ListboxItemIndicator>
+                </ListboxItem>
+              ))}
+            </Listbox>
+            <div className="flex shrink-0 flex-col">
+              {list.map((folder) => (
+                <div key={folder.id} className="flex h-8 items-center">
+                  <button
+                    type="button"
+                    aria-label={`Open ${folder.name}`}
+                    title={`Open ${folder.name}`}
+                    disabled={busy}
+                    onClick={() => navigate([...trail, { id: folder.id, name: folder.name }])}
+                    className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 disabled:opacity-50 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+                  >
+                    <ChevronIcon className="size-4" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
 
       {newFolderOpen ? (
         <form onSubmit={submitNewFolder} className="space-y-1.5">

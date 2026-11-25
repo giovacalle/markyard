@@ -1,3 +1,10 @@
+import {
+  Autocomplete,
+  AutocompleteContent,
+  AutocompleteInput,
+  AutocompleteItem,
+  AutocompleteList,
+} from "@ui-sdk/react/autocomplete";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "@ui-sdk/react/collapsible";
 import { Switch, SwitchThumb } from "@ui-sdk/react/switch";
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
@@ -10,6 +17,7 @@ import {
   type EditableFrontmatterProperty,
 } from "../frontmatter";
 import { ChevronIcon, CloseIcon, CodeIcon, PlusIcon } from "./icons";
+import { MENU_ITEM_CLASS, TAG_SUGGESTIONS_CONTENT_CLASS } from "./menuStyles";
 
 function stopEscape(event: KeyboardEvent): void {
   event.preventDefault();
@@ -54,8 +62,8 @@ function TagsValueEditor({
   onChangeTags: (nextTags: string[]) => void;
 }) {
   const [draft, setDraft] = useState("");
-  const [focused, setFocused] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const listLabelId = useId();
 
   const existingLower = useMemo(() => new Set(tags.map((t) => t.toLowerCase())), [tags]);
 
@@ -81,44 +89,52 @@ function TagsValueEditor({
   };
 
   return (
-    <div className="space-y-1">
-      <div className="flex flex-wrap items-center gap-1">
-        {tags.map((tag) => (
-          <span
-            key={tag}
-            className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300"
+    <div className="flex flex-wrap items-center gap-1">
+      {tags.map((tag) => (
+        <span
+          key={tag}
+          className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300"
+        >
+          <span>#{tag}</span>
+          <button
+            type="button"
+            aria-label={`Remove tag ${tag}`}
+            onClick={() => onChangeTags(tags.filter((t) => t.toLowerCase() !== tag.toLowerCase()))}
+            className="inline-flex size-3.5 items-center justify-center rounded-full text-blue-600/80 transition-colors hover:bg-blue-200/80 hover:text-blue-900 focus-visible:outline-2 focus-visible:outline-blue-600 dark:text-blue-300/80 dark:hover:bg-blue-900 dark:hover:text-blue-100"
           >
-            <span>#{tag}</span>
-            <button
-              type="button"
-              aria-label={`Remove tag ${tag}`}
-              onClick={() =>
-                onChangeTags(tags.filter((t) => t.toLowerCase() !== tag.toLowerCase()))
-              }
-              className="inline-flex size-3.5 items-center justify-center rounded-full text-blue-600/80 transition-colors hover:bg-blue-200/80 hover:text-blue-900 focus-visible:outline-2 focus-visible:outline-blue-600 dark:text-blue-300/80 dark:hover:bg-blue-900 dark:hover:text-blue-100"
-            >
-              ×
-            </button>
-          </span>
-        ))}
-        <input
+            ×
+          </button>
+        </span>
+      ))}
+      <Autocomplete
+        value={draft}
+        onValueChange={(value, details) => {
+          if (details.reason === "item-press") {
+            commitTag(value);
+          } else if (value.endsWith(",")) {
+            commitTag(value.slice(0, -1));
+          } else {
+            setDraft(value);
+          }
+        }}
+        // Enter with no suggestion highlighted commits the typed text.
+        onSubmit={(value, details) => {
+          details.event?.preventDefault();
+          commitTag(value);
+        }}
+        openOnFocus
+        filter={false}
+        autoHighlight
+      >
+        <AutocompleteInput
           ref={inputRef}
           type="text"
           aria-label="Add tag"
           placeholder="+ tag…"
-          value={draft}
-          onFocus={() => setFocused(true)}
-          onBlur={() => setFocused(false)}
-          onChange={(event) => {
-            const value = event.target.value;
-            if (value.endsWith(",")) {
-              commitTag(value.slice(0, -1));
-            } else {
-              setDraft(value);
-            }
-          }}
           onKeyDown={(event) => {
-            if (event.key === "Enter" || event.key === ",") {
+            if (event.key === "Enter") {
+              event.stopPropagation();
+            } else if (event.key === ",") {
               event.preventDefault();
               event.stopPropagation();
               commitTag(draft);
@@ -133,24 +149,26 @@ function TagsValueEditor({
           }}
           className="w-20 min-w-0 flex-1 border-0 bg-transparent px-1 py-0.5 text-xs text-neutral-800 placeholder:text-neutral-400 focus:outline-none dark:text-neutral-200 dark:placeholder:text-neutral-500"
         />
-      </div>
-      {focused && suggestions.length > 0 && (
-        <div role="listbox" aria-label="Tag suggestions" className="flex flex-wrap gap-1 pt-0.5">
-          {suggestions.map((tag) => (
-            <button
-              key={tag}
-              type="button"
-              role="option"
-              aria-selected={false}
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => commitTag(tag)}
-              className="rounded-full border border-neutral-200 bg-white px-2 py-0.5 text-[11px] text-neutral-600 transition-colors hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-300 dark:hover:border-blue-700 dark:hover:bg-blue-950/60 dark:hover:text-blue-300"
-            >
-              #{tag}
-            </button>
-          ))}
-        </div>
-      )}
+        {suggestions.length > 0 && (
+          <AutocompleteContent
+            align="start"
+            sideOffset={4}
+            className={TAG_SUGGESTIONS_CONTENT_CLASS}
+          >
+            {/* AutocompleteList names itself after the input; keep the list's own name. */}
+            <span id={listLabelId} hidden>
+              Tag suggestions
+            </span>
+            <AutocompleteList aria-labelledby={listLabelId}>
+              {suggestions.map((tag) => (
+                <AutocompleteItem key={tag} value={tag} className={MENU_ITEM_CLASS}>
+                  #{tag}
+                </AutocompleteItem>
+              ))}
+            </AutocompleteList>
+          </AutocompleteContent>
+        )}
+      </Autocomplete>
     </div>
   );
 }

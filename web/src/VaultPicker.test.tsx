@@ -95,8 +95,29 @@ describe("vault onboarding", () => {
     fireEvent.click(await within(onboarding).findByRole("button", { name: "Open Work" }));
     const path = within(onboarding).getByRole("navigation", { name: "Folder path" });
     expect(within(path).getByText("Work")).toHaveAttribute("aria-current", "location");
-    expect(await within(onboarding).findByRole("button", { name: "Projects" })).toBeInTheDocument();
+    expect(await within(onboarding).findByRole("option", { name: "Projects" })).toBeInTheDocument();
     expect(within(onboarding).getByRole("button", { name: "Use “Work”" })).toBeEnabled();
+    fireEvent.click(within(path).getByRole("button", { name: "My Drive" }));
+    await within(onboarding).findByRole("button", { name: "Open Old vault" });
+
+    // The folders are a ui-sdk Listbox: arrows select, pressing the selection clears it, and a
+    // double-click opens the folder.
+    const folderList = within(onboarding).getByRole("listbox", { name: "Folders in My Drive" });
+    expect(folderList).toHaveAttribute("data-slot", "listbox");
+    const work = within(folderList).getByRole("option", { name: "Work" });
+    const oldVault = within(folderList).getByRole("option", { name: "Old vault" });
+    expect(work).not.toHaveAttribute("aria-selected", "true");
+    fireEvent.click(work);
+    expect(work).toHaveAttribute("aria-selected", "true");
+    expect(within(onboarding).getByRole("button", { name: "Use “Work”" })).toBeEnabled();
+    fireEvent.keyDown(work, { key: "ArrowDown" });
+    expect(oldVault).toHaveAttribute("aria-selected", "true");
+    expect(oldVault).toHaveFocus();
+    fireEvent.click(oldVault);
+    expect(oldVault).not.toHaveAttribute("aria-selected", "true");
+    expect(within(onboarding).getByRole("button", { name: "Use “My Drive”" })).toBeEnabled();
+    fireEvent.doubleClick(work);
+    await within(onboarding).findByRole("listbox", { name: "Folders in Work" });
     fireEvent.click(within(path).getByRole("button", { name: "My Drive" }));
     await within(onboarding).findByRole("button", { name: "Open Old vault" });
 
@@ -110,8 +131,8 @@ describe("vault onboarding", () => {
 
     fireEvent.change(input, { target: { value: "My notes" } });
     fireEvent.click(within(onboarding).getByRole("button", { name: "Create" }));
-    const created = await within(onboarding).findByRole("button", { name: /^My notes/ });
-    expect(created).toHaveAttribute("aria-pressed", "true");
+    const created = await within(onboarding).findByRole("option", { name: /^My notes/ });
+    expect(created).toHaveAttribute("aria-selected", "true");
     expect(creates).toEqual([{ name: "My notes" }]);
     expect(rootRequests).toBe(0);
 
@@ -188,10 +209,10 @@ describe("changing vault from Settings", () => {
     fireEvent.click(within(settings).getByRole("button", { name: "Change vault…" }));
 
     const picker = await screen.findByRole("dialog", { name: "Choose vault folder" });
-    const oldRow = await within(picker).findByRole("button", { name: /^Old vault/ });
+    const oldRow = await within(picker).findByRole("option", { name: /^Old vault/ });
     expect(within(oldRow).getByText("Current vault")).toBeInTheDocument();
     fireEvent.click(within(picker).getByRole("button", { name: "Open Work" }));
-    fireEvent.click(await within(picker).findByRole("button", { name: "Projects" }));
+    fireEvent.click(await within(picker).findByRole("option", { name: "Projects" }));
     fireEvent.click(within(picker).getByRole("button", { name: "Use “Projects”" }));
 
     expect(await screen.findByRole("treeitem", { name: /new\.md/ })).toBeInTheDocument();

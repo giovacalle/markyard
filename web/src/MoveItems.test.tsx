@@ -141,6 +141,51 @@ describe("moving notes and folders", () => {
     expect(screen.getAllByText("a.md")).toHaveLength(1);
   });
 
+  it("picks a destination with ui-sdk Command keys, clamped, and closes on one Escape", async () => {
+    const patches = vault();
+    render(<App />);
+    await screen.findByText("a.md");
+
+    let dialog = await openMovePicker("a.md");
+    const input = within(dialog).getByRole("combobox");
+    expect(input).toHaveAttribute("data-slot", "command-input");
+    expect(input).toHaveAccessibleName("Search folders");
+    const list = within(dialog).getByRole("listbox", { name: "Destination folders" });
+    const options = within(list).getAllByRole("option");
+    expect(options.map((option) => option.textContent)).toEqual([
+      "Notes / Archive",
+      "Notes / Projects",
+    ]);
+    expect(options[0]).toHaveAttribute("aria-selected", "true");
+
+    // ArrowUp on the first option stays there; ArrowDown past the last one too.
+    fireEvent.keyDown(input, { key: "ArrowUp" });
+    expect(options[0]).toHaveAttribute("aria-selected", "true");
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    expect(options[1]).toHaveAttribute("aria-selected", "true");
+    expect(options[0]).not.toHaveAttribute("aria-selected", "true");
+
+    // Nothing matches: the message sits outside the list.
+    fireEvent.change(input, { target: { value: "zzqq" } });
+    const empty = within(dialog).getByText("No matching folder.");
+    expect(list).not.toContainElement(empty);
+
+    // A typed filter still closes the dialog in one Escape, without moving anything.
+    fireEvent.keyDown(input, { key: "Escape" });
+    await vi.waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Move to…" })).not.toBeInTheDocument(),
+    );
+
+    // Enter runs the highlighted destination.
+    dialog = await openMovePicker("a.md");
+    const again = within(dialog).getByRole("combobox");
+    fireEvent.keyDown(again, { key: "ArrowDown" });
+    fireEvent.keyDown(again, { key: "Enter" });
+    await vi.waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(patches).toEqual([{ kind: "files", id: "note-a", parentId: "projects" }]);
+  });
+
   it("never offers a folder itself, its subfolders, or its current parent", async () => {
     vault();
     render(<App />);

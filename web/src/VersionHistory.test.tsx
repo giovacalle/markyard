@@ -220,6 +220,42 @@ describe("VersionHistoryDialog states", () => {
     expect(within(dialog).queryByRole("listbox")).not.toBeInTheDocument();
   });
 
+  it("picks revisions from a ui-sdk Listbox with clamped arrows, Home and End", async () => {
+    revisionHandlers([
+      ...REVISIONS,
+      { id: "r1", modifiedTime: "2026-11-10T08:00:00.000Z", size: 10, keepForever: false },
+    ]);
+    const { dialog, onClose } = renderDialog();
+    const list = await within(dialog).findByRole("listbox", { name: "Revisions" });
+    expect(list).toHaveAttribute("data-slot", "listbox");
+    const options = within(list).getAllByRole("option");
+    expect(options).toHaveLength(3);
+    expect(options[0]).toHaveAttribute("aria-selected", "true");
+
+    act(() => options[0].focus());
+    fireEvent.keyDown(options[0], { key: "ArrowDown" });
+    expect(options[1]).toHaveAttribute("aria-selected", "true");
+    expect(options[1]).toHaveFocus();
+
+    fireEvent.keyDown(options[1], { key: "End" });
+    expect(options[2]).toHaveAttribute("aria-selected", "true");
+    expect(options[2]).toHaveFocus();
+
+    // The ends clamp: no wrap back to the newest revision.
+    fireEvent.keyDown(options[2], { key: "ArrowDown" });
+    expect(options[2]).toHaveAttribute("aria-selected", "true");
+    expect(options[0]).not.toHaveAttribute("aria-selected", "true");
+
+    fireEvent.keyDown(options[2], { key: "Home" });
+    expect(options[0]).toHaveAttribute("aria-selected", "true");
+    fireEvent.keyDown(options[0], { key: "ArrowUp" });
+    expect(options[0]).toHaveAttribute("aria-selected", "true");
+
+    // Escape on the list still reaches the dialog.
+    fireEvent.keyDown(options[0], { key: "Escape" });
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+  });
+
   it("disables restore in read-only mode", async () => {
     revisionHandlers();
     const { dialog, onRestore } = renderDialog({ readOnly: true });

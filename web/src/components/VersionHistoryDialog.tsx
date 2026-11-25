@@ -7,8 +7,9 @@ import {
   DialogDescription,
   DialogTitle,
 } from "@ui-sdk/react/dialog";
+import { Listbox, ListboxItem } from "@ui-sdk/react/listbox";
 import { SegmentedControl, SegmentedControlItem } from "@ui-sdk/react/segmented-control";
-import { type KeyboardEvent, lazy, Suspense, useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import {
   describeError,
   fetchRevisionContent,
@@ -227,32 +228,6 @@ function HistoryBody({
     );
   }
 
-  const move = (event: KeyboardEvent<HTMLElement>, index: number) => {
-    const next =
-      event.key === "ArrowDown"
-        ? Math.min(revisions.length - 1, index + 1)
-        : event.key === "ArrowUp"
-          ? Math.max(0, index - 1)
-          : event.key === "Home"
-            ? 0
-            : event.key === "End"
-              ? revisions.length - 1
-              : null;
-    if (next === null) {
-      if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        setSelectedId(revisions[index].id);
-      }
-      return;
-    }
-    event.preventDefault();
-    setSelectedId(revisions[next].id);
-    const sibling = event.currentTarget.parentElement?.children[next];
-    if (sibling instanceof HTMLElement) {
-      sibling.focus();
-    }
-  };
-
   const text = content.data;
   const identical = text !== undefined && text === currentText;
   const canRestore = text !== undefined && !identical && !readOnly;
@@ -261,20 +236,22 @@ function HistoryBody({
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4">
       <div className="grid min-h-0 flex-1 gap-4 md:grid-cols-[16rem_minmax(0,1fr)]">
-        <ul
-          role="listbox"
+        <Listbox
           aria-label="Revisions"
+          loop={false}
+          value={selected.id}
+          onValueChange={(id) => {
+            if (id !== null) {
+              setSelectedId(id);
+            }
+          }}
           className="max-h-48 space-y-1 overflow-y-auto md:max-h-[60vh]"
         >
           {revisions.map((revision, index) => (
-            <li
+            <ListboxItem
               key={revision.id}
-              role="option"
-              aria-selected={revision === selected}
-              tabIndex={revision === selected ? 0 : -1}
-              onClick={() => setSelectedId(revision.id)}
-              onKeyDown={(event) => move(event, index)}
-              className="cursor-pointer rounded-lg border border-transparent px-2.5 py-2 text-sm hover:bg-neutral-50 focus-visible:outline-2 focus-visible:outline-blue-600 aria-selected:border-neutral-200 aria-selected:bg-neutral-100 dark:hover:bg-neutral-800/60 dark:aria-selected:border-neutral-700 dark:aria-selected:bg-neutral-800"
+              value={revision.id}
+              className="cursor-pointer rounded-lg border border-transparent px-2.5 py-2 text-sm hover:bg-neutral-50 focus-visible:outline-2 focus-visible:outline-blue-600 data-selected:border-neutral-200 data-selected:bg-neutral-100 dark:hover:bg-neutral-800/60 dark:data-selected:border-neutral-700 dark:data-selected:bg-neutral-800"
             >
               <div className="flex items-center justify-between gap-2">
                 <time dateTime={revision.modifiedTime} className="font-medium">
@@ -292,9 +269,9 @@ function HistoryBody({
                 {revision.size !== undefined && <span>{formatBytes(revision.size)}</span>}
                 {revision.keepForever && <span>Kept forever</span>}
               </div>
-            </li>
+            </ListboxItem>
           ))}
-        </ul>
+        </Listbox>
 
         <section aria-label="Selected version" className="flex min-h-0 min-w-0 flex-col gap-2">
           <div className="flex flex-wrap items-center justify-between gap-2">

@@ -1,5 +1,5 @@
 import { EditorView } from "@codemirror/view";
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vite-plus/test";
@@ -239,9 +239,9 @@ describe("Direction A frontmatter editing (PropertiesEditor + DocumentView)", ()
     );
 
     // Tags: focus input, verify vault suggestion appears, click suggestion + type new tag.
-    const tagInput = within(propsEditor).getByRole("textbox", { name: "Add tag" });
-    fireEvent.focus(tagInput);
-    const suggestion = await within(propsEditor).findByRole("option", { name: "#backend" });
+    const tagInput = within(propsEditor).getByRole("combobox", { name: "Add tag" });
+    act(() => tagInput.focus());
+    const suggestion = await screen.findByRole("option", { name: "#backend" });
     fireEvent.click(suggestion);
     expect(
       within(propsEditor).getByRole("button", { name: "Remove tag backend" }),
@@ -448,6 +448,61 @@ describe("Direction A frontmatter editing (PropertiesEditor + DocumentView)", ()
     expect(saved[0]).toBe("---\na: 1\n---\n\nBodyx");
   });
 
+  it("suggests vault tags in a ui-sdk Autocomplete: keys commit, comma commits, Escape stays in Edit", async () => {
+    await writeCachedFile("other-id", "---\ntags: [backend, urgent]\n---\nOther\n", "r1");
+    const saved: string[] = [];
+    setupNote("---\ntags: [work, old]\n---\n\n# Body\n", (body) => saved.push(body));
+    render(<App />);
+
+    const preview = await screen.findByRole("region", { name: "Preview" });
+    await within(preview).findByRole("heading", { level: 3, name: "Body" });
+    fireEvent.click(within(preview).getByTestId("editor-canvas"));
+    const editor = await screen.findByRole("region", { name: "Editor" });
+    const propsEditor = editor.querySelector<HTMLElement>("[data-properties-editor]")!;
+    fireEvent.click(within(propsEditor).getByRole("button", { name: /Properties/ }));
+
+    const tagInput = within(propsEditor).getByRole("combobox", { name: "Add tag" });
+    expect(tagInput).toHaveAttribute("data-slot", "autocomplete-input");
+    act(() => tagInput.focus());
+    const list = await screen.findByRole("listbox", { name: "Tag suggestions" });
+    const backend = within(list).getByRole("option", { name: "#backend" });
+    expect(backend).toHaveAttribute("data-slot", "autocomplete-item");
+    // Tags already on the note are not offered.
+    expect(within(list).queryByRole("option", { name: "#work" })).toBeNull();
+
+    // ArrowDown highlights the first suggestion; Enter commits it and clears the draft.
+    fireEvent.keyDown(tagInput, { key: "ArrowDown" });
+    fireEvent.keyDown(tagInput, { key: "Enter" });
+    expect(
+      await within(propsEditor).findByRole("button", { name: "Remove tag backend" }),
+    ).toBeInTheDocument();
+    expect(tagInput).toHaveValue("");
+
+    // A trailing comma commits the draft.
+    fireEvent.change(tagInput, { target: { value: "ops," } });
+    expect(within(propsEditor).getByRole("button", { name: "Remove tag ops" })).toBeInTheDocument();
+    expect(tagInput).toHaveValue("");
+
+    // Backspace on an empty draft removes the last tag.
+    fireEvent.keyDown(tagInput, { key: "Backspace" });
+    expect(within(propsEditor).queryByRole("button", { name: "Remove tag ops" })).toBeNull();
+
+    // Escape closes the suggestions and clears the draft without leaving Edit.
+    act(() => tagInput.focus());
+    fireEvent.change(tagInput, { target: { value: "urg" } });
+    expect(await screen.findByRole("option", { name: "#urgent" })).toBeInTheDocument();
+    fireEvent.keyDown(tagInput, { key: "Escape" });
+    await waitFor(() =>
+      expect(screen.queryByRole("listbox", { name: "Tag suggestions" })).toBeNull(),
+    );
+    expect(tagInput).toHaveValue("");
+    expect(screen.getByRole("region", { name: "Editor" })).toBeInTheDocument();
+
+    pressSave();
+    await screen.findByText("Saved");
+    expect(saved[0]).toBe("---\ntags: [work, old, backend]\n---\n\n# Body\n");
+  });
+
   it("edits a second tag-like property (keywords) without overwriting the first (tags)", async () => {
     const saved: string[] = [];
     setupNote("---\ntags: [a]\nkeywords: [b]\n---\n\n# Body\n", (body) => saved.push(body));
@@ -460,7 +515,7 @@ describe("Direction A frontmatter editing (PropertiesEditor + DocumentView)", ()
     const propsEditor = editor.querySelector<HTMLElement>("[data-properties-editor]")!;
 
     fireEvent.click(within(propsEditor).getByRole("button", { name: /Properties/ }));
-    const tagInputs = within(propsEditor).getAllByRole("textbox", { name: "Add tag" });
+    const tagInputs = within(propsEditor).getAllByRole("combobox", { name: "Add tag" });
     expect(tagInputs).toHaveLength(2);
 
     // Add `#c` specifically to the second tag property (`keywords`).

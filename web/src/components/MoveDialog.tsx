@@ -7,7 +7,14 @@ import {
   DialogDescription,
   DialogTitle,
 } from "@ui-sdk/react/dialog";
-import { useId, useMemo, useState, type KeyboardEvent } from "react";
+import {
+  Command,
+  CommandEmpty,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@ui-sdk/react/command";
+import { useId, useMemo, useState } from "react";
 import { fetchVaultIndex, type DriveNode } from "../api";
 import { fuzzyMatch } from "../commandSearch";
 import { moveErrorMessage, useMoveNode } from "../moveItem";
@@ -60,9 +67,8 @@ function OpenMoveDialog({
   const online = useOnlineStatus();
   const moveNode = useMoveNode();
   const inputId = useId();
-  const listId = useId();
+  const listLabelId = useId();
   const [query, setQuery] = useState("");
-  const [active, setActive] = useState(0);
   // The whole vault's folders, for destinations nobody has expanded yet; the cached tree meanwhile.
   const index = useQuery({
     queryKey: VAULT_INDEX_KEY,
@@ -112,24 +118,6 @@ function OpenMoveDialog({
     }
   };
 
-  const activeIndex = Math.min(active, Math.max(results.length - 1, 0));
-  const activeTarget = results[activeIndex];
-
-  const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
-    if (event.key === "ArrowDown") {
-      event.preventDefault();
-      setActive((i) => Math.min(i + 1, results.length - 1));
-    } else if (event.key === "ArrowUp") {
-      event.preventDefault();
-      setActive((i) => Math.max(i - 1, 0));
-    } else if (event.key === "Enter") {
-      event.preventDefault();
-      if (activeTarget !== undefined) {
-        choose(activeTarget.id);
-      }
-    }
-  };
-
   return (
     <Dialog
       open
@@ -152,55 +140,57 @@ function OpenMoveDialog({
         <label htmlFor={inputId} className="sr-only">
           Search folders
         </label>
-        <input
-          id={inputId}
-          type="text"
-          autoFocus
-          role="combobox"
-          aria-expanded="true"
-          aria-controls={listId}
-          aria-activedescendant={activeTarget ? `${listId}-${activeTarget.id}` : undefined}
-          value={query}
-          disabled={mutation.isPending}
-          placeholder="Search folders…"
-          onChange={(event) => {
-            setQuery(event.target.value);
-            setActive(0);
+        <Command
+          filter={false}
+          loop={false}
+          query={query}
+          onQueryChange={(next, details) => {
+            // Escape closes the dialog in one press, even with a filter (ui-sdk would clear it first).
+            if (details.reason === "escape-key") {
+              if (!mutation.isPending) {
+                onClose();
+              }
+              return;
+            }
+            setQuery(next);
             if (mutation.isError) {
               mutation.reset();
             }
           }}
-          onKeyDown={handleKeyDown}
-          className="mt-3 w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm placeholder:text-neutral-400 focus:border-blue-500 focus:outline-2 focus:outline-blue-500/30 disabled:opacity-50 dark:border-neutral-700 dark:bg-neutral-950 dark:placeholder:text-neutral-500"
-        />
-        <ul
-          id={listId}
-          role="listbox"
-          aria-label="Destination folders"
-          className="mt-2 max-h-72 overflow-y-auto"
+          onAction={(targetId) => {
+            choose(targetId);
+          }}
         >
-          {results.map((target, i) => (
-            <li
-              key={target.id}
-              id={`${listId}-${target.id}`}
-              role="option"
-              aria-selected={i === activeIndex}
-              onMouseEnter={() => setActive(i)}
-              onClick={() => choose(target.id)}
-              className="flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm aria-selected:bg-neutral-100 dark:aria-selected:bg-neutral-800"
-            >
-              <FolderIcon className="size-3.5 shrink-0 text-neutral-400" />
-              <span className="truncate" title={target.path}>
-                {target.path}
-              </span>
-            </li>
-          ))}
-          {results.length === 0 && (
-            <li className="px-2.5 py-1.5 text-sm text-neutral-500 dark:text-neutral-400">
-              {index.isFetching ? "Loading folders…" : "No matching folder."}
-            </li>
-          )}
-        </ul>
+          <CommandInput
+            id={inputId}
+            type="text"
+            autoFocus
+            disabled={mutation.isPending}
+            placeholder="Search folders…"
+            className="mt-3 w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm placeholder:text-neutral-400 focus:border-blue-500 focus:outline-2 focus:outline-blue-500/30 disabled:opacity-50 dark:border-neutral-700 dark:bg-neutral-950 dark:placeholder:text-neutral-500"
+          />
+          {/* CommandList names itself after the input; keep the list's own name. */}
+          <span id={listLabelId} hidden>
+            Destination folders
+          </span>
+          <CommandList aria-labelledby={listLabelId} className="mt-2 max-h-72 overflow-y-auto">
+            {results.map((target) => (
+              <CommandItem
+                key={target.id}
+                value={target.id}
+                className="flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm data-highlighted:bg-neutral-100 dark:data-highlighted:bg-neutral-800"
+              >
+                <FolderIcon className="size-3.5 shrink-0 text-neutral-400" />
+                <span className="truncate" title={target.path}>
+                  {target.path}
+                </span>
+              </CommandItem>
+            ))}
+          </CommandList>
+          <CommandEmpty className="text-sm text-neutral-500 data-empty:px-2.5 data-empty:py-1.5 dark:text-neutral-400">
+            {index.isFetching ? "Loading folders…" : "No matching folder."}
+          </CommandEmpty>
+        </Command>
         {mutation.isPending && (
           <p role="status" className="mt-2 text-sm text-neutral-500 dark:text-neutral-400">
             Moving…

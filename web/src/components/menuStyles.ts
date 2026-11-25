@@ -13,6 +13,9 @@ export const ACTIONS_MENU_CONTENT_CLASS = `${MENU_PANEL_CLASS} w-44`;
 /** The popup of an attachment card's copy menu. */
 export const COPY_MENU_CONTENT_CLASS = `${MENU_PANEL_CLASS} w-40`;
 
+/** The popup of the tag field's vault suggestions. */
+export const TAG_SUGGESTIONS_CONTENT_CLASS = `${MENU_PANEL_CLASS} w-44`;
+
 const MENU_ITEM_BASE_CLASS =
   "flex w-full cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-medium outline-none transition-colors select-none data-disabled:cursor-not-allowed data-disabled:opacity-40";
 
