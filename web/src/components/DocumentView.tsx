@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { createToaster, Toast, ToastRegion, ToastTitle } from "@ui-sdk/react/toast";
 import { Toggle } from "@ui-sdk/react/toggle";
 import {
   lazy,
@@ -72,8 +73,15 @@ export const AUTOSAVE_DELAY_MS = 1_500;
 
 const UTF8_ENCODER = new TextEncoder();
 const NOOP = () => {};
-/** How long the "Updated from Drive" notice stays up. */
+/** How long the "Updated from Drive" and "Restored revision" toasts stay up. */
 const UPDATED_TOAST_MS = 4_000;
+const UPDATED_TOAST_ID = "updated-from-drive";
+const RESTORED_TOAST_ID = "restored-revision";
+/** Top center, below the note header, where the inline notice used to sit. */
+const TOAST_REGION_CLASS = "top-16 flex flex-col items-center px-4";
+/** The pill look of the former inline notices, lifted off the page by a ring and a shadow. */
+const TOAST_CLASS =
+  "mb-2 w-fit rounded-full bg-neutral-100 px-3 py-1 text-center text-xs font-medium text-neutral-600 shadow-sm ring-1 ring-neutral-200 transition-opacity duration-150 select-none data-ending-style:opacity-0 data-starting-style:opacity-0 dark:bg-neutral-800 dark:text-neutral-300 dark:ring-neutral-700";
 const RELOAD_CONFIRM = "Discard your changes and load the version on Drive?";
 
 export type DocumentMode = "preview" | "edit";
@@ -1091,16 +1099,16 @@ function DocumentSession({
   const hasLocalWorkRef = useRef(hasLocalWork);
   hasLocalWorkRef.current = hasLocalWork;
   const [externalBanner, setExternalBanner] = useState(false);
-  const [updatedToast, setUpdatedToast] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [restoredFrom, setRestoredFrom] = useState<string | null>(null);
-  useEffect(() => {
-    if (restoredFrom === null) {
-      return;
-    }
-    const timer = window.setTimeout(() => setRestoredFrom(null), UPDATED_TOAST_MS);
-    return () => window.clearTimeout(timer);
-  }, [restoredFrom]);
+  // This note's own toast queue: its notices never outlive the note they are about.
+  const [toaster] = useState(() => createToaster({ duration: UPDATED_TOAST_MS }));
+  useEffect(
+    () => () => {
+      toaster.dismiss(UPDATED_TOAST_ID);
+      toaster.dismiss(RESTORED_TOAST_ID);
+    },
+    [fileId, toaster],
+  );
   // A restored version is one undoable edit in the editor, saved through the sync queue with the
   // note's current Drive tag, so a concurrent change on Drive still surfaces as a conflict.
   const handleRestore = (text: string, revision: Revision) => {
@@ -1109,7 +1117,9 @@ function DocumentSession({
     frontmatterRawRef.current = nextSplit.frontmatterRaw;
     editorHandleRef.current?.replaceText(rawYamlModeRef.current ? text : nextSplit.body);
     handleToggleTask(text);
-    setRestoredFrom(formatRevisionDate(revision.modifiedTime));
+    toaster(`Restored revision from ${formatRevisionDate(revision.modifiedTime)}`, {
+      id: RESTORED_TOAST_ID,
+    });
   };
   // Whole-note edits from the Info Drawer (removing an image): one undoable editor change, saved
   // right away like a task toggle.
@@ -1163,15 +1173,8 @@ function DocumentSession({
       return;
     }
     void queryClient.invalidateQueries({ queryKey: ["files", fileId, "content"], exact: true });
-    setUpdatedToast(true);
-  }, [externalChange, driveChanges, fileId, queryClient]);
-  useEffect(() => {
-    if (!updatedToast) {
-      return;
-    }
-    const timer = window.setTimeout(() => setUpdatedToast(false), UPDATED_TOAST_MS);
-    return () => window.clearTimeout(timer);
-  }, [updatedToast]);
+    toaster("Updated from Drive", { id: UPDATED_TOAST_ID });
+  }, [externalChange, driveChanges, fileId, queryClient, toaster]);
   const handleExternalReload = () => {
     if (window.confirm(RELOAD_CONFIRM)) {
       setExternalBanner(false);
@@ -1510,22 +1513,6 @@ function DocumentSession({
             data-testid="editor-column"
             className="mx-auto flex w-full max-w-3xl flex-1 flex-col space-y-4"
           >
-            {updatedToast && (
-              <p
-                role="status"
-                className="self-center rounded-full bg-neutral-100 px-3 py-1 text-xs font-medium text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300"
-              >
-                Updated from Drive
-              </p>
-            )}
-            {restoredFrom !== null && (
-              <p
-                role="status"
-                className="self-center rounded-full bg-neutral-100 px-3 py-1 text-xs font-medium text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300"
-              >
-                Restored revision from {restoredFrom}
-              </p>
-            )}
             {externalBanner && !isConflict(saveError) && (
               <div
                 className="space-y-2 rounded-lg border border-amber-300 bg-amber-50 p-3.5 text-sm dark:border-amber-800/70 dark:bg-amber-950/50"
@@ -1630,6 +1617,13 @@ function DocumentSession({
           </div>
         </div>
       </div>
+      <ToastRegion toaster={toaster} side="top" align="center" className={TOAST_REGION_CLASS}>
+        {() => (
+          <Toast className={TOAST_CLASS}>
+            <ToastTitle />
+          </Toast>
+        )}
+      </ToastRegion>
       {historyOpen && (
         <VersionHistoryDialog
           fileId={fileId}

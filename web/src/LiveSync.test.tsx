@@ -135,6 +135,32 @@ describe("live Drive sync", () => {
     expect(screen.queryByText("This note was updated on Drive")).not.toBeInTheDocument();
   });
 
+  it("shows 'Updated from Drive' as a ui-sdk toast and dismisses it when another note opens", async () => {
+    history.replaceState(null, "", "/?file=doc-1");
+    signedIn([node("doc-1", "a.md", "markdown"), node("doc-2", "b.md", "markdown")]);
+    await changesFeed([externalChange("doc-1", "a.md")]);
+    let reads = 0;
+    server.use(
+      http.get("/api/files/doc-1/content", () => {
+        reads += 1;
+        return reads === 1 ? contentResponse("mine", '"r1"') : contentResponse("theirs", '"r2"');
+      }),
+      http.get("/api/files/doc-2/content", () => contentResponse("other", '"r1"')),
+    );
+
+    render(<App />);
+    const message = await screen.findByText("Updated from Drive");
+    const region = screen.getByRole("region", { name: "Notifications" });
+    expect(region).toContainElement(message);
+    expect(message.closest('[data-slot="toast"]')).not.toBeNull();
+
+    fireEvent.click(await screen.findByRole("treeitem", { name: /b\.md/ }));
+    await vi.waitFor(() =>
+      expect(screen.getByRole("region", { name: "Preview" })).toHaveTextContent("other"),
+    );
+    await vi.waitFor(() => expect(screen.queryByText("Updated from Drive")).toBeNull());
+  });
+
   it("warns with Reload and Compare & Merge when Drive changed a note with unsaved edits", async () => {
     history.replaceState(null, "", "/?file=doc-1");
     signedIn();

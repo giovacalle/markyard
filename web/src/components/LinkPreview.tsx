@@ -1,17 +1,13 @@
 import { QueryClient, QueryClientContext, useQuery } from "@tanstack/react-query";
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "@ui-sdk/react/hover-card";
 import {
   type ComponentPropsWithoutRef,
-  type FocusEvent,
   type MouseEvent,
   type ReactNode,
   useContext,
   useEffect,
-  useId,
-  useLayoutEffect,
-  useRef,
   useState,
 } from "react";
-import { createPortal } from "react-dom";
 import { fetchLinkPreview, type LinkPreviewData } from "../api";
 import { safeImageSrc } from "../safeUrl";
 import { useSettings } from "../settings";
@@ -123,101 +119,59 @@ function stopPropagation(event: MouseEvent) {
   event.stopPropagation();
 }
 
-/** The floating card shown for a hovered or focused external link. */
-function PreviewCard({
-  id,
+/** The body of the card shown for a hovered or focused external link. */
+function PreviewCardBody({
   url,
-  anchor,
   preview,
   loading,
-  onPointerEnter,
-  onPointerLeave,
 }: {
-  id: string;
   url: string;
-  anchor: HTMLElement;
   preview: LinkPreviewData | undefined;
   loading: boolean;
-  onPointerEnter: () => void;
-  onPointerLeave: () => void;
 }) {
-  const cardRef = useRef<HTMLDivElement>(null);
   const rich = isRich(preview);
-
-  // Positioned through the CSSOM: the CSP forbids inline style attributes, not `element.style`.
-  useLayoutEffect(() => {
-    const card = cardRef.current;
-    if (card === null) {
-      return;
-    }
-    const link = anchor.getBoundingClientRect();
-    const width = card.offsetWidth;
-    const height = card.offsetHeight;
-    const viewportWidth = document.documentElement.clientWidth || window.innerWidth;
-    const viewportHeight = window.innerHeight;
-    const below = link.bottom + GAP_PX;
-    const above = link.top - GAP_PX - height;
-    const top = below + height > viewportHeight - GAP_PX && above >= GAP_PX ? above : below;
-    const maxLeft = Math.max(GAP_PX, viewportWidth - width - GAP_PX);
-    const left = Math.min(Math.max(link.left, GAP_PX), maxLeft);
-    card.style.setProperty("left", `${Math.round(left)}px`);
-    card.style.setProperty("top", `${Math.round(top)}px`);
-  });
-
-  return createPortal(
-    <div
-      ref={cardRef}
-      id={id}
-      role="tooltip"
-      aria-label="Link preview"
-      aria-busy={loading || undefined}
-      onMouseEnter={onPointerEnter}
-      onMouseLeave={onPointerLeave}
-      className="fixed top-0 left-0 z-50 w-80 max-w-[calc(100vw-1rem)] overflow-hidden rounded-xl border border-neutral-200 bg-white text-left shadow-xl shadow-neutral-950/10 dark:border-neutral-700 dark:bg-neutral-900 dark:shadow-black/40"
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noopener noreferrer"
+      tabIndex={-1}
+      onClick={stopPropagation}
+      className="block text-neutral-900 no-underline dark:text-neutral-100"
     >
-      <a
-        href={url}
-        target="_blank"
-        rel="noopener noreferrer"
-        tabIndex={-1}
-        onClick={stopPropagation}
-        className="block text-neutral-900 no-underline dark:text-neutral-100"
-      >
-        {loading ? (
-          <span data-testid="link-preview-loading" className="block space-y-2 p-3">
-            <span className="block h-3 w-1/3 animate-pulse rounded bg-neutral-200 dark:bg-neutral-800" />
-            <span className="block h-3.5 w-4/5 animate-pulse rounded bg-neutral-200 dark:bg-neutral-800" />
-            <span className="block h-3 w-full animate-pulse rounded bg-neutral-100 dark:bg-neutral-800/70" />
-          </span>
-        ) : (
-          <>
-            {rich && (
-              <OptionalImage
-                src={preview.image}
-                className="aspect-[1.91/1] w-full border-b border-neutral-200 bg-neutral-100 object-cover dark:border-neutral-800 dark:bg-neutral-800"
-              />
-            )}
-            <span className="block space-y-1 p-3">
-              <SiteRow preview={preview} url={url} />
-              {rich && preview.title?.trim() && (
-                <span className="line-clamp-2 block text-sm leading-snug font-semibold">
-                  {preview.title}
-                </span>
-              )}
-              {rich && preview.description?.trim() && (
-                <span className="line-clamp-2 block text-xs leading-snug text-neutral-600 dark:text-neutral-400">
-                  {preview.description}
-                </span>
-              )}
-              <span className="block truncate text-[11px] text-neutral-400 dark:text-neutral-500">
-                {displayUrl(preview?.finalUrl ?? url)}
+      {loading ? (
+        <span data-testid="link-preview-loading" className="block space-y-2 p-3">
+          <span className="block h-3 w-1/3 animate-pulse rounded bg-neutral-200 dark:bg-neutral-800" />
+          <span className="block h-3.5 w-4/5 animate-pulse rounded bg-neutral-200 dark:bg-neutral-800" />
+          <span className="block h-3 w-full animate-pulse rounded bg-neutral-100 dark:bg-neutral-800/70" />
+        </span>
+      ) : (
+        <>
+          {rich && (
+            <OptionalImage
+              src={preview.image}
+              className="aspect-[1.91/1] w-full border-b border-neutral-200 bg-neutral-100 object-cover dark:border-neutral-800 dark:bg-neutral-800"
+            />
+          )}
+          <span className="block space-y-1 p-3">
+            <SiteRow preview={preview} url={url} />
+            {rich && preview.title?.trim() && (
+              <span className="line-clamp-2 block text-sm leading-snug font-semibold">
+                {preview.title}
               </span>
+            )}
+            {rich && preview.description?.trim() && (
+              <span className="line-clamp-2 block text-xs leading-snug text-neutral-600 dark:text-neutral-400">
+                {preview.description}
+              </span>
+            )}
+            <span className="block truncate text-[11px] text-neutral-400 dark:text-neutral-500">
+              {displayUrl(preview?.finalUrl ?? url)}
             </span>
-          </>
-        )}
-      </a>
-    </div>,
-    document.body,
+          </span>
+        </>
+      )}
+    </a>
   );
 }
 
@@ -228,7 +182,7 @@ type ExternalLinkProps = Omit<ComponentPropsWithoutRef<"a">, "href"> & {
 
 /**
  * An external Preview link: opens in a new tab and, unless link previews are off in Settings,
- * shows a preview card after a short hover or on keyboard focus.
+ * shows a preview card after a short hover or keyboard focus.
  */
 export function ExternalLink({ onClick, ...props }: ExternalLinkProps) {
   const { linkPreviewsEnabled } = useSettings();
@@ -248,118 +202,69 @@ export function ExternalLink({ onClick, ...props }: ExternalLinkProps) {
   );
 }
 
-/** The card stays open while the pointer moves onto it. */
-function PreviewingExternalLink({
-  href,
-  children,
-  onClick,
-  onMouseEnter,
-  onMouseLeave,
-  onFocus,
-  onBlur,
-  ...props
-}: ExternalLinkProps) {
-  const anchorRef = useRef<HTMLAnchorElement>(null);
-  const openTimer = useRef<number | undefined>(undefined);
-  const closeTimer = useRef<number | undefined>(undefined);
+/**
+ * A ui-sdk HoverCard: the card stays open while the pointer moves onto it and closes on Escape,
+ * scroll or resize. It renders into document.body so its block markup never lands inside the
+ * Markdown paragraph holding the link.
+ */
+function PreviewingExternalLink({ href, children, onClick, ...props }: ExternalLinkProps) {
   const [open, setOpen] = useState(false);
   const [requested, setRequested] = useState(false);
-  const cardId = useId();
   const query = useLinkPreview(href, { enabled: requested });
   const loading = query.data === undefined && query.fetchStatus === "fetching";
-
-  const clearTimers = () => {
-    window.clearTimeout(openTimer.current);
-    window.clearTimeout(closeTimer.current);
-  };
-  const show = () => {
-    clearTimers();
-    setRequested(true);
-    setOpen(true);
-  };
-  const close = () => {
-    clearTimers();
-    setOpen(false);
-  };
-  const scheduleOpen = () => {
-    clearTimers();
-    openTimer.current = window.setTimeout(show, OPEN_DELAY_MS);
-  };
-  const scheduleClose = () => {
-    clearTimers();
-    closeTimer.current = window.setTimeout(() => setOpen(false), CLOSE_DELAY_MS);
-  };
-
-  useEffect(() => clearTimers, []);
 
   useEffect(() => {
     if (!open) {
       return;
     }
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        close();
-      }
-    };
-    const onScroll = () => close();
-    window.addEventListener("keydown", onKeyDown);
-    window.addEventListener("scroll", onScroll, true);
-    window.addEventListener("resize", onScroll);
+    const close = () => setOpen(false);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
     return () => {
-      window.removeEventListener("keydown", onKeyDown);
-      window.removeEventListener("scroll", onScroll, true);
-      window.removeEventListener("resize", onScroll);
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
     };
   }, [open]);
 
-  // Nothing to say beyond the link's own text: a failed fetch shows only the hostname card.
-  const showCard = open && anchorRef.current !== null;
-
   return (
-    <>
-      <a
+    <HoverCard
+      open={open}
+      onOpenChange={(next) => {
+        if (next) {
+          setRequested(true);
+        }
+        setOpen(next);
+      }}
+      delay={OPEN_DELAY_MS}
+      closeDelay={CLOSE_DELAY_MS}
+    >
+      <HoverCardTrigger
         {...props}
-        ref={anchorRef}
         href={href}
         target="_blank"
         rel="noopener noreferrer"
-        aria-describedby={showCard ? cardId : undefined}
-        onClick={(event) => {
+        onClick={(event: MouseEvent<HTMLAnchorElement>) => {
           event.stopPropagation();
-          close();
+          setOpen(false);
           onClick?.(event);
-        }}
-        onMouseEnter={(event: MouseEvent<HTMLAnchorElement>) => {
-          scheduleOpen();
-          onMouseEnter?.(event);
-        }}
-        onMouseLeave={(event: MouseEvent<HTMLAnchorElement>) => {
-          scheduleClose();
-          onMouseLeave?.(event);
-        }}
-        onFocus={(event: FocusEvent<HTMLAnchorElement>) => {
-          show();
-          onFocus?.(event);
-        }}
-        onBlur={(event: FocusEvent<HTMLAnchorElement>) => {
-          scheduleClose();
-          onBlur?.(event);
         }}
       >
         {children}
-      </a>
-      {showCard && anchorRef.current !== null && (
-        <PreviewCard
-          id={cardId}
-          url={href}
-          anchor={anchorRef.current}
-          preview={query.data}
-          loading={loading}
-          onPointerEnter={() => window.clearTimeout(closeTimer.current)}
-          onPointerLeave={scheduleClose}
-        />
-      )}
-    </>
+      </HoverCardTrigger>
+      {/* Nothing to say beyond the link's own text: a failed fetch shows only the hostname card. */}
+      <HoverCardContent
+        container={document.body}
+        side="bottom"
+        align="start"
+        sideOffset={GAP_PX}
+        collisionPadding={GAP_PX}
+        aria-label="Link preview"
+        aria-busy={loading || undefined}
+        className="z-50 w-80 max-w-[calc(100vw-1rem)] overflow-hidden rounded-xl border border-neutral-200 bg-white p-0 text-left shadow-xl shadow-neutral-950/10 dark:border-neutral-700 dark:bg-neutral-900 dark:shadow-black/40"
+      >
+        <PreviewCardBody url={href} preview={query.data} loading={loading} />
+      </HoverCardContent>
+    </HoverCard>
   );
 }
 

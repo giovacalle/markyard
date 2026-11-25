@@ -52,6 +52,15 @@ if (!("showPopover" in HTMLElement.prototype)) {
 }
 configure({ defaultIgnore: "script, style, [data-ui-sdk-announcer]" });
 
+// @ui-sdk/core toasts measure their stack with an unguarded ResizeObserver; jsdom lacks it.
+if (typeof globalThis.ResizeObserver !== "function") {
+  globalThis.ResizeObserver = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
+}
+
 // CodeMirror 6 measures text via Range layout APIs that jsdom does not implement.
 if (!("getClientRects" in Range.prototype)) {
   Object.defineProperty(Range.prototype, "getClientRects", {
