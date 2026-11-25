@@ -1319,7 +1319,7 @@ function SessionContent({
               sidebarCollapsed ? "md:hidden" : "md:static md:translate-x-0"
             } ${mobileSidebarOpen ? "translate-x-0" : "-translate-x-full"}`}
           >
-            <div className="flex min-h-12 shrink-0 items-center justify-between gap-2 border-b border-neutral-200 px-3.5 py-2 dark:border-neutral-800">
+            <div className="flex min-h-14 shrink-0 items-center justify-between gap-2 border-b border-neutral-200 px-3.5 py-2 dark:border-neutral-800">
               <div className="flex min-w-0 items-center gap-1">
                 <h1
                   className="truncate text-sm font-semibold tracking-tight text-neutral-900 dark:text-neutral-100"
@@ -1349,7 +1349,7 @@ function SessionContent({
                 type="button"
                 onClick={() => openPalette()}
                 aria-label="Search notes and commands"
-                className="flex w-full items-center justify-between gap-2 rounded-lg border border-neutral-200 bg-white px-2.5 py-1.5 text-xs text-neutral-500 transition-colors hover:border-neutral-300 hover:text-neutral-800 focus-visible:outline-2 focus-visible:outline-blue-600 dark:border-neutral-800 dark:bg-neutral-950/60 dark:text-neutral-400 dark:hover:border-neutral-700 dark:hover:text-neutral-200"
+                className="flex w-full cursor-pointer items-center justify-between gap-2 rounded-lg border border-neutral-200 bg-white px-2.5 py-1.5 text-xs text-neutral-500 transition-colors hover:border-neutral-300 hover:text-neutral-800 focus-visible:outline-2 focus-visible:outline-blue-600 dark:border-neutral-800 dark:bg-neutral-950/60 dark:text-neutral-400 dark:hover:border-neutral-700 dark:hover:text-neutral-200"
               >
                 <span className="flex items-center gap-2">
                   <SearchIcon className="size-3.5" />
@@ -1359,7 +1359,7 @@ function SessionContent({
                   ⌘K
                 </kbd>
               </button>
-              <div className="mt-1.5 flex gap-1">
+              <div className="mt-1.5 flex flex-col gap-0.5">
                 {WORKSPACE_PANELS.map(({ panel, label, Icon }) => (
                   <button
                     key={panel}
@@ -1370,7 +1370,7 @@ function SessionContent({
                       setOpenPanel((prev) => (prev === panel ? null : panel));
                       setMobileSidebarOpen(false);
                     }}
-                    className={`flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-blue-600 ${
+                    className={`flex w-full min-w-0 items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-blue-600 ${
                       openPanel === panel
                         ? "bg-neutral-200/80 text-neutral-900 dark:bg-neutral-800 dark:text-neutral-100"
                         : "text-neutral-600 hover:bg-neutral-200/70 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
@@ -1548,7 +1548,7 @@ function SessionContent({
               <>
                 <header
                   data-offline={isOffline ? "true" : undefined}
-                  className={`min-h-12 shrink-0 items-center justify-between gap-3 border-b px-4 py-2 transition-colors sm:px-6 ${
+                  className={`min-h-14 shrink-0 items-center justify-between gap-3 border-b px-4 py-2 transition-colors sm:px-6 ${
                     isOffline
                       ? "flex border-red-200 bg-red-50/90 dark:border-red-900/70 dark:bg-red-950/55"
                       : sidebarCollapsed

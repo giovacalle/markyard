@@ -477,7 +477,7 @@ function DocumentContent({
           {(leadingControl || trailingControl || offline) && (
             <header
               data-offline={offline ? "true" : undefined}
-              className={`flex min-h-12 shrink-0 items-center justify-between gap-3 border-b px-4 py-2 transition-colors sm:px-6 ${
+              className={`flex min-h-14 shrink-0 items-center justify-between gap-3 border-b px-4 py-2 transition-colors sm:px-6 ${
                 offline
                   ? "border-red-200 bg-red-50/90 dark:border-red-900/70 dark:bg-red-950/55"
                   : "border-neutral-200 dark:border-neutral-800"
@@ -1410,7 +1410,7 @@ function DocumentSession({
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <header
           data-offline={offline ? "true" : undefined}
-          className={`flex min-h-12 shrink-0 flex-wrap items-center justify-between gap-3 border-b px-4 py-2 transition-colors sm:px-6 ${
+          className={`flex min-h-14 shrink-0 flex-wrap items-center justify-between gap-3 border-b px-4 py-2 transition-colors sm:px-6 ${
             offline
               ? "border-red-200 bg-red-50/90 dark:border-red-900/70 dark:bg-red-950/55"
               : "border-neutral-200 dark:border-neutral-800"

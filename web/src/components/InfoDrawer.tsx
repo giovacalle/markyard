@@ -259,7 +259,7 @@ export function InfoDrawer({
         aria-label="Document info"
         className="fixed inset-y-0 right-0 z-40 flex w-[85vw] max-w-sm flex-col border-l border-neutral-200 bg-neutral-50 text-sm shadow-xl md:static md:z-auto md:w-72 md:max-w-none md:shrink-0 md:shadow-none dark:border-neutral-800 dark:bg-neutral-900"
       >
-        <div className="flex min-h-12 shrink-0 items-center justify-between gap-2 border-b border-neutral-200 px-3.5 py-2 dark:border-neutral-800">
+        <div className="flex min-h-14 shrink-0 items-center justify-between gap-2 border-b border-neutral-200 px-3.5 py-2 dark:border-neutral-800">
           <h2 className="truncate text-sm font-semibold tracking-tight text-neutral-900 dark:text-neutral-100">
             Document info
           </h2>
