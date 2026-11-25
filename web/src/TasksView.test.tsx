@@ -30,7 +30,7 @@ function renderPanel() {
 }
 
 describe("TasksPanel", () => {
-  it("groups open tasks by note and filters by status, search, folder and tag", () => {
+  it("groups open tasks by note and filters by status, search, folder and tag", async () => {
     renderPanel();
     const groups = () =>
       screen.getAllByRole("group").map((g) =>
@@ -46,11 +46,13 @@ describe("TasksPanel", () => {
     fireEvent.click(screen.getByRole("radio", { name: "All" }));
     expect(groups()).toEqual([["milk #shop"], ["ship #release @2026-12-01", "draft"]]);
 
-    fireEvent.change(screen.getByRole("combobox", { name: "Folder" }), {
-      target: { value: "Work" },
-    });
+    const folderTrigger = screen.getByRole("combobox", { name: "Folder" });
+    expect(folderTrigger.tagName).toBe("BUTTON");
+    fireEvent.click(folderTrigger);
+    fireEvent.click(await screen.findByRole("option", { name: "Work" }));
     expect(groups()).toEqual([["ship #release @2026-12-01", "draft"]]);
-    fireEvent.change(screen.getByRole("combobox", { name: "Folder" }), { target: { value: "" } });
+    fireEvent.click(folderTrigger);
+    fireEvent.click(await screen.findByRole("option", { name: "All folders" }));
 
     fireEvent.click(screen.getByRole("button", { name: "#shop" }));
     expect(screen.getByRole("button", { name: "#shop" })).toHaveAttribute("aria-pressed", "true");
@@ -74,5 +76,38 @@ describe("TasksPanel", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: /Groceries/ }));
     expect(onOpenNote).toHaveBeenCalledWith("h");
+  });
+
+  it("supports keyboard arrows on the status segmented control and filters root-only notes", async () => {
+    const docsWithRoot = [...DOCS, doc("r", "Inbox.md", [], "- [ ] root task\n")];
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <TasksPanel
+          docs={docsWithRoot}
+          vaultPinned={false}
+          onToggle={() => {}}
+          onOpenNote={() => {}}
+        />
+      </QueryClientProvider>,
+    );
+
+    const openRadio = screen.getByRole("radio", { name: "Open" });
+    openRadio.focus();
+    fireEvent.keyDown(openRadio, { key: "ArrowRight" });
+    expect(screen.getByRole("radio", { name: "Completed" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    expect(screen.getByRole("checkbox", { name: "draft" })).toBeChecked();
+
+    const completedRadio = screen.getByRole("radio", { name: "Completed" });
+    fireEvent.keyDown(completedRadio, { key: "ArrowRight" });
+    expect(screen.getByRole("radio", { name: "All" })).toHaveAttribute("aria-checked", "true");
+
+    const folderTrigger = screen.getByRole("combobox", { name: "Folder" });
+    fireEvent.click(folderTrigger);
+    fireEvent.click(await screen.findByRole("option", { name: "Root only" }));
+    expect(screen.getByRole("checkbox", { name: "root task" })).not.toBeChecked();
+    expect(screen.queryByRole("checkbox", { name: "milk #shop" })).toBeNull();
   });
 });

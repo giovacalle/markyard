@@ -6,6 +6,7 @@ import {
   DialogDescription,
   DialogTitle,
 } from "@ui-sdk/react/dialog";
+import { SegmentedControl, SegmentedControlItem } from "@ui-sdk/react/segmented-control";
 import { type ReactNode, useId, useState } from "react";
 import {
   type AppSettings,
@@ -137,31 +138,26 @@ function Segmented<T extends string>({
   return (
     <div className="flex items-center justify-between gap-3">
       <span className="text-sm font-medium text-neutral-800 dark:text-neutral-200">{label}</span>
-      <div
-        role="radiogroup"
+      <SegmentedControl
         aria-label={label}
+        value={value}
+        onValueChange={(next) => {
+          if (next !== null) {
+            onChange(next);
+          }
+        }}
         className="inline-flex gap-1 rounded-lg bg-neutral-100 p-1 dark:bg-neutral-950"
       >
-        {options.map((option) => {
-          const active = option.value === value;
-          return (
-            <button
-              key={option.value}
-              type="button"
-              role="radio"
-              aria-checked={active}
-              onClick={() => onChange(option.value)}
-              className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
-                active
-                  ? "bg-white text-neutral-950 shadow-xs dark:bg-neutral-800 dark:text-neutral-50"
-                  : "text-neutral-600 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100"
-              }`}
-            >
-              {option.label}
-            </button>
-          );
-        })}
-      </div>
+        {options.map((option) => (
+          <SegmentedControlItem
+            key={option.value}
+            value={option.value}
+            className="rounded-md px-2.5 py-1 text-xs font-medium text-neutral-600 transition-colors hover:text-neutral-900 focus-visible:outline-2 focus-visible:outline-blue-600 data-checked:bg-white data-checked:text-neutral-950 data-checked:shadow-xs dark:text-neutral-400 dark:hover:text-neutral-100 dark:data-checked:bg-neutral-800 dark:data-checked:text-neutral-50"
+          >
+            {option.label}
+          </SegmentedControlItem>
+        ))}
+      </SegmentedControl>
     </div>
   );
 }

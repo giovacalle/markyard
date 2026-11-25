@@ -1,3 +1,13 @@
+import { Checkbox, CheckboxIndicator } from "@ui-sdk/react/checkbox";
+import { SegmentedControl, SegmentedControlItem } from "@ui-sdk/react/segmented-control";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectItemIndicator,
+  SelectTrigger,
+  SelectValue,
+} from "@ui-sdk/react/select";
 import { type ReactNode, useMemo, useState } from "react";
 import { usePkm } from "../pkm";
 import { useSyncQueue } from "../syncQueue";
@@ -6,6 +16,7 @@ import { toggleTaskAt } from "../taskToggle";
 import { useVaultDocuments } from "../useVaultDocuments";
 import { saveVaultDocument, type VaultDocument } from "../vaultDocuments";
 import { noteStem } from "../wikilinks";
+import { CheckIcon, ChevronsUpDownIcon } from "./icons";
 
 const STATUS_OPTIONS: { value: TaskStatusFilter; label: string }[] = [
   { value: "open", label: "Open" },
@@ -13,7 +24,7 @@ const STATUS_OPTIONS: { value: TaskStatusFilter; label: string }[] = [
   { value: "all", label: "All" },
 ];
 
-/** Folder `<select>` value for notes at the root (no real folder path starts with `/`). */
+/** Folder Select value for notes at the root (no real folder path starts with `/`). */
 const ROOT_ONLY = "/";
 
 interface IndexedNote extends NoteTasks {
@@ -74,6 +85,14 @@ export function TasksPanel({
   }, [docs, overrides]);
 
   const folders = useMemo(() => folderPaths(indexed), [indexed]);
+  const folderItems = useMemo(
+    () => [
+      { value: "", label: "All folders" },
+      { value: ROOT_ONLY, label: "Root only" },
+      ...folders.map((path) => ({ value: path, label: path.split("/").join(" / ") })),
+    ],
+    [folders],
+  );
   const tags = useMemo(() => {
     const all = new Set<string>();
     for (const note of indexed) {
@@ -112,28 +131,26 @@ export function TasksPanel({
       <header className="flex min-h-14 shrink-0 flex-wrap items-center gap-2 border-b border-neutral-200 px-4 py-2 sm:px-6 dark:border-neutral-800">
         {header}
         <h2 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Tasks</h2>
-        <div
-          role="radiogroup"
+        <SegmentedControl
           aria-label="Status"
+          value={status}
+          onValueChange={(next) => {
+            if (next !== null) {
+              setStatus(next);
+            }
+          }}
           className="ml-auto flex rounded-md border border-neutral-200 p-0.5 dark:border-neutral-700"
         >
           {STATUS_OPTIONS.map((option) => (
-            <button
+            <SegmentedControlItem
               key={option.value}
-              type="button"
-              role="radio"
-              aria-checked={status === option.value}
-              onClick={() => setStatus(option.value)}
-              className={`rounded px-2 py-0.5 text-xs font-medium transition-colors ${
-                status === option.value
-                  ? "bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900"
-                  : "text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-800"
-              }`}
+              value={option.value}
+              className="rounded px-2 py-0.5 text-xs font-medium text-neutral-600 transition-colors hover:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-blue-600 data-checked:bg-neutral-900 data-checked:text-white data-checked:hover:bg-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:data-checked:bg-neutral-100 dark:data-checked:text-neutral-900 dark:data-checked:hover:bg-neutral-100"
             >
               {option.label}
-            </button>
+            </SegmentedControlItem>
           ))}
-        </div>
+        </SegmentedControl>
       </header>
 
       <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-neutral-200 px-4 py-2 sm:px-6 dark:border-neutral-800">
@@ -145,23 +162,41 @@ export function TasksPanel({
           onChange={(event) => setQuery(event.target.value)}
           className={`${controlClass} min-w-0 flex-1`}
         />
-        <select
-          aria-label="Folder"
+        <Select
+          items={folderItems}
           value={folder === null ? "" : folder === "" ? ROOT_ONLY : folder}
-          onChange={(event) => {
-            const value = event.target.value;
+          onValueChange={(next) => {
+            const value = next ?? "";
             setFolder(value === "" ? null : value === ROOT_ONLY ? "" : value);
           }}
-          className={controlClass}
         >
-          <option value="">All folders</option>
-          <option value={ROOT_ONLY}>Root only</option>
-          {folders.map((path) => (
-            <option key={path} value={path}>
-              {path.split("/").join(" / ")}
-            </option>
-          ))}
-        </select>
+          <SelectTrigger
+            aria-label="Folder"
+            className={`${controlClass} inline-flex items-center justify-between gap-2 data-open:border-neutral-400 dark:data-open:border-neutral-500`}
+          >
+            <SelectValue className="truncate" />
+            <ChevronsUpDownIcon className="size-3.5 shrink-0 text-neutral-400 dark:text-neutral-500" />
+          </SelectTrigger>
+          <SelectContent
+            side="bottom"
+            align="end"
+            sideOffset={6}
+            className="z-50 max-h-64 min-w-(--anchor-width) overflow-y-auto rounded-xl border border-neutral-200 bg-white p-1 text-neutral-900 shadow-lg outline-none dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-100"
+          >
+            {folderItems.map((item) => (
+              <SelectItem
+                key={item.value}
+                value={item.value}
+                className="flex cursor-default items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-xs font-medium text-neutral-700 outline-none select-none data-highlighted:bg-neutral-100 data-highlighted:text-neutral-950 data-selected:text-neutral-950 dark:text-neutral-200 dark:data-highlighted:bg-neutral-800 dark:data-highlighted:text-neutral-50 dark:data-selected:text-neutral-50"
+              >
+                <span className="truncate">{item.label}</span>
+                <SelectItemIndicator className="shrink-0 text-blue-600 dark:text-blue-400">
+                  <CheckIcon className="size-3.5" />
+                </SelectItemIndicator>
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         {tags.length > 0 && (
           <div className="flex w-full flex-wrap gap-1">
             {tags.map((name) => (
@@ -211,13 +246,16 @@ export function TasksPanel({
                 <ul className="mt-1 space-y-0.5">
                   {note.tasks.map((task) => (
                     <li key={task.offset} className="flex items-start gap-2 px-1 py-0.5">
-                      <input
-                        type="checkbox"
+                      <Checkbox
                         aria-label={task.text}
                         checked={task.done}
-                        onChange={() => toggle(note.id, task.offset)}
-                        className="mt-1 size-4 shrink-0 accent-blue-600"
-                      />
+                        onCheckedChange={() => toggle(note.id, task.offset)}
+                        className="mt-0.5 flex size-4 shrink-0 items-center justify-center rounded border border-neutral-300 bg-white text-white transition-colors hover:border-neutral-400 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 data-checked:border-blue-600 data-checked:bg-blue-600 dark:border-neutral-600 dark:bg-neutral-900 dark:hover:border-neutral-500 dark:data-checked:border-blue-500 dark:data-checked:bg-blue-500"
+                      >
+                        <CheckboxIndicator className="flex items-center justify-center">
+                          <CheckIcon className="size-3" strokeWidth={2.5} />
+                        </CheckboxIndicator>
+                      </Checkbox>
                       <span
                         className={`min-w-0 flex-1 break-words text-sm ${
                           task.done

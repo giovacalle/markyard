@@ -1,4 +1,5 @@
 import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from "@ui-sdk/react/popover";
+import { SegmentedControl, SegmentedControlItem } from "@ui-sdk/react/segmented-control";
 import { useState } from "react";
 import type { ThemePreference } from "../theme";
 import {
@@ -123,32 +124,27 @@ export function AccountPopover({
           <span className="block text-[11px] font-medium text-neutral-500 dark:text-neutral-400">
             Theme
           </span>
-          <div
-            role="radiogroup"
+          <SegmentedControl
             aria-label="Theme"
+            value={theme}
+            onValueChange={(next) => {
+              if (next !== null) {
+                onThemeChange(next);
+              }
+            }}
             className="mt-1.5 grid grid-cols-3 gap-1 rounded-lg bg-neutral-100 p-1 dark:bg-neutral-950"
           >
-            {THEME_OPTIONS.map(({ value, label, Icon }) => {
-              const active = theme === value;
-              return (
-                <button
-                  key={value}
-                  type="button"
-                  role="radio"
-                  aria-checked={active}
-                  onClick={() => onThemeChange(value)}
-                  className={`inline-flex items-center justify-center gap-1 rounded-md px-2 py-1.5 text-xs font-medium transition-colors ${
-                    active
-                      ? "bg-white text-neutral-950 shadow-xs dark:bg-neutral-800 dark:text-neutral-50"
-                      : "text-neutral-600 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100"
-                  }`}
-                >
-                  <Icon className="size-3.5" />
-                  <span>{label}</span>
-                </button>
-              );
-            })}
-          </div>
+            {THEME_OPTIONS.map(({ value, label, Icon }) => (
+              <SegmentedControlItem
+                key={value}
+                value={value}
+                className="inline-flex items-center justify-center gap-1 rounded-md px-2 py-1.5 text-xs font-medium text-neutral-600 transition-colors hover:text-neutral-900 focus-visible:outline-2 focus-visible:outline-blue-600 data-checked:bg-white data-checked:text-neutral-950 data-checked:shadow-xs dark:text-neutral-400 dark:hover:text-neutral-100 dark:data-checked:bg-neutral-800 dark:data-checked:text-neutral-50"
+              >
+                <Icon className="size-3.5" />
+                <span>{label}</span>
+              </SegmentedControlItem>
+            ))}
+          </SegmentedControl>
         </div>
 
         <div className="my-1.5 h-px bg-neutral-200 dark:bg-neutral-800" />

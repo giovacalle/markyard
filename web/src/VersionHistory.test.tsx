@@ -113,7 +113,8 @@ describe("Version history", () => {
     await waitFor(() => expect(diffHost.shadowRoot?.textContent).toContain("Ship it later."));
     expect(diffHost.shadowRoot?.textContent).toContain("Ship it now.");
 
-    fireEvent.click(within(dialog).getByRole("button", { name: "Raw text" }));
+    const viewGroup = within(dialog).getByRole("radiogroup", { name: "View" });
+    fireEvent.click(within(viewGroup).getByRole("radio", { name: "Raw text" }));
     expect(within(dialog).getByTestId("revision-raw")).toHaveTextContent("Ship it later.");
 
     // Going back to a revision already fetched does not refetch it.

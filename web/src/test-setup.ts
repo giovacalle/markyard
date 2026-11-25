@@ -1,6 +1,6 @@
 import "fake-indexeddb/auto";
 import "@testing-library/jest-dom/vitest";
-import { cleanup } from "@testing-library/react";
+import { cleanup, configure } from "@testing-library/react";
 import { afterEach } from "vite-plus/test";
 import { clearLocalCache } from "./localCache";
 import { resetSettings } from "./settings";
@@ -41,6 +41,16 @@ if (!("showPopover" in HTMLElement.prototype)) {
   style.textContent = "[popover]:not([hidden]) { display: block; }";
   document.head.appendChild(style);
 }
+
+// @ui-sdk/core appends persistent live-region elements (`data-ui-sdk-announcer`) to document.body.
+// Hiding them via CSS + defaultIgnore keeps them in the DOM for explicit assertions without
+// colliding with unscoped `*ByRole("status"|"alert")` and `*ByText(...)` queries.
+{
+  const style = document.createElement("style");
+  style.textContent = "[data-ui-sdk-announcer] { display: none; }";
+  document.head.appendChild(style);
+}
+configure({ defaultIgnore: "script, style, [data-ui-sdk-announcer]" });
 
 // CodeMirror 6 measures text via Range layout APIs that jsdom does not implement.
 if (!("getClientRects" in Range.prototype)) {

@@ -7,6 +7,7 @@ import {
   DialogDescription,
   DialogTitle,
 } from "@ui-sdk/react/dialog";
+import { SegmentedControl, SegmentedControlItem } from "@ui-sdk/react/segmented-control";
 import { type KeyboardEvent, lazy, Suspense, useState } from "react";
 import {
   describeError,
@@ -93,7 +94,7 @@ const BUTTON_CLASS =
   "rounded-lg border border-neutral-300 bg-white px-3 py-1.5 text-sm font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200 dark:hover:bg-neutral-800";
 
 const TOGGLE_CLASS =
-  "rounded-md px-2 py-0.5 text-xs font-medium text-neutral-600 hover:text-neutral-900 aria-pressed:bg-white aria-pressed:text-neutral-900 aria-pressed:shadow-xs dark:text-neutral-400 dark:hover:text-neutral-100 dark:aria-pressed:bg-neutral-700 dark:aria-pressed:text-neutral-50";
+  "rounded-md px-2 py-0.5 text-xs font-medium text-neutral-600 hover:text-neutral-900 focus-visible:outline-2 focus-visible:outline-blue-600 data-checked:bg-white data-checked:text-neutral-900 data-checked:shadow-xs dark:text-neutral-400 dark:hover:text-neutral-100 dark:data-checked:bg-neutral-700 dark:data-checked:text-neutral-50";
 
 /**
  * Drive's stored versions of a note: pick one to compare with the current text, then restore
@@ -302,28 +303,23 @@ function HistoryBody({
                 ? "Red lines are in the current note, green lines are in this version."
                 : `Text of the version from ${when}.`}
             </p>
-            <div
-              role="group"
+            <SegmentedControl
               aria-label="View"
+              value={view}
+              onValueChange={(next) => {
+                if (next !== null) {
+                  setView(next);
+                }
+              }}
               className="inline-flex rounded-lg bg-neutral-100 p-0.5 dark:bg-neutral-800"
             >
-              <button
-                type="button"
-                aria-pressed={view === "diff"}
-                onClick={() => setView("diff")}
-                className={TOGGLE_CLASS}
-              >
+              <SegmentedControlItem value="diff" className={TOGGLE_CLASS}>
                 Diff vs current
-              </button>
-              <button
-                type="button"
-                aria-pressed={view === "raw"}
-                onClick={() => setView("raw")}
-                className={TOGGLE_CLASS}
-              >
+              </SegmentedControlItem>
+              <SegmentedControlItem value="raw" className={TOGGLE_CLASS}>
                 Raw text
-              </button>
-            </div>
+              </SegmentedControlItem>
+            </SegmentedControl>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto">
             {content.isPending ? (
