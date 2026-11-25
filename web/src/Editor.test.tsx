@@ -233,4 +233,27 @@ describe("mobile formatting accessory bar", () => {
     tap("Dismiss keyboard");
     expect(blur).toHaveBeenCalled();
   });
+
+  it("is a ui-sdk Toolbar: one tab stop, and the arrow keys move between its buttons", () => {
+    const viewport = installVisualViewport();
+    mountEditor("item");
+    act(() => {
+      viewport.height = 300;
+      viewport.dispatchEvent(new Event("resize"));
+    });
+    const bar = screen.getByRole("toolbar", { name: "Formatting accessory bar" });
+    expect(bar).toHaveAttribute("data-slot", "toolbar");
+    const buttons = within(bar).getAllByRole("button");
+    for (const button of buttons) {
+      expect(button).toHaveAttribute("data-slot", "toolbar-button");
+    }
+    // Roving focus: only one button is in the tab order.
+    expect(buttons.filter((button) => button.tabIndex === 0)).toHaveLength(1);
+
+    act(() => buttons[0].focus());
+    fireEvent.keyDown(buttons[0], { key: "ArrowRight" });
+    expect(buttons[1]).toHaveFocus();
+    fireEvent.keyDown(buttons[1], { key: "ArrowLeft" });
+    expect(buttons[0]).toHaveFocus();
+  });
 });

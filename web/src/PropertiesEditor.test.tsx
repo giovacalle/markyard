@@ -76,18 +76,68 @@ function pressSave() {
 }
 
 describe("Direction A frontmatter editing (PropertiesEditor + DocumentView)", () => {
-  it("clicking <summary>Properties</summary> in Preview toggles details without entering Edit mode", async () => {
+  it("clicking the Properties trigger in Preview toggles the panel without entering Edit mode", async () => {
     setupNote("---\nstatus: ready\ntags: [test]\n---\n\n# Body\n");
     render(<App />);
 
     const preview = await screen.findByRole("region", { name: "Preview" });
     const properties = await within(preview).findByRole("group", { name: "Properties" });
-    const summary = properties.querySelector("summary")!;
-    expect(summary).not.toBeNull();
+    const trigger = within(properties).getByRole("button", { name: "Properties" });
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
 
-    fireEvent.click(summary);
+    fireEvent.click(trigger);
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
     expect(screen.getByRole("region", { name: "Preview" })).toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Editor" })).not.toBeInTheDocument();
+  });
+
+  it("renders Preview properties as a ui-sdk Collapsible", async () => {
+    setupNote("---\nstatus: ready\ntags: [test]\n---\n\n# Body\n");
+    render(<App />);
+
+    const preview = await screen.findByRole("region", { name: "Preview" });
+    const properties = await within(preview).findByRole("group", { name: "Properties" });
+    expect(properties).toHaveAttribute("data-slot", "collapsible");
+    const trigger = within(properties).getByRole("button", { name: "Properties" });
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+
+    fireEvent.click(trigger);
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    expect(within(properties).queryByText("status")).not.toBeInTheDocument();
+
+    fireEvent.click(trigger);
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(within(properties).getByText("ready"));
+    expect(screen.getByRole("region", { name: "Preview" })).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Editor" })).not.toBeInTheDocument();
+  });
+
+  it("renders the Edit properties panel as a ui-sdk Collapsible, collapsed by default", async () => {
+    setupNote("---\nstatus: ready\ntags: [test]\n---\n\n# Body\n");
+    render(<App />);
+
+    const preview = await screen.findByRole("region", { name: "Preview" });
+    await within(preview).findByRole("heading", { level: 3, name: "Body" });
+    fireEvent.click(within(preview).getByTestId("editor-canvas"));
+    const editor = await screen.findByRole("region", { name: "Editor" });
+    const propsEditor = within(editor).getByRole("group", { name: "Properties" });
+    expect(propsEditor).toHaveAttribute("data-slot", "collapsible");
+    expect(propsEditor).toHaveAttribute("data-properties-editor");
+
+    const toggle = within(propsEditor).getByRole("button", { name: /Properties/ });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(within(propsEditor).queryByRole("button", { name: "Add property" })).toBeNull();
+
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(propsEditor).toHaveAttribute("data-open");
+    expect(within(propsEditor).getByRole("button", { name: "Add property" })).toBeInTheDocument();
+    // The collapsed preview hides once the panel shows the editable values.
+    expect(within(toggle).queryByText("#test")).toBeNull();
+
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(within(toggle).getByText("#test")).toBeInTheDocument();
   });
 
   it("hides PropertiesBar in Edit mode, places PropertiesEditor below toolbar, and edits body-only in Visual mode", async () => {
@@ -266,14 +316,15 @@ describe("Direction A frontmatter editing (PropertiesEditor + DocumentView)", ()
     await within(preview).findByRole("heading", { level: 3, name: "Hello" });
     fireEvent.click(within(preview).getByTestId("editor-canvas"));
     const editor = await screen.findByRole("region", { name: "Editor" });
-    const propsEditor = editor.querySelector<HTMLElement>("[data-properties-editor]")!;
+    // Re-queried: the root switches between a plain div (raw YAML, no frontmatter) and the Collapsible.
+    const propsEditor = () => editor.querySelector<HTMLElement>("[data-properties-editor]")!;
 
-    fireEvent.click(within(propsEditor).getByRole("button", { name: /Properties/ }));
-    expect(within(propsEditor).getByText("Complex YAML")).toBeInTheDocument();
+    fireEvent.click(within(propsEditor()).getByRole("button", { name: /Properties/ }));
+    expect(within(propsEditor()).getByText("Complex YAML")).toBeInTheDocument();
 
     // Jump to Raw YAML mode via "Edit in </>".
-    fireEvent.click(within(propsEditor).getByRole("button", { name: "Edit in </>" }));
-    expect(within(propsEditor).getByText("YAML frontmatter")).toBeInTheDocument();
+    fireEvent.click(within(propsEditor()).getByRole("button", { name: "Edit in </>" }));
+    expect(within(propsEditor()).getByText("YAML frontmatter")).toBeInTheDocument();
 
     const view = getEditorView(editor);
     expect(view.state.doc.toString()).toContain("  author: Alice");
@@ -287,9 +338,9 @@ describe("Direction A frontmatter editing (PropertiesEditor + DocumentView)", ()
     });
 
     // Switch back to Visual mode: body-only restored, visual card reflects `shipped` and nested YAML preserved.
-    fireEvent.click(within(propsEditor).getByRole("button", { name: "Visual" }));
+    fireEvent.click(within(propsEditor()).getByRole("button", { name: "Visual" }));
     expect(view.state.doc.toString()).toBe("# Hello\n");
-    expect(within(propsEditor).getByRole("button", { name: "Edit status" })).toHaveTextContent(
+    expect(within(propsEditor()).getByRole("button", { name: "Edit status" })).toHaveTextContent(
       "shipped",
     );
 
@@ -309,26 +360,27 @@ describe("Direction A frontmatter editing (PropertiesEditor + DocumentView)", ()
     await within(preview).findByRole("heading", { level: 3, name: "Plain note" });
     fireEvent.click(within(preview).getByTestId("editor-canvas"));
     const editor = await screen.findByRole("region", { name: "Editor" });
-    const propsEditor = editor.querySelector<HTMLElement>("[data-properties-editor]")!;
+    // Re-queried: the root switches between a plain div (raw YAML, no frontmatter) and the Collapsible.
+    const propsEditor = () => editor.querySelector<HTMLElement>("[data-properties-editor]")!;
 
-    fireEvent.click(within(propsEditor).getByRole("button", { name: "Add property" }));
-    fireEvent.change(within(propsEditor).getByRole("textbox", { name: "Property key" }), {
+    fireEvent.click(within(propsEditor()).getByRole("button", { name: "Add property" }));
+    fireEvent.change(within(propsEditor()).getByRole("textbox", { name: "Property key" }), {
       target: { value: "tags" },
     });
-    const valueInput = within(propsEditor).getByRole("textbox", { name: "Property value" });
+    const valueInput = within(propsEditor()).getByRole("textbox", { name: "Property value" });
     fireEvent.change(valueInput, { target: { value: "#ideas, design" } });
     fireEvent.keyDown(valueInput, { key: "Enter" });
 
     // Panel auto-expands and shows the newly added tags while CodeMirror keeps body-only.
-    expect(within(propsEditor).getByRole("button", { name: /Properties/ })).toHaveAttribute(
+    expect(within(propsEditor()).getByRole("button", { name: /Properties/ })).toHaveAttribute(
       "aria-expanded",
       "true",
     );
     expect(
-      within(propsEditor).getByRole("button", { name: "Remove tag ideas" }),
+      within(propsEditor()).getByRole("button", { name: "Remove tag ideas" }),
     ).toBeInTheDocument();
     expect(
-      within(propsEditor).getByRole("button", { name: "Remove tag design" }),
+      within(propsEditor()).getByRole("button", { name: "Remove tag design" }),
     ).toBeInTheDocument();
     expect(getEditorView(editor).state.doc.toString()).toBe("# Plain note\n\nBody text.\n");
 

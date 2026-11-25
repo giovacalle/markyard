@@ -1,3 +1,4 @@
+import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "@ui-sdk/react/collapsible";
 import { isTagKey, type Frontmatter } from "../frontmatter";
 import { ChevronIcon } from "./icons";
 
@@ -14,16 +15,20 @@ export function PropertiesBar({
   }
 
   return (
-    <details
-      open
+    <Collapsible
+      defaultOpen
+      role="group"
       aria-label="Properties"
-      className="group rounded-lg border border-neutral-200 bg-neutral-50/60 px-3 py-1.5 text-xs dark:border-neutral-800 dark:bg-neutral-900/60"
+      className="group/properties rounded-lg border border-neutral-200 bg-neutral-50/60 px-3 py-1.5 text-xs dark:border-neutral-800 dark:bg-neutral-900/60"
     >
-      <summary className="flex cursor-pointer list-none items-center gap-1.5 py-0.5 text-neutral-500 transition-colors hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-200">
-        <ChevronIcon className="size-3.5 shrink-0 transition-transform group-open:rotate-90" />
+      <CollapsibleTrigger className="flex w-full cursor-pointer items-center gap-1.5 py-0.5 text-left text-neutral-500 transition-colors hover:text-neutral-800 focus-visible:outline-2 focus-visible:outline-blue-600 dark:text-neutral-400 dark:hover:text-neutral-200">
+        <ChevronIcon className="size-3.5 shrink-0 transition-transform group-data-open/properties:rotate-90" />
         <span className="font-medium">Properties</span>
-      </summary>
-      <dl className="mt-2 grid grid-cols-[max-content_1fr] items-baseline gap-x-3 gap-y-1.5 border-t border-neutral-200/80 pt-2 pb-1 dark:border-neutral-800">
+      </CollapsibleTrigger>
+      <CollapsiblePanel
+        render={<dl />}
+        className="mt-2 grid grid-cols-[max-content_1fr] items-baseline gap-x-3 gap-y-1.5 border-t border-neutral-200/80 pt-2 pb-1 dark:border-neutral-800"
+      >
         {frontmatter.properties.map((p, index) => {
           const isTags = isTagKey(p.key);
           const tagValues = isTags
@@ -60,7 +65,7 @@ export function PropertiesBar({
             </div>
           );
         })}
-      </dl>
-    </details>
+      </CollapsiblePanel>
+    </Collapsible>
   );
 }

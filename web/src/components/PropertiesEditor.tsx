@@ -1,3 +1,4 @@
+import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "@ui-sdk/react/collapsible";
 import { Switch, SwitchThumb } from "@ui-sdk/react/switch";
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import {
@@ -514,22 +515,17 @@ export function PropertiesEditor({
   const scalarPreview = collapsedScalars(frontmatter.properties);
 
   return (
-    <div
+    <Collapsible
+      open={expanded}
+      onOpenChange={setExpanded}
       data-properties-editor=""
       role="group"
       aria-label="Properties"
-      className="rounded-lg border border-neutral-200 bg-neutral-50/60 px-3 py-1.5 text-xs dark:border-neutral-800 dark:bg-neutral-900/60"
+      className="group/properties rounded-lg border border-neutral-200 bg-neutral-50/60 px-3 py-1.5 text-xs dark:border-neutral-800 dark:bg-neutral-900/60"
     >
       <div className="flex items-center justify-between gap-2">
-        <button
-          type="button"
-          aria-expanded={expanded}
-          onClick={() => setExpanded((prev) => !prev)}
-          className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5 py-0.5 text-left text-neutral-500 transition-colors hover:text-neutral-800 focus-visible:outline-2 focus-visible:outline-blue-600 dark:text-neutral-400 dark:hover:text-neutral-200"
-        >
-          <ChevronIcon
-            className={`size-3.5 shrink-0 transition-transform ${expanded ? "rotate-90" : ""}`}
-          />
+        <CollapsibleTrigger className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5 py-0.5 text-left text-neutral-500 transition-colors hover:text-neutral-800 focus-visible:outline-2 focus-visible:outline-blue-600 dark:text-neutral-400 dark:hover:text-neutral-200">
+          <ChevronIcon className="size-3.5 shrink-0 transition-transform group-data-open/properties:rotate-90" />
           <span className="font-medium">Properties</span>
           {!expanded && (
             <>
@@ -551,7 +547,7 @@ export function PropertiesEditor({
               ))}
             </>
           )}
-        </button>
+        </CollapsibleTrigger>
         <button
           type="button"
           aria-label="Edit raw YAML"
@@ -564,103 +560,101 @@ export function PropertiesEditor({
         </button>
       </div>
 
-      {expanded && (
-        <div className="mt-2 space-y-2 border-t border-neutral-200/80 pt-2 pb-1 dark:border-neutral-800">
-          {frontmatter.properties.length > 0 && (
-            <div className="space-y-1.5">
-              {frontmatter.properties.map((prop, index) => (
-                <div
-                  key={`${prop.key}-${prop.blockStart}`}
-                  className="grid grid-cols-[minmax(5rem,max-content)_1fr_auto] items-start gap-x-3 gap-y-1"
-                >
-                  <span className="truncate py-0.5 font-medium text-neutral-500 dark:text-neutral-400">
-                    {prop.key}
-                  </span>
-                  <div className="min-w-0">
-                    {prop.kind === "tags" ? (
-                      <TagsValueEditor
-                        tags={prop.listItems ?? (Array.isArray(prop.value) ? prop.value : [])}
-                        vaultTags={vaultTags}
-                        onChangeTags={(nextTags) =>
-                          onChange(setFrontmatterProperty(text, index, nextTags))
-                        }
-                      />
-                    ) : prop.kind === "boolean" ? (
-                      <Switch
-                        aria-label={prop.key}
-                        checked={prop.booleanValue === true}
-                        onCheckedChange={(next) =>
-                          onChange(setFrontmatterProperty(text, index, next))
-                        }
-                        className="relative mt-0.5 inline-flex h-4.5 w-8 shrink-0 items-center rounded-full bg-neutral-300 transition-colors focus-visible:outline-2 focus-visible:outline-blue-600 data-checked:bg-blue-600 dark:bg-neutral-700 dark:data-checked:bg-blue-500"
+      <CollapsiblePanel className="mt-2 space-y-2 border-t border-neutral-200/80 pt-2 pb-1 dark:border-neutral-800">
+        {frontmatter.properties.length > 0 && (
+          <div className="space-y-1.5">
+            {frontmatter.properties.map((prop, index) => (
+              <div
+                key={`${prop.key}-${prop.blockStart}`}
+                className="grid grid-cols-[minmax(5rem,max-content)_1fr_auto] items-start gap-x-3 gap-y-1"
+              >
+                <span className="truncate py-0.5 font-medium text-neutral-500 dark:text-neutral-400">
+                  {prop.key}
+                </span>
+                <div className="min-w-0">
+                  {prop.kind === "tags" ? (
+                    <TagsValueEditor
+                      tags={prop.listItems ?? (Array.isArray(prop.value) ? prop.value : [])}
+                      vaultTags={vaultTags}
+                      onChangeTags={(nextTags) =>
+                        onChange(setFrontmatterProperty(text, index, nextTags))
+                      }
+                    />
+                  ) : prop.kind === "boolean" ? (
+                    <Switch
+                      aria-label={prop.key}
+                      checked={prop.booleanValue === true}
+                      onCheckedChange={(next) =>
+                        onChange(setFrontmatterProperty(text, index, next))
+                      }
+                      className="relative mt-0.5 inline-flex h-4.5 w-8 shrink-0 items-center rounded-full bg-neutral-300 transition-colors focus-visible:outline-2 focus-visible:outline-blue-600 data-checked:bg-blue-600 dark:bg-neutral-700 dark:data-checked:bg-blue-500"
+                    >
+                      <SwitchThumb className="inline-block size-3.5 translate-x-0.5 rounded-full bg-white shadow-sm transition-transform data-checked:translate-x-4" />
+                    </Switch>
+                  ) : prop.kind === "list" ? (
+                    <ListValueEditor
+                      propKey={prop.key}
+                      items={prop.listItems ?? []}
+                      onChangeItems={(nextItems) =>
+                        onChange(setFrontmatterProperty(text, index, nextItems))
+                      }
+                    />
+                  ) : prop.kind === "complex" ? (
+                    <div className="flex flex-wrap items-center gap-1.5 py-0.5">
+                      <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800 dark:bg-amber-950/60 dark:text-amber-300">
+                        Complex YAML
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => onToggleRawMode(true)}
+                        className="rounded-md px-1.5 py-0.5 text-[11px] font-medium text-blue-700 transition-colors hover:bg-blue-50 focus-visible:outline-2 focus-visible:outline-blue-600 dark:text-blue-300 dark:hover:bg-blue-950/60"
                       >
-                        <SwitchThumb className="inline-block size-3.5 translate-x-0.5 rounded-full bg-white shadow-sm transition-transform data-checked:translate-x-4" />
-                      </Switch>
-                    ) : prop.kind === "list" ? (
-                      <ListValueEditor
-                        propKey={prop.key}
-                        items={prop.listItems ?? []}
-                        onChangeItems={(nextItems) =>
-                          onChange(setFrontmatterProperty(text, index, nextItems))
-                        }
-                      />
-                    ) : prop.kind === "complex" ? (
-                      <div className="flex flex-wrap items-center gap-1.5 py-0.5">
-                        <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800 dark:bg-amber-950/60 dark:text-amber-300">
-                          Complex YAML
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => onToggleRawMode(true)}
-                          className="rounded-md px-1.5 py-0.5 text-[11px] font-medium text-blue-700 transition-colors hover:bg-blue-50 focus-visible:outline-2 focus-visible:outline-blue-600 dark:text-blue-300 dark:hover:bg-blue-950/60"
-                        >
-                          Edit in &lt;/&gt;
-                        </button>
-                      </div>
-                    ) : (
-                      <TextValueEditor
-                        propKey={prop.key}
-                        value={typeof prop.value === "string" ? prop.value : prop.value.join(", ")}
-                        onCommit={(nextValue) =>
-                          onChange(setFrontmatterProperty(text, index, nextValue))
-                        }
-                      />
-                    )}
-                  </div>
-                  <button
-                    type="button"
-                    aria-label={`Delete property ${prop.key}`}
-                    title={`Delete ${prop.key}`}
-                    onClick={() => onChange(deleteFrontmatterProperty(text, index))}
-                    className="inline-flex size-5 shrink-0 items-center justify-center rounded text-neutral-400 transition-colors hover:bg-red-50 hover:text-red-600 focus-visible:outline-2 focus-visible:outline-blue-600 dark:text-neutral-500 dark:hover:bg-red-950/50 dark:hover:text-red-400"
-                  >
-                    ×
-                  </button>
+                        Edit in &lt;/&gt;
+                      </button>
+                    </div>
+                  ) : (
+                    <TextValueEditor
+                      propKey={prop.key}
+                      value={typeof prop.value === "string" ? prop.value : prop.value.join(", ")}
+                      onCommit={(nextValue) =>
+                        onChange(setFrontmatterProperty(text, index, nextValue))
+                      }
+                    />
+                  )}
                 </div>
-              ))}
-            </div>
-          )}
+                <button
+                  type="button"
+                  aria-label={`Delete property ${prop.key}`}
+                  title={`Delete ${prop.key}`}
+                  onClick={() => onChange(deleteFrontmatterProperty(text, index))}
+                  className="inline-flex size-5 shrink-0 items-center justify-center rounded text-neutral-400 transition-colors hover:bg-red-50 hover:text-red-600 focus-visible:outline-2 focus-visible:outline-blue-600 dark:text-neutral-500 dark:hover:bg-red-950/50 dark:hover:text-red-400"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
 
-          {adding ? (
-            <AddPropertyForm
-              onAdd={(key, value) => {
-                setAdding(false);
-                onChange(addFrontmatterProperty(text, key, value));
-              }}
-              onCancel={() => setAdding(false)}
-            />
-          ) : (
-            <button
-              type="button"
-              onClick={() => setAdding(true)}
-              className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-medium text-neutral-500 transition-colors hover:bg-neutral-200/70 hover:text-neutral-900 focus-visible:outline-2 focus-visible:outline-blue-600 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
-            >
-              <PlusIcon className="size-3" />
-              <span>Add property</span>
-            </button>
-          )}
-        </div>
-      )}
-    </div>
+        {adding ? (
+          <AddPropertyForm
+            onAdd={(key, value) => {
+              setAdding(false);
+              onChange(addFrontmatterProperty(text, key, value));
+            }}
+            onCancel={() => setAdding(false)}
+          />
+        ) : (
+          <button
+            type="button"
+            onClick={() => setAdding(true)}
+            className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-medium text-neutral-500 transition-colors hover:bg-neutral-200/70 hover:text-neutral-900 focus-visible:outline-2 focus-visible:outline-blue-600 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+          >
+            <PlusIcon className="size-3" />
+            <span>Add property</span>
+          </button>
+        )}
+      </CollapsiblePanel>
+    </Collapsible>
   );
 }

@@ -206,7 +206,7 @@ function isInteractiveTarget(target: EventTarget | null): boolean {
   }
   return (
     target.closest(
-      'button, a, input, textarea, select, summary, details, [data-properties-editor], [role="toolbar"], [role="alert"], [role="dialog"]',
+      'button, a, input, textarea, select, summary, details, [data-slot="collapsible"], [data-properties-editor], [role="toolbar"], [role="alert"], [role="dialog"]',
     ) !== null
   );
 }

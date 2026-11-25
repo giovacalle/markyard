@@ -1,3 +1,4 @@
+import { Toolbar, ToolbarButton } from "@ui-sdk/react/toolbar";
 import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 export interface AccessoryAction {
@@ -62,16 +63,14 @@ export function AccessoryBar({ actions }: { actions: AccessoryAction[] }) {
   return (
     <>
       <div ref={spacerRef} aria-hidden="true" data-testid="accessory-bar-spacer" />
-      <div
+      <Toolbar
         ref={barRef}
-        role="toolbar"
         aria-label="Formatting accessory bar"
         className="fixed inset-x-0 z-30 flex h-12 items-center gap-1 overflow-x-auto border-t border-neutral-200 bg-neutral-50/95 px-2 backdrop-blur-xs dark:border-neutral-800 dark:bg-neutral-900/95"
       >
         {actions.map((action) => (
-          <button
+          <ToolbarButton
             key={action.label}
-            type="button"
             aria-label={action.label}
             title={action.label}
             onPointerDown={keepFocus}
@@ -80,9 +79,9 @@ export function AccessoryBar({ actions }: { actions: AccessoryAction[] }) {
             className="inline-flex h-9 min-w-9 shrink-0 items-center justify-center rounded-md px-2 text-sm font-medium text-neutral-700 active:bg-neutral-200 dark:text-neutral-300 dark:active:bg-neutral-800"
           >
             {action.icon}
-          </button>
+          </ToolbarButton>
         ))}
-      </div>
+      </Toolbar>
     </>
   );
 }

@@ -634,19 +634,20 @@ describe("open and preview a Markdown file", () => {
 
     const preview = await screen.findByRole("region", { name: "Preview" });
     const properties = await within(preview).findByRole("group", { name: "Properties" });
-    const summary = properties.querySelector("summary")!;
-    expect(properties).toHaveAttribute("open");
-    // Tags are rendered in their own row in written order, not hoisted into `<summary>`.
-    expect(within(summary).queryByRole("button", { name: "#work" })).toBeNull();
+    const trigger = within(properties).getByRole("button", { name: "Properties" });
+    expect(properties).toHaveAttribute("data-open");
+    // Tags are rendered in their own row in written order, not hoisted into the trigger.
+    expect(within(trigger).queryByRole("button", { name: "#work" })).toBeNull();
     const termLabels = Array.from(properties.querySelectorAll("dt")).map((dt) => dt.textContent);
     expect(termLabels).toEqual(["title", "tags", "status"]);
 
     const workPill = within(properties).getByRole("button", { name: "#work" });
     expect(within(properties).queryByText("##work")).not.toBeInTheDocument();
 
-    // Clicking the tag pill does not toggle `<details>` or switch to Edit, and opens Cmd+K pre-filled with `tag:work`.
+    // Clicking the tag pill does not toggle the panel or switch to Edit, and opens Cmd+K pre-filled with `tag:work`.
     fireEvent.click(workPill);
-    expect(properties).toHaveAttribute("open");
+    expect(properties).toHaveAttribute("data-open");
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByRole("region", { name: "Preview" })).toBeInTheDocument();
 
     const palette = await screen.findByRole("dialog", { name: "Command palette" });
