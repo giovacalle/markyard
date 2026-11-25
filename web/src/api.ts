@@ -354,6 +354,8 @@ export interface AttachmentItem {
   mimeType: string;
   size?: number;
   modifiedTime: string;
+  /** When the image was uploaded to Drive; absent when Drive sent none. */
+  createdTime?: string;
   /** Same-origin blob URL: `/api/files/<id>/blob`. */
   url: string;
 }
@@ -365,12 +367,24 @@ export interface AttachmentsResponse {
 }
 
 /** Lists the vault's uploaded attachments (in `_attachments` unless `folder` says). */
+/** A half-open `[from, before)` window on upload time, as ISO instants. */
+export interface UploadedRange {
+  from?: string;
+  before?: string;
+}
+
 export async function fetchAttachments(
   signal?: AbortSignal,
   folder?: string,
+  range: UploadedRange = {},
 ): Promise<AttachmentsResponse> {
+  const params = new URLSearchParams();
   const custom = customAttachmentsFolder(folder);
-  const query = custom === null ? "" : `?folder=${encodeURIComponent(custom)}`;
+  if (custom !== null) params.set("folder", custom);
+  if (range.from !== undefined) params.set("uploadedFrom", range.from);
+  if (range.before !== undefined) params.set("uploadedBefore", range.before);
+  const encoded = params.toString();
+  const query = encoded === "" ? "" : `?${encoded}`;
   const response = await request(`/api/attachments${query}`, { signal });
   return (await response.json()) as AttachmentsResponse;
 }

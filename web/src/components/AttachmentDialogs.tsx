@@ -70,10 +70,13 @@ export function AttachmentThumb({
   src,
   alt,
   className,
+  fit = "cover",
 }: {
   src: string;
   alt: string;
   className: string;
+  /** `contain` shows the whole image (letterboxed) instead of cropping it to the box. */
+  fit?: "cover" | "contain";
 }) {
   const [failedSrc, setFailedSrc] = useState<string | null>(null);
   if (failedSrc === src) {
@@ -94,7 +97,9 @@ export function AttachmentThumb({
       loading="lazy"
       decoding="async"
       onError={() => setFailedSrc(src)}
-      className={`${className} bg-neutral-100 object-cover dark:bg-neutral-800`}
+      className={`${className} bg-neutral-100 dark:bg-neutral-800 ${
+        fit === "contain" ? "object-contain" : "object-cover"
+      }`}
     />
   );
 }

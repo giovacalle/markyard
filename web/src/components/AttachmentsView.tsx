@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
-import { type ReactNode, useEffect, useMemo, useState } from "react";
-import { type AttachmentItem, describeError, fetchAttachments } from "../api";
+import { type ReactNode, useEffect, useId, useMemo, useState } from "react";
+import { type AttachmentItem, describeError, fetchAttachments, type UploadedRange } from "../api";
 import { attachmentUsage } from "../attachmentRefs";
 import { usePkm } from "../pkm";
 import { useSettings } from "../settings";
@@ -9,7 +9,7 @@ import type { VaultDocument } from "../vaultDocuments";
 import { useViewPrefs } from "../viewPrefs";
 import { noteStem } from "../wikilinks";
 import { attachmentsQueryKey, AttachmentThumb, DeleteAttachmentDialog } from "./AttachmentDialogs";
-import { CheckIcon, CopyIcon, TrashIcon } from "./icons";
+import { CalendarIcon, CheckIcon, CloseIcon, CopyIcon, TrashIcon } from "./icons";
 
 const FEEDBACK_MS = 3_000;
 const COPIED_MS = 1_500;
@@ -32,11 +32,44 @@ export function formatBytes(size: number | undefined): string | null {
   return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[unit]}`;
 }
 
-function formatModified(time: string): string {
+function formatDate(time: string | undefined, withTime = false): string | null {
+  if (time === undefined) {
+    return null;
+  }
   const date = new Date(time);
   return Number.isNaN(date.getTime())
-    ? ""
-    : date.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+    ? null
+    : date.toLocaleString(undefined, {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+        ...(withTime ? { hour: "2-digit", minute: "2-digit" } : {}),
+      });
+}
+
+/** `image/png` → `PNG`. */
+function imageKind(mimeType: string): string {
+  const subtype = mimeType.split("/")[1] ?? mimeType;
+  return subtype.toUpperCase();
+}
+
+/**
+ * The `[from, before)` upload window of two `<input type="date">` values (`YYYY-MM-DD`, or empty
+ * for an open side), as ISO instants of local midnights: `to` counts as a whole day.
+ */
+export function uploadedRangeOf(fromDay: string, toDay: string): UploadedRange {
+  const midnight = (day: string, plusDays: number): string | undefined => {
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day);
+    if (match === null) return undefined;
+    const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]) + plusDays);
+    return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
+  };
+  const from = midnight(fromDay, 0);
+  const before = midnight(toDay, 1);
+  return {
+    ...(from === undefined ? {} : { from }),
+    ...(before === undefined ? {} : { before }),
+  };
 }
 
 /** Markdown that embeds `attachment`, alt text escaped like editor uploads. */
@@ -44,6 +77,9 @@ export function attachmentMarkdown(attachment: Pick<AttachmentItem, "name" | "ur
   const alt = attachment.name.replace(/[\\[\]]/g, "\\$&").replace(/[\r\n]+/g, " ");
   return `![${alt}](${attachment.url})`;
 }
+
+const ICON_ACTION_CLASS =
+  "inline-flex size-7 shrink-0 items-center justify-center rounded-md text-neutral-500 transition-colors focus-visible:outline-2 focus-visible:outline-blue-600 dark:text-neutral-400";
 
 function CopyMarkdownButton({ attachment }: { attachment: AttachmentItem }) {
   const [copied, setCopied] = useState(false);
@@ -56,104 +92,219 @@ function CopyMarkdownButton({ attachment }: { attachment: AttachmentItem }) {
     <button
       type="button"
       aria-label={copied ? "Copied" : `Copy Markdown for ${attachment.name}`}
-      title="Copy Markdown"
+      title={copied ? "Copied" : "Copy Markdown"}
       onClick={() => {
         void navigator.clipboard?.writeText(attachmentMarkdown(attachment)).then(
           () => setCopied(true),
           () => undefined,
         );
       }}
-      className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-xs font-medium text-neutral-600 transition-colors hover:bg-neutral-100 hover:text-neutral-900 focus-visible:outline-2 focus-visible:outline-blue-600 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+      className={`${ICON_ACTION_CLASS} hover:bg-neutral-100 hover:text-neutral-900 dark:hover:bg-neutral-800 dark:hover:text-neutral-100`}
     >
-      {copied ? <CheckIcon className="size-3.5" /> : <CopyIcon className="size-3.5" />}
-      <span>{copied ? "Copied" : "Copy Markdown"}</span>
+      {copied ? <CheckIcon className="size-4" /> : <CopyIcon className="size-4" />}
     </button>
   );
 }
 
 function AttachmentCard({
   attachment,
-  usedIn,
+  selected,
+  detailsId,
   canDelete,
   deleteHint,
-  onOpenNote,
+  onSelect,
   onDelete,
 }: {
   attachment: AttachmentItem;
-  /** `null` while cached notes are still being read. */
-  usedIn: readonly VaultDocument[] | null;
+  selected: boolean;
+  detailsId: string;
   canDelete: boolean;
   deleteHint: string;
-  onOpenNote: (id: string) => void;
+  onSelect: () => void;
   onDelete: () => void;
 }) {
-  const size = formatBytes(attachment.size);
-  const modified = formatModified(attachment.modifiedTime);
   return (
     <li
       aria-label={attachment.name}
-      className="flex min-w-0 flex-col overflow-hidden rounded-xl border border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900"
+      className={`flex min-w-0 flex-col overflow-hidden rounded-xl border bg-white dark:bg-neutral-900 ${
+        selected
+          ? "border-blue-500 ring-1 ring-blue-500 dark:border-blue-400 dark:ring-blue-400"
+          : "border-neutral-200 dark:border-neutral-800"
+      }`}
     >
-      <AttachmentThumb
-        src={attachment.url}
-        alt={attachment.name}
-        className="aspect-video w-full border-b border-neutral-200 dark:border-neutral-800"
-      />
-      <div className="flex min-w-0 flex-1 flex-col gap-1.5 p-3">
+      <button
+        type="button"
+        aria-label={`Details for ${attachment.name}`}
+        aria-expanded={selected}
+        aria-controls={selected ? detailsId : undefined}
+        onClick={onSelect}
+        className="block w-full border-b border-neutral-200 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-blue-600 dark:border-neutral-800"
+      >
+        <AttachmentThumb src={attachment.url} alt="" className="aspect-video w-full" />
+      </button>
+      <div className="flex min-w-0 items-center gap-0.5 py-1.5 pr-1.5 pl-3">
         <p
-          className="truncate text-sm font-medium text-neutral-900 dark:text-neutral-100"
+          className="min-w-0 flex-1 truncate text-sm font-medium text-neutral-900 dark:text-neutral-100"
           title={attachment.name}
         >
           {attachment.name}
         </p>
-        <p className="text-xs text-neutral-500 tabular-nums dark:text-neutral-400">
-          {[size, modified].filter(Boolean).join(" · ")}
-        </p>
-        {usedIn === null ? (
-          <span className="text-xs text-neutral-400 dark:text-neutral-500">Checking notes…</span>
-        ) : usedIn.length === 0 ? (
-          <span className="w-fit rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800 dark:bg-amber-950/60 dark:text-amber-300">
-            Unused
-          </span>
-        ) : (
-          <div className="space-y-1">
-            <p className="text-xs text-neutral-500 dark:text-neutral-400">
-              Used in {usedIn.length} {usedIn.length === 1 ? "note" : "notes"}
-            </p>
-            <div className="flex flex-wrap gap-1">
-              {usedIn.map((doc) => (
-                <button
-                  key={doc.id}
-                  type="button"
-                  title={[...doc.path, doc.name].join(" / ")}
-                  onClick={() => onOpenNote(doc.id)}
-                  className="max-w-full truncate rounded-full border border-neutral-200 px-2 py-0.5 text-[11px] text-neutral-700 transition-colors hover:border-neutral-400 hover:text-neutral-950 dark:border-neutral-700 dark:text-neutral-300 dark:hover:border-neutral-500 dark:hover:text-neutral-50"
-                >
-                  {noteStem(doc.name)}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-        <div className="mt-auto flex items-center justify-between gap-1 pt-1">
-          <CopyMarkdownButton attachment={attachment} />
-          <button
-            type="button"
-            aria-label={`Delete ${attachment.name}`}
-            title={canDelete ? "Move to Drive Trash" : deleteHint}
-            disabled={!canDelete}
-            onClick={onDelete}
-            className="inline-flex size-7 items-center justify-center rounded-md text-neutral-500 transition-colors hover:bg-red-50 hover:text-red-600 focus-visible:outline-2 focus-visible:outline-blue-600 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-neutral-500 dark:text-neutral-400 dark:hover:bg-red-950/50 dark:hover:text-red-400"
-          >
-            <TrashIcon className="size-4" />
-          </button>
-        </div>
+        <CopyMarkdownButton attachment={attachment} />
+        <button
+          type="button"
+          aria-label={`Delete ${attachment.name}`}
+          title={canDelete ? "Move to Drive Trash" : deleteHint}
+          disabled={!canDelete}
+          onClick={onDelete}
+          className={`${ICON_ACTION_CLASS} hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-neutral-500 dark:hover:bg-red-950/50 dark:hover:text-red-400`}
+        >
+          <TrashIcon className="size-4" />
+        </button>
       </div>
     </li>
   );
 }
 
-/** The vault's uploaded images: where each is used, copy-as-Markdown, and trash. */
+const SECTION_TITLE_CLASS =
+  "text-[11px] font-semibold tracking-wider text-neutral-400 uppercase dark:text-neutral-500";
+
+/**
+ * Right sidebar with one attachment's details and the notes that show it, laid out like the
+ * Document info drawer: docked on desktop, an overlay sheet with a backdrop on narrow screens.
+ */
+function AttachmentDetails({
+  id,
+  attachment,
+  usedIn,
+  vaultPinned,
+  onOpenNote,
+  onClose,
+}: {
+  id: string;
+  attachment: AttachmentItem;
+  /** `null` while cached notes are still being read. */
+  usedIn: readonly VaultDocument[] | null;
+  vaultPinned: boolean;
+  onOpenNote: (id: string) => void;
+  onClose: () => void;
+}) {
+  const details: [string, string | null][] = [
+    ["Type", imageKind(attachment.mimeType)],
+    ["Size", formatBytes(attachment.size)],
+    ["Uploaded", formatDate(attachment.createdTime, true)],
+    ["Modified", formatDate(attachment.modifiedTime, true)],
+  ];
+  return (
+    <>
+      <div
+        aria-hidden="true"
+        onClick={onClose}
+        className="fixed inset-0 z-30 bg-neutral-950/40 md:hidden"
+      />
+      <aside
+        id={id}
+        aria-label="Attachment info"
+        className="fixed inset-y-0 right-0 z-40 flex w-[85vw] max-w-sm flex-col border-l border-neutral-200 bg-neutral-50 text-sm shadow-xl md:static md:z-auto md:w-72 md:max-w-none md:shrink-0 md:shadow-none dark:border-neutral-800 dark:bg-neutral-900"
+      >
+        <div className="flex min-h-12 shrink-0 items-center justify-between gap-2 border-b border-neutral-200 px-3.5 py-2 dark:border-neutral-800">
+          <p className="truncate text-sm font-semibold tracking-tight text-neutral-900 dark:text-neutral-100">
+            Attachment info
+          </p>
+          <button
+            type="button"
+            aria-label="Close attachment info"
+            title="Close attachment info"
+            onClick={onClose}
+            className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-neutral-500 transition-colors hover:bg-neutral-200/70 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+          >
+            <CloseIcon className="size-4" />
+          </button>
+        </div>
+
+        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-3.5 py-3.5">
+          <div className="space-y-2">
+            <a
+              href={attachment.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="Open the full image in a new tab"
+              className="block overflow-hidden rounded-lg border border-neutral-200 focus-visible:outline-2 focus-visible:outline-blue-600 dark:border-neutral-700"
+            >
+              <AttachmentThumb
+                src={attachment.url}
+                alt={attachment.name}
+                fit="contain"
+                className="aspect-video w-full"
+              />
+            </a>
+            <h2 className="break-all font-medium text-neutral-900 dark:text-neutral-100">
+              {attachment.name}
+            </h2>
+          </div>
+
+          <section aria-label="Details" className="space-y-1.5">
+            <h3 className={SECTION_TITLE_CLASS}>Details</h3>
+            <dl className="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1 text-neutral-800 dark:text-neutral-200">
+              {details
+                .filter((entry): entry is [string, string] => entry[1] !== null)
+                .map(([label, value]) => (
+                  <div key={label} className="contents">
+                    <dt className="text-neutral-500 dark:text-neutral-400">{label}</dt>
+                    <dd className="text-right tabular-nums">{value}</dd>
+                  </div>
+                ))}
+            </dl>
+          </section>
+
+          <section aria-label="Used in" className="space-y-1.5">
+            <h3 className={SECTION_TITLE_CLASS}>
+              Used in
+              {usedIn !== null && usedIn.length > 0 && (
+                <span className="ml-1 tabular-nums">· {usedIn.length}</span>
+              )}
+            </h3>
+            {usedIn === null ? (
+              <p className="text-xs text-neutral-400 dark:text-neutral-500">Checking notes…</p>
+            ) : usedIn.length === 0 ? (
+              <p className="text-xs text-neutral-400 dark:text-neutral-500">
+                Not used in any note cached on this device.
+              </p>
+            ) : (
+              <ul className="space-y-1">
+                {usedIn.map((doc) => (
+                  <li key={doc.id}>
+                    <button
+                      type="button"
+                      onClick={() => onOpenNote(doc.id)}
+                      className="block w-full rounded-md px-2 py-1.5 text-left transition-colors hover:bg-neutral-200/70 dark:hover:bg-neutral-800"
+                    >
+                      <span className="block truncate font-medium text-neutral-800 dark:text-neutral-200">
+                        {noteStem(doc.name)}
+                      </span>
+                      {doc.path.length > 0 && (
+                        <span className="block truncate text-[11px] text-neutral-400 dark:text-neutral-500">
+                          {doc.path.join(" / ")}
+                        </span>
+                      )}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {!vaultPinned && (
+              <p className="text-[11px] text-neutral-400 dark:text-neutral-500">
+                Usage counts only notes cached on this device. Pin vault offline to check every
+                note.
+              </p>
+            )}
+          </section>
+        </div>
+      </aside>
+    </>
+  );
+}
+
+/** The vault's uploaded images: copy-as-Markdown, trash, and an info sidebar with their usage. */
 export function AttachmentsPanel({
   docs,
   vaultPinned,
@@ -171,14 +322,28 @@ export function AttachmentsPanel({
   header?: ReactNode;
 }) {
   const { attachmentsFolder } = useSettings();
+  const [fromDay, setFromDay] = useState("");
+  const [toDay, setToDay] = useState("");
+  const range = useMemo(() => uploadedRangeOf(fromDay, toDay), [fromDay, toDay]);
+  const filtered = range.from !== undefined || range.before !== undefined;
   const query = useQuery({
-    queryKey: attachmentsQueryKey(attachmentsFolder),
-    queryFn: ({ signal }) => fetchAttachments(signal, attachmentsFolder),
+    // The unfiltered list keeps the shared key the Document info drawer reads names from.
+    queryKey: filtered
+      ? [
+          ...attachmentsQueryKey(attachmentsFolder),
+          "uploaded",
+          range.from ?? "",
+          range.before ?? "",
+        ]
+      : attachmentsQueryKey(attachmentsFolder),
+    queryFn: ({ signal }) => fetchAttachments(signal, attachmentsFolder, range),
+    placeholderData: (previous) => previous,
   });
   const [search, setSearch] = useState("");
-  const [unusedOnly, setUnusedOnly] = useState(false);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<AttachmentItem | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
+  const detailsId = useId();
 
   useEffect(() => {
     if (feedback === null) return;
@@ -194,19 +359,18 @@ export function AttachmentsPanel({
       ),
     [query.data],
   );
-  const unusedCount = attachments.filter((item) => !usage.has(item.id)).length;
   const needle = search.trim().toLowerCase();
   const visible = attachments.filter(
-    (item) =>
-      (!unusedOnly || !usage.has(item.id)) &&
-      (needle.length === 0 || item.name.toLowerCase().includes(needle)),
+    (item) => needle.length === 0 || item.name.toLowerCase().includes(needle),
   );
+  // Gone from the list (trashed, or outside the dates): the sidebar closes with it.
+  const selected = attachments.find((item) => item.id === selectedId) ?? null;
   const canDelete = !readOnly && !offline;
   const deleteHint = readOnly ? "Unlock editing to delete" : "Reconnect to delete";
   const usedNames = (id: string) => (usage.get(id) ?? []).map((doc) => noteStem(doc.name));
 
   const controlClass =
-    "rounded-md border border-neutral-200 bg-white px-2 py-1 text-sm text-neutral-800 focus-visible:outline-2 focus-visible:outline-blue-600 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200";
+    "rounded-md border border-neutral-200 bg-white px-2 py-1 text-sm text-neutral-800 focus-visible:outline-2 focus-visible:outline-blue-600 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200 dark:[color-scheme:dark]";
 
   let body: ReactNode;
   if (query.data === undefined) {
@@ -235,7 +399,9 @@ export function AttachmentsPanel({
   } else if (attachments.length === 0) {
     body = (
       <p className="text-sm text-neutral-500 dark:text-neutral-400">
-        No attachments yet. Paste or drop an image into a note to add one.
+        {filtered
+          ? "No attachments were uploaded in these dates."
+          : "No attachments yet. Paste or drop an image into a note to add one."}
       </p>
     );
   } else if (visible.length === 0) {
@@ -250,10 +416,13 @@ export function AttachmentsPanel({
           <AttachmentCard
             key={attachment.id}
             attachment={attachment}
-            usedIn={docs === null ? null : (usage.get(attachment.id) ?? [])}
+            selected={attachment.id === selected?.id}
+            detailsId={detailsId}
             canDelete={canDelete}
             deleteHint={deleteHint}
-            onOpenNote={onOpenNote}
+            onSelect={() =>
+              setSelectedId((prev) => (prev === attachment.id ? null : attachment.id))
+            }
             onDelete={() => setDeleting(attachment)}
           />
         ))}
@@ -262,63 +431,95 @@ export function AttachmentsPanel({
   }
 
   return (
-    <section aria-label="Attachments" className="flex min-h-0 flex-1 flex-col">
-      <header className="flex min-h-12 shrink-0 flex-wrap items-center gap-2 border-b border-neutral-200 px-4 py-2 sm:px-6 dark:border-neutral-800">
-        {header}
-        <h2 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
-          Attachments
-          {query.data !== undefined && (
-            <span className="ml-1.5 font-normal text-neutral-400 tabular-nums dark:text-neutral-500">
-              {attachments.length}
+    <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
+      <section aria-label="Attachments" className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <header className="flex min-h-12 shrink-0 flex-wrap items-center gap-2 border-b border-neutral-200 px-4 py-2 sm:px-6 dark:border-neutral-800">
+          {header}
+          <h2 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+            Attachments
+            {query.data !== undefined && (
+              <span className="ml-1.5 font-normal text-neutral-400 tabular-nums dark:text-neutral-500">
+                {attachments.length}
+              </span>
+            )}
+          </h2>
+          {feedback !== null && (
+            <span role="status" className="text-xs text-neutral-500 dark:text-neutral-400">
+              {feedback}
             </span>
           )}
-        </h2>
-        {feedback !== null && (
-          <span role="status" className="text-xs text-neutral-500 dark:text-neutral-400">
-            {feedback}
-          </span>
-        )}
-        <button
-          type="button"
-          onClick={() => void query.refetch()}
-          disabled={offline || query.isFetching}
-          className="ml-auto rounded-md border border-neutral-200 px-2 py-1 text-xs font-medium text-neutral-700 transition-colors hover:bg-neutral-100 disabled:opacity-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
-        >
-          {query.isFetching ? "Refreshing…" : "Refresh"}
-        </button>
-      </header>
+          <button
+            type="button"
+            onClick={() => void query.refetch()}
+            disabled={offline || query.isFetching}
+            className="ml-auto rounded-md border border-neutral-200 px-2 py-1 text-xs font-medium text-neutral-700 transition-colors hover:bg-neutral-100 disabled:opacity-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
+          >
+            {query.isFetching ? "Refreshing…" : "Refresh"}
+          </button>
+        </header>
 
-      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-neutral-200 px-4 py-2 sm:px-6 dark:border-neutral-800">
-        <input
-          type="search"
-          aria-label="Search attachments"
-          placeholder="Search by filename…"
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-          className={`${controlClass} min-w-0 flex-1`}
+        <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-neutral-200 px-4 py-2 sm:px-6 dark:border-neutral-800">
+          <input
+            type="search"
+            aria-label="Search attachments"
+            placeholder="Search by filename…"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            className={`${controlClass} min-w-0 flex-1 basis-40`}
+          />
+          <div role="group" aria-label="Upload date" className="flex items-center gap-1.5">
+            <CalendarIcon className="size-4 shrink-0 text-neutral-400 dark:text-neutral-500" />
+            <input
+              type="date"
+              aria-label="Uploaded from"
+              title="Uploaded from"
+              value={fromDay}
+              max={toDay || undefined}
+              onChange={(event) => setFromDay(event.target.value)}
+              className={controlClass}
+            />
+            <span aria-hidden="true" className="text-neutral-400 dark:text-neutral-500">
+              –
+            </span>
+            <input
+              type="date"
+              aria-label="Uploaded to"
+              title="Uploaded to"
+              value={toDay}
+              min={fromDay || undefined}
+              onChange={(event) => setToDay(event.target.value)}
+              className={controlClass}
+            />
+            {(fromDay !== "" || toDay !== "") && (
+              <button
+                type="button"
+                aria-label="Clear dates"
+                title="Clear dates"
+                onClick={() => {
+                  setFromDay("");
+                  setToDay("");
+                }}
+                className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+              >
+                <CloseIcon className="size-4" />
+              </button>
+            )}
+          </div>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6">{body}</div>
+      </section>
+
+      {selected !== null && (
+        <AttachmentDetails
+          id={detailsId}
+          attachment={selected}
+          usedIn={docs === null ? null : (usage.get(selected.id) ?? [])}
+          vaultPinned={vaultPinned}
+          onOpenNote={onOpenNote}
+          onClose={() => setSelectedId(null)}
         />
-        <button
-          type="button"
-          aria-pressed={unusedOnly}
-          onClick={() => setUnusedOnly((prev) => !prev)}
-          className={`rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
-            unusedOnly
-              ? "border-blue-600 bg-blue-600 text-white"
-              : "border-neutral-200 text-neutral-600 hover:border-neutral-400 dark:border-neutral-700 dark:text-neutral-400"
-          }`}
-        >
-          Unused only <span className="tabular-nums">({unusedCount})</span>
-        </button>
-      </div>
-
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6">
-        {body}
-        {!vaultPinned && query.data !== undefined && attachments.length > 0 && (
-          <p className="mt-6 text-xs text-neutral-400 dark:text-neutral-500">
-            Usage counts only notes cached on this device. Pin vault offline to check every note.
-          </p>
-        )}
-      </div>
+      )}
 
       {deleting !== null && (
         <DeleteAttachmentDialog
@@ -329,7 +530,7 @@ export function AttachmentsPanel({
           onDeleted={() => setFeedback(`Moved “${deleting.name}” to Drive Trash.`)}
         />
       )}
-    </section>
+    </div>
   );
 }
 
