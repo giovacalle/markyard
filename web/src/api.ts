@@ -1,3 +1,4 @@
+import { forgetCachedImage } from "./imageCache";
 import { markSelfWrite } from "./selfWrites";
 
 export interface Session {
@@ -485,12 +486,13 @@ export async function moveFolder(id: string, parentId: string): Promise<DriveNod
   return (await response.json()) as DriveNode;
 }
 
-/** Moves a file to Google Drive Trash. */
+/** Moves a file to Google Drive Trash, and drops any image of it cached on this device. */
 export async function deleteFile(id: string): Promise<void> {
   await request(`/api/files/${encodeURIComponent(id)}`, {
     method: "DELETE",
   });
   markSelfWrite(id);
+  void forgetCachedImage(id);
 }
 
 export async function fetchStartPageToken(signal?: AbortSignal): Promise<string> {

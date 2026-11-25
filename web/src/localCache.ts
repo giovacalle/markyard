@@ -2,6 +2,7 @@ import type { QueryClient } from "@tanstack/react-query";
 import Dexie, { type EntityTable, type Table } from "dexie";
 import { isUnauthenticated, type DriveNode, type Session } from "./api";
 import { clearCloudStateStamp } from "./cloudStateStamp";
+import { clearCachedImages } from "./imageCache";
 import { isLocalId, makeOpId } from "./localIds";
 import { resetSettings } from "./settings";
 import { childrenKey } from "./treeCache";
@@ -713,8 +714,10 @@ export function clearVaultCache(): Promise<void> {
   }, undefined);
 }
 
+/** Empties the local note cache, and deletes the attachment images cached on this device. */
 export function clearLocalCache(): Promise<void> {
   clearCloudStateStamp();
+  void clearCachedImages();
   return safe(async (db) => {
     await db.transaction("rw", [db.meta, db.folders, db.files, db.outbox, db.ops], async () => {
       await db.meta.clear();

@@ -1,3 +1,5 @@
+import { IMAGE_CACHE_LIMITS, IMAGE_CACHES } from "./imageCache";
+
 export const SHELL_CACHE_PREFIX = "markyard-shell-";
 
 export const STATIC_SHELL_URLS = [
@@ -81,7 +83,11 @@ export function collectPrecacheUrls(bundle: Record<string, PrecacheBundleItem>):
  * Generates the standalone `/sw.js` app-shell service worker source.
  *
  * Guarantees:
- * - Never intercepts or caches `/api` or `/api/*` (including `/api/auth/*` navigations).
+ * - Never intercepts or caches `/api` or `/api/*` (including `/api/auth/*` navigations), except
+ *   attachment images: `GET /api/files/<id>/blob` and `/thumb` are cache-first in their own
+ *   caches (`IMAGE_CACHES`), trimmed to `IMAGE_CACHE_LIMITS`. Only OK same-origin image answers
+ *   are stored (never a 401 or a redirect), and a thumbnail the BFF filled in with the original
+ *   is not, so Drive's real thumbnail replaces it later.
  * - Never intercepts non-GET, cross-origin, or `/sw.js` requests.
  * - Network-first for HTML navigations with offline fallback to cached `/index.html`.
  * - Cache-first for static app-shell assets (hashed JS/CSS chunks, icons, manifest).
@@ -95,6 +101,26 @@ export function buildServiceWorkerSource(
   return `const CACHE_PREFIX = ${JSON.stringify(SHELL_CACHE_PREFIX)};
 const CACHE_NAME = ${JSON.stringify(cacheName)};
 const PRECACHE_URLS = ${JSON.stringify(uniqueUrls, null, 2)};
+const IMAGE_CACHES = ${JSON.stringify(IMAGE_CACHES)};
+const IMAGE_CACHE_LIMITS = ${JSON.stringify(IMAGE_CACHE_LIMITS)};
+const IMAGE_PATH = new RegExp("^/api/files/[^/]+/(blob|thumb)$");
+
+function cacheableImage(kind, response) {
+  return (
+    response.ok &&
+    response.type === "basic" &&
+    !response.redirected &&
+    (response.headers.get("content-type") || "").startsWith("image/") &&
+    !(kind === "thumb" && response.headers.get("x-thumbnail-source") === "original")
+  );
+}
+
+async function trimCache(cache, limit) {
+  const keys = await cache.keys();
+  for (const key of keys.slice(0, Math.max(0, keys.length - limit))) {
+    await cache.delete(key);
+  }
+}
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -131,7 +157,32 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Never intercept or cache any BFF /api/* request (auth redirects, Drive reads, writes).
+  // Attachment images: cache-first, so they load once and stay available offline.
+  const image = IMAGE_PATH.exec(url.pathname);
+  if (image !== null) {
+    const kind = image[1];
+    event.respondWith(
+      self.caches.open(IMAGE_CACHES[kind]).then(async (cache) => {
+        const cached = await cache.match(request);
+        if (cached) {
+          return cached;
+        }
+        const response = await self.fetch(request);
+        if (cacheableImage(kind, response)) {
+          event.waitUntil(
+            cache
+              .put(request, response.clone())
+              .then(() => trimCache(cache, IMAGE_CACHE_LIMITS[kind]))
+              .catch(() => undefined),
+          );
+        }
+        return response;
+      }),
+    );
+    return;
+  }
+
+  // Never intercept or cache any other BFF /api/* request (auth redirects, Drive reads, writes).
   if (url.pathname === "/api" || url.pathname.startsWith("/api/")) {
     return;
   }

@@ -6,12 +6,15 @@ import {
   STATIC_SHELL_URLS,
   type PrecacheBundleItem,
 } from "./sw-source";
+import { IMAGE_CACHE_LIMITS, IMAGE_CACHES } from "./imageCache";
 
 interface MockCache {
   entries: Map<string, Response>;
   addAll: (urls: string[]) => Promise<void>;
   match: (req: Request | string) => Promise<Response | undefined>;
   put: (req: Request | string, res: Response) => Promise<void>;
+  keys: () => Promise<string[]>;
+  delete: (req: Request | string) => Promise<boolean>;
 }
 
 function keyOf(req: Request | string): string {
@@ -41,6 +44,8 @@ function createMockSwEnv(cacheName: string, precacheUrls: string[]) {
       put: async (req, res) => {
         entries.set(keyOf(req), res);
       },
+      keys: async () => Array.from(entries.keys()),
+      delete: async (req) => entries.delete(keyOf(req)),
     };
   };
 
@@ -98,17 +103,23 @@ function createMockSwEnv(cacheName: string, precacheUrls: string[]) {
     } as Request;
 
     let responsePromise: Promise<Response> | undefined;
+    const background: Promise<unknown>[] = [];
     listener({
       request,
       respondWith: (promise: Promise<Response>) => {
         responsePromise = promise;
+      },
+      waitUntil: (promise: Promise<unknown>) => {
+        background.push(promise);
       },
     });
 
     if (responsePromise === undefined) {
       return { intercepted: false };
     }
-    return { intercepted: true, response: await responsePromise };
+    const response = await responsePromise;
+    await Promise.all(background);
+    return { intercepted: true, response };
   };
 
   return {
@@ -121,11 +132,14 @@ function createMockSwEnv(cacheName: string, precacheUrls: string[]) {
   };
 }
 
-function basicResponse(body: string, status = 200): Response {
-  const res = new Response(body, { status });
+function basicResponse(body: string, status = 200, headers: HeadersInit = {}): Response {
+  const res = new Response(body, { status, headers });
   Object.defineProperty(res, "type", { value: "basic" });
   return res;
 }
+
+const png = (body: string, headers: Record<string, string> = {}) =>
+  basicResponse(body, 200, { "content-type": "image/png", ...headers });
 
 describe("collectPrecacheUrls", () => {
   const chunk = (
@@ -270,6 +284,71 @@ describe("app-shell service worker", () => {
     ).toBe(false);
 
     expect(env.fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("serves attachment originals and thumbnails cache-first, offline included", async () => {
+    const env = createMockSwEnv(CACHE_V2, PRECACHE);
+    await env.dispatchExtendable("install");
+    env.fetchMock.mockResolvedValueOnce(png("original"));
+    env.fetchMock.mockResolvedValueOnce(png("thumb", { "x-thumbnail-source": "thumbnail" }));
+
+    const blobUrl = "https://notes.example.com/api/files/img-1/blob";
+    const thumbUrl = "https://notes.example.com/api/files/img-1/thumb?size=800";
+    expect(await (await env.dispatchFetch(blobUrl)).response?.text()).toBe("original");
+    expect(await (await env.dispatchFetch(thumbUrl)).response?.text()).toBe("thumb");
+    expect(Array.from(env.stores.get(IMAGE_CACHES.blob)!.keys())).toEqual([
+      "/api/files/img-1/blob",
+    ]);
+    expect(Array.from(env.stores.get(IMAGE_CACHES.thumb)!.keys())).toEqual([
+      "/api/files/img-1/thumb?size=800",
+    ]);
+
+    env.fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
+    expect(await (await env.dispatchFetch(blobUrl)).response?.text()).toBe("original");
+    expect(await (await env.dispatchFetch(thumbUrl)).response?.text()).toBe("thumb");
+    expect(env.fetchMock).toHaveBeenCalledTimes(2);
+
+    // A deploy replaces the shell cache only.
+    const next = createMockSwEnv("markyard-shell-v3", PRECACHE);
+    for (const [name, entries] of env.stores) next.stores.set(name, entries);
+    await next.dispatchExtendable("activate");
+    expect(next.stores.has(IMAGE_CACHES.blob)).toBe(true);
+    expect(next.stores.has(IMAGE_CACHES.thumb)).toBe(true);
+  });
+
+  it("does not store failed, non-image, redirected or stand-in thumbnail answers", async () => {
+    const env = createMockSwEnv(CACHE_V2, PRECACHE);
+    await env.dispatchExtendable("install");
+    const redirected = png("login");
+    Object.defineProperty(redirected, "redirected", { value: true });
+    for (const response of [
+      basicResponse('{"error":"unauthenticated"}', 401, { "content-type": "application/json" }),
+      basicResponse("<html>", 200, { "content-type": "text/html" }),
+      redirected,
+    ]) {
+      env.fetchMock.mockResolvedValueOnce(response);
+      await env.dispatchFetch("https://notes.example.com/api/files/img-1/blob");
+    }
+    env.fetchMock.mockResolvedValueOnce(png("original", { "x-thumbnail-source": "original" }));
+    const standIn = await env.dispatchFetch(
+      "https://notes.example.com/api/files/img-1/thumb?size=640",
+    );
+    expect(await standIn.response?.text()).toBe("original");
+
+    expect(env.stores.get(IMAGE_CACHES.blob)?.size ?? 0).toBe(0);
+    expect(env.stores.get(IMAGE_CACHES.thumb)?.size ?? 0).toBe(0);
+  });
+
+  it("keeps only the newest images up to the limit", async () => {
+    const env = createMockSwEnv(CACHE_V2, PRECACHE);
+    await env.dispatchExtendable("install");
+    env.fetchMock.mockImplementation(async () => png("x"));
+    for (let n = 0; n <= IMAGE_CACHE_LIMITS.blob; n += 1) {
+      await env.dispatchFetch(`https://notes.example.com/api/files/img-${n}/blob`);
+    }
+    const keys = Array.from(env.stores.get(IMAGE_CACHES.blob)!.keys());
+    expect(keys).toHaveLength(IMAGE_CACHE_LIMITS.blob);
+    expect(keys[0]).toBe("/api/files/img-1/blob");
   });
 
   it("ignores non-GET, cross-origin, and /sw.js requests", async () => {
