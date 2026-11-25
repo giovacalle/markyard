@@ -26,6 +26,7 @@ import { ATTACHMENT_TYPES, uploadAttachment } from "../api";
 import { getSettings } from "../settings";
 import { type CompletionSources, pkmCompletions } from "../editorCompletion";
 import { focusMode, typewriterMode } from "../editorModes";
+import { imagePreviews } from "../imagePreviews";
 import { dragHasFiles, imageFiles, imagePlaceholders, insertImages } from "../imageUploads";
 import {
   continueListItem,
@@ -570,6 +571,7 @@ export function Editor({
         syntaxHighlighting(YAML_HIGHLIGHT),
         history(),
         imagePlaceholders,
+        imagePreviews,
         imageEvents,
         MARKDOWN_EDITING,
         pkmCompletions(completionSources),
