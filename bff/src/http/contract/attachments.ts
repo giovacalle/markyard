@@ -7,9 +7,10 @@ import * as HttpApiEndpoint from "effect/http-api/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/http-api/HttpApiGroup";
 import * as Schema from "effect/Schema";
 
-import { VaultErrors } from "../errors.ts";
+import { Forbidden403, VaultErrors } from "../errors.ts";
+import { IdParams } from "./node.ts";
 
-/** `domain/attachments.ts` `AttachmentItem`, in wire key order; `size` may be absent. */
+/** `domain/attachments.ts` `AttachmentItem`, in wire key order; `size`, `createdTime`, `tags` may be absent. */
 export const AttachmentItemSchema = Schema.Struct({
   id: Schema.String,
   name: Schema.String,
@@ -18,14 +19,30 @@ export const AttachmentItemSchema = Schema.Struct({
   modifiedTime: Schema.String,
   createdTime: Schema.optionalKey(Schema.String),
   url: Schema.String,
+  tags: Schema.optionalKey(Schema.Array(Schema.String)),
 });
 
-export class AttachmentsGroup extends HttpApiGroup.make("attachments").add(
-  HttpApiEndpoint.get("listAttachments", "/api/attachments", {
-    success: Schema.Struct({
-      folderId: Schema.NullOr(Schema.String),
-      attachments: Schema.Array(AttachmentItemSchema),
+export class AttachmentsGroup extends HttpApiGroup.make("attachments")
+  .add(
+    HttpApiEndpoint.get("listAttachments", "/api/attachments", {
+      success: Schema.Struct({
+        folderId: Schema.NullOr(Schema.String),
+        attachments: Schema.Array(AttachmentItemSchema),
+      }),
+      error: VaultErrors,
     }),
-    error: VaultErrors,
-  }),
-) {}
+  )
+  .add(
+    HttpApiEndpoint.get("getAttachment", "/api/attachments/:id", {
+      params: IdParams,
+      success: AttachmentItemSchema,
+      error: VaultErrors,
+    }),
+  )
+  .add(
+    HttpApiEndpoint.patch("updateAttachmentTags", "/api/attachments/:id/tags", {
+      params: IdParams,
+      success: AttachmentItemSchema,
+      error: [...VaultErrors, Forbidden403],
+    }),
+  ) {}

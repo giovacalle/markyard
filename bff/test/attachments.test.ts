@@ -881,7 +881,7 @@ describe("GET /api/attachments", () => {
     const params = new URL(listCalls[0]!.url).searchParams;
     expect(params.get("q")).toBe("'att-folder' in parents and trashed=false");
     expect(params.get("fields")).toBe(
-      "nextPageToken,files(id,name,mimeType,modifiedTime,createdTime,size,trashed)",
+      "nextPageToken,files(id,name,mimeType,modifiedTime,createdTime,size,trashed,appProperties)",
     );
     expect(listCalls[0]!.headers.get("authorization")).toBe(`Bearer ${AT}`);
     expect(google.calls.every((c) => c.method === "GET")).toBe(true);
@@ -1128,5 +1128,396 @@ describe("GET /api/files/{id}/thumb", () => {
     const google = fake();
     expect((await send(get("/api/files/img-1/thumb"), { google })).status).toBe(401);
     expect(google.calls).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Attachment tags (`appProperties`): GET /api/attachments, GET /:id, PATCH /:id/tags
+// ---------------------------------------------------------------------------
+
+const ATT_FIELDS = "id,name,mimeType,modifiedTime,createdTime,size,trashed,parents,appProperties";
+
+const attachmentMetaRoute = (id: string, overrides: Record<string, unknown> = {}): R => [
+  "GET",
+  `${V3}/${id}?fields=${ATT_FIELDS}`,
+  json(200, {
+    id,
+    name: "y2k.png",
+    mimeType: "image/png",
+    modifiedTime: "2026-11-20T10:00:00.000Z",
+    createdTime: "2026-11-19T10:00:00.000Z",
+    size: "420",
+    trashed: false,
+    parents: ["att-folder"],
+    ...overrides,
+  }),
+];
+
+describe("attachment tags via Drive appProperties", () => {
+  it("decodes_sorted_tag_appProperties_in_list_attachments_and_ignores_unrelated_keys", async () => {
+    const google = fake([
+      findAnswer([ATT_FOLDER]),
+      [
+        "GET",
+        "pageSize=1000",
+        json(200, {
+          files: [
+            {
+              id: "img-1",
+              name: "hero.png",
+              mimeType: "image/png",
+              modifiedTime: "2026-11-20T10:00:00.000Z",
+              createdTime: "2026-11-19T10:00:00.000Z",
+              size: "123",
+              trashed: false,
+              appProperties: {
+                "tag_y2k%20aesthetic": "Y2K aesthetic",
+                tag_cybercore: "Cybercore",
+                otherKey: "ignored",
+              },
+            },
+            {
+              id: "img-2",
+              name: "plain.png",
+              mimeType: "image/png",
+              modifiedTime: "2026-11-18T10:00:00.000Z",
+              trashed: false,
+              appProperties: { otherKey: "still-ignored" },
+            },
+          ],
+        }),
+      ],
+    ]);
+
+    const res = await send(get("/api/attachments", { cookie: await signedInCookie() }), { google });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      folderId: "att-folder",
+      attachments: [
+        {
+          id: "img-1",
+          name: "hero.png",
+          mimeType: "image/png",
+          size: 123,
+          modifiedTime: "2026-11-20T10:00:00.000Z",
+          createdTime: "2026-11-19T10:00:00.000Z",
+          url: "/api/files/img-1/blob",
+          tags: ["Cybercore", "Y2K aesthetic"],
+        },
+        {
+          id: "img-2",
+          name: "plain.png",
+          mimeType: "image/png",
+          modifiedTime: "2026-11-18T10:00:00.000Z",
+          url: "/api/files/img-2/blob",
+        },
+      ],
+    });
+  });
+
+  it("gets_one_attachment_with_tags_and_enforces_vault_subtree_isolation", async () => {
+    const google = fake([
+      attachmentMetaRoute("img-1", {
+        appProperties: { "tag_wabi-sabi": "Wabi-sabi", unrelated: "keep" },
+      }),
+      folderMeta(ATT_FOLDER),
+    ]);
+    const res = await send(get("/api/attachments/img-1", { cookie: await signedInCookie() }), {
+      google,
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      id: "img-1",
+      name: "y2k.png",
+      mimeType: "image/png",
+      size: 420,
+      modifiedTime: "2026-11-20T10:00:00.000Z",
+      createdTime: "2026-11-19T10:00:00.000Z",
+      url: "/api/files/img-1/blob",
+      tags: ["Wabi-sabi"],
+    });
+
+    const outside = fake([
+      attachmentMetaRoute("img-2", { parents: ["elsewhere"] }),
+      ["GET", `${V3}/elsewhere?fields=id,name`, json(200, folder("elsewhere", "x", []))],
+    ]);
+    expect(
+      (
+        await send(get("/api/attachments/img-2", { cookie: await signedInCookie() }), {
+          google: outside,
+        })
+      ).status,
+    ).toBe(404);
+  });
+
+  it("patches_tag_appProperties_diffing_removed_keys_as_null_without_touching_other_keys", async () => {
+    const google = fake([
+      attachmentMetaRoute("img-1", {
+        appProperties: {
+          tag_old: "old",
+          tag_keep: "keep",
+          customKey: "preserve-me",
+        },
+      }),
+      folderMeta(ATT_FOLDER),
+      [
+        "PATCH",
+        `${V3}/img-1?fields=${ATT_FIELDS}`,
+        json(200, {
+          id: "img-1",
+          name: "y2k.png",
+          mimeType: "image/png",
+          modifiedTime: "2026-11-21T10:00:00.000Z",
+          createdTime: "2026-11-19T10:00:00.000Z",
+          size: "420",
+          trashed: false,
+          parents: ["att-folder"],
+          appProperties: {
+            tag_keep: "keep",
+            "tag_neo-brutalism": "Neo-brutalism",
+            "tag_y2k%20aesthetic": "Y2K aesthetic",
+            customKey: "preserve-me",
+          },
+        }),
+      ],
+    ]);
+
+    const res = await send(
+      request("PATCH", "/api/attachments/img-1/tags", {
+        cookie: await signedInCookie(),
+        headers: { "content-type": "application/json" },
+        body: bytes(
+          JSON.stringify({ tags: [" #Neo-brutalism ", "Y2K aesthetic", "keep", "KEEP"] }),
+        ),
+      }),
+      { google },
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      id: "img-1",
+      name: "y2k.png",
+      mimeType: "image/png",
+      size: 420,
+      modifiedTime: "2026-11-21T10:00:00.000Z",
+      createdTime: "2026-11-19T10:00:00.000Z",
+      url: "/api/files/img-1/blob",
+      tags: ["keep", "Neo-brutalism", "Y2K aesthetic"],
+    });
+
+    const patch = google.calls.find((c) => c.method === "PATCH");
+    expect(patch).toBeDefined();
+    expect(JSON.parse(patch!.text)).toEqual({
+      appProperties: {
+        tag_old: null,
+        "tag_neo-brutalism": "Neo-brutalism",
+        "tag_y2k%20aesthetic": "Y2K aesthetic",
+      },
+    });
+  });
+
+  it("skips_the_drive_patch_when_tags_are_already_identical", async () => {
+    const google = fake([
+      attachmentMetaRoute("img-1", {
+        appProperties: { tag_design: "design" },
+      }),
+      folderMeta(ATT_FOLDER),
+    ]);
+    const res = await send(
+      request("PATCH", "/api/attachments/img-1/tags", {
+        cookie: await signedInCookie(),
+        headers: { "content-type": "application/json" },
+        body: bytes(JSON.stringify({ tags: ["#design"] })),
+      }),
+      { google },
+    );
+    expect(res.status).toBe(200);
+    expect(google.calls.some((c) => c.method === "PATCH")).toBe(false);
+  });
+
+  it("rejects_bad_tag_bodies_limits_and_cross_origin_requests", async () => {
+    const tooMany = Array.from({ length: 31 }, (_, i) => `t${i}`);
+    const tooLong = "a".repeat(65);
+    for (const [label, body] of [
+      ["bad json", "{"],
+      ["not array", JSON.stringify({ tags: "one" })],
+      ["non string", JSON.stringify({ tags: [123] })],
+      ["control char", JSON.stringify({ tags: ["line\nbreak"] })],
+      ["too many", JSON.stringify({ tags: tooMany })],
+      ["too long", JSON.stringify({ tags: [tooLong] })],
+    ] as const) {
+      const google = fake();
+      const res = await send(
+        request("PATCH", "/api/attachments/img-1/tags", {
+          cookie: await signedInCookie(),
+          headers: { "content-type": "application/json" },
+          body: bytes(body),
+        }),
+        { google },
+      );
+      expect(res.status, label).toBe(400);
+      expect((await jsonBody(res))["code"], label).toBe("invalid_request");
+      expect(google.calls, label).toHaveLength(0);
+    }
+
+    const crossOrigin = await send(
+      request("PATCH", "/api/attachments/img-1/tags", {
+        cookie: await signedInCookie(),
+        headers: { "content-type": "application/json", origin: "https://evil.test" },
+        body: bytes(JSON.stringify({ tags: ["ok"] })),
+      }),
+      { google: fake() },
+    );
+    expect(crossOrigin.status).toBe(403);
+  });
+
+  it("normalizes_nested_hashes_idempotently_rejects_format_chars_and_checks_exact_124_byte_multibyte_cap", async () => {
+    const exact124 = "é".repeat(15); // "tag_" (4) + 15*"%C3%A9" (90) + 15*2 (30) = 124 bytes
+    const exact124Key = `tag_${"%C3%A9".repeat(15)}`;
+    const over124 = "é".repeat(16);
+
+    // Format / zero-width / bidi characters and 125+ byte multibyte tags fail with 400.
+    for (const bad of ["zero\u200Bwidth", "bidi\u202Eoverride", over124]) {
+      const google = fake();
+      const res = await send(
+        request("PATCH", "/api/attachments/img-1/tags", {
+          cookie: await signedInCookie(),
+          headers: { "content-type": "application/json" },
+          body: bytes(JSON.stringify({ tags: [bad] })),
+        }),
+        { google },
+      );
+      expect(res.status, bad).toBe(400);
+      expect(google.calls, bad).toHaveLength(0);
+    }
+
+    // Exact 124-byte multibyte tag and `# #nested` normalize cleanly and succeed.
+    const google = fake([
+      attachmentMetaRoute("img-1", { appProperties: {} }),
+      folderMeta(ATT_FOLDER),
+      [
+        "PATCH",
+        `${V3}/img-1?fields=${ATT_FIELDS}`,
+        json(200, {
+          id: "img-1",
+          name: "y2k.png",
+          mimeType: "image/png",
+          modifiedTime: "2026-11-21T10:00:00.000Z",
+          trashed: false,
+          parents: ["att-folder"],
+          appProperties: {
+            [exact124Key]: exact124,
+            tag_nested: "nested",
+          },
+        }),
+      ],
+    ]);
+    const res = await send(
+      request("PATCH", "/api/attachments/img-1/tags", {
+        cookie: await signedInCookie(),
+        headers: { "content-type": "application/json" },
+        body: bytes(JSON.stringify({ tags: ["# #nested", exact124] })),
+      }),
+      { google },
+    );
+    expect(res.status).toBe(200);
+    const patch = google.calls.find((c) => c.method === "PATCH")!;
+    expect(JSON.parse(patch.text)).toEqual({
+      appProperties: {
+        tag_nested: "nested",
+        [exact124Key]: exact124,
+      },
+    });
+  });
+
+  it("accounts_for_existing_non_tag_appProperties_in_the_30_key_cap", async () => {
+    const google = fake([
+      attachmentMetaRoute("img-1", {
+        appProperties: { customA: "1", customB: "2" },
+      }),
+      folderMeta(ATT_FOLDER),
+    ]);
+    const twentyNine = Array.from({ length: 29 }, (_, i) => `t${i}`);
+    const res = await send(
+      request("PATCH", "/api/attachments/img-1/tags", {
+        cookie: await signedInCookie(),
+        headers: { "content-type": "application/json" },
+        body: bytes(JSON.stringify({ tags: twentyNine })),
+      }),
+      { google },
+    );
+    expect(res.status).toBe(400);
+    expect((await jsonBody(res))["code"]).toBe("invalid_request");
+    expect(google.calls.some((c) => c.method === "PATCH")).toBe(false);
+  });
+
+  it("enforces_subtree_trashed_and_image_type_on_patch_and_maps_drive_400_403", async () => {
+    const outside = fake([
+      attachmentMetaRoute("img-out", { parents: ["elsewhere"] }),
+      ["GET", `${V3}/elsewhere?fields=id,name`, json(200, folder("elsewhere", "x", []))],
+    ]);
+    expect(
+      (
+        await send(
+          request("PATCH", "/api/attachments/img-out/tags", {
+            cookie: await signedInCookie(),
+            headers: { "content-type": "application/json" },
+            body: bytes(JSON.stringify({ tags: ["ok"] })),
+          }),
+          { google: outside },
+        )
+      ).status,
+    ).toBe(404);
+
+    const trashed = fake([attachmentMetaRoute("img-del", { trashed: true })]);
+    expect(
+      (
+        await send(
+          request("PATCH", "/api/attachments/img-del/tags", {
+            cookie: await signedInCookie(),
+            headers: { "content-type": "application/json" },
+            body: bytes(JSON.stringify({ tags: ["ok"] })),
+          }),
+          { google: trashed },
+        )
+      ).status,
+    ).toBe(404);
+
+    const svg = fake([
+      attachmentMetaRoute("img-svg", { mimeType: "image/svg+xml" }),
+      folderMeta(ATT_FOLDER),
+    ]);
+    expect(
+      (
+        await send(
+          request("PATCH", "/api/attachments/img-svg/tags", {
+            cookie: await signedInCookie(),
+            headers: { "content-type": "application/json" },
+            body: bytes(JSON.stringify({ tags: ["ok"] })),
+          }),
+          { google: svg },
+        )
+      ).status,
+    ).toBe(400);
+
+    for (const [driveStatus, expectedStatus, expectedCode] of [
+      [400, 400, "invalid_request"],
+      [403, 403, "forbidden"],
+    ] as const) {
+      const google = fake([
+        attachmentMetaRoute("img-1", { appProperties: {} }),
+        folderMeta(ATT_FOLDER),
+        ["PATCH", `${V3}/img-1?fields=${ATT_FIELDS}`, json(driveStatus, {})],
+      ]);
+      const res = await send(
+        request("PATCH", "/api/attachments/img-1/tags", {
+          cookie: await signedInCookie(),
+          headers: { "content-type": "application/json" },
+          body: bytes(JSON.stringify({ tags: ["ok"] })),
+        }),
+        { google },
+      );
+      expect(res.status, String(driveStatus)).toBe(expectedStatus);
+      expect((await jsonBody(res))["code"], String(driveStatus)).toBe(expectedCode);
+    }
   });
 });

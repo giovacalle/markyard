@@ -1,8 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { Popover, PopoverContent, PopoverTrigger } from "@ui-sdk/react/popover";
-import { type ReactNode, useEffect, useId, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
 import { type AttachmentItem, describeError, fetchAttachments, type UploadedRange } from "../api";
 import { attachmentThumbUrl, attachmentUsage } from "../attachmentRefs";
+import { collectKnownTags, matchesAttachmentSearch } from "../attachmentTags";
 import { canCopyImages, copyImage } from "../copyImage";
 import { usePkm } from "../pkm";
 import { useSettings } from "../settings";
@@ -11,6 +12,7 @@ import type { VaultDocument } from "../vaultDocuments";
 import { useViewPrefs } from "../viewPrefs";
 import { noteStem } from "../wikilinks";
 import { attachmentsQueryKey, AttachmentThumb, DeleteAttachmentDialog } from "./AttachmentDialogs";
+import { AttachmentTagsEditor } from "./AttachmentTags";
 import { CloseIcon, CopyIcon, ImageIcon, TrashIcon } from "./icons";
 import { type DayRange, UploadDateFilter } from "./UploadDateFilter";
 
@@ -180,6 +182,7 @@ function AttachmentCard({
   return (
     <li
       aria-label={attachment.name}
+      data-attachment-id={attachment.id}
       className={`flex min-w-0 flex-col overflow-hidden rounded-xl border bg-white dark:bg-neutral-900 ${
         selected
           ? "border-blue-500 ring-1 ring-blue-500 dark:border-blue-400 dark:ring-blue-400"
@@ -237,6 +240,10 @@ function AttachmentDetails({
   attachment,
   usedIn,
   vaultPinned,
+  tagSuggestions,
+  canEditTags,
+  editTagsHint,
+  onFilterTag,
   onOpenNote,
   onClose,
 }: {
@@ -245,6 +252,10 @@ function AttachmentDetails({
   /** `null` while cached notes are still being read. */
   usedIn: readonly VaultDocument[] | null;
   vaultPinned: boolean;
+  tagSuggestions: readonly string[];
+  canEditTags: boolean;
+  editTagsHint: string;
+  onFilterTag: (tag: string) => void;
   onOpenNote: (id: string) => void;
   onClose: () => void;
 }) {
@@ -316,6 +327,18 @@ function AttachmentDetails({
             </dl>
           </section>
 
+          <section aria-label="Tags" className="space-y-1.5">
+            <h3 className={SECTION_TITLE_CLASS}>Tags</h3>
+            <AttachmentTagsEditor
+              attachmentId={attachment.id}
+              tags={attachment.tags ?? []}
+              suggestions={tagSuggestions}
+              disabled={!canEditTags}
+              disabledHint={canEditTags ? undefined : editTagsHint}
+              onTagClick={onFilterTag}
+            />
+          </section>
+
           <section aria-label="Used in" className="space-y-1.5">
             <h3 className={SECTION_TITLE_CLASS}>
               Used in
@@ -364,12 +387,19 @@ function AttachmentDetails({
   );
 }
 
+/** One request from outside (e.g. Command Palette) to highlight and inspect an attachment. */
+export interface FocusAttachmentRequest {
+  id: string;
+  key: number;
+}
+
 /** The vault's uploaded images: copy-as-Markdown, trash, and an info sidebar with their usage. */
 export function AttachmentsPanel({
   docs,
   vaultPinned,
   offline,
   readOnly,
+  focusAttachment,
   onOpenNote,
   header,
 }: {
@@ -378,6 +408,8 @@ export function AttachmentsPanel({
   vaultPinned: boolean;
   offline: boolean;
   readOnly: boolean;
+  /** Optional target attachment to reveal and open in the info sidebar. */
+  focusAttachment?: FocusAttachmentRequest | null;
   onOpenNote: (id: string) => void;
   header?: ReactNode;
 }) {
@@ -399,12 +431,35 @@ export function AttachmentsPanel({
     placeholderData: (previous) => previous,
   });
   const [search, setSearch] = useState("");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(() => focusAttachment?.id ?? null);
   // Open from the start where it docks beside the grid; on narrow screens it would cover it.
-  const [infoOpen, setInfoOpen] = useState(() => !narrowScreen());
+  const [infoOpen, setInfoOpen] = useState(() => focusAttachment != null || !narrowScreen());
   const [deleting, setDeleting] = useState<AttachmentItem | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
+  const listRef = useRef<HTMLUListElement>(null);
   const detailsId = useId();
+
+  useEffect(() => {
+    if (focusAttachment == null) {
+      return;
+    }
+    setSearch("");
+    setDays(null);
+    setSelectedId(focusAttachment.id);
+    setInfoOpen(true);
+  }, [focusAttachment]);
+
+  useEffect(() => {
+    if (focusAttachment == null || query.data === undefined) {
+      return;
+    }
+    const escaped =
+      typeof CSS !== "undefined" && typeof CSS.escape === "function"
+        ? CSS.escape(focusAttachment.id)
+        : focusAttachment.id.replace(/["\\]/g, "\\$&");
+    const target = listRef.current?.querySelector<HTMLElement>(`[data-attachment-id="${escaped}"]`);
+    target?.scrollIntoView?.({ block: "nearest" });
+  }, [focusAttachment, query.data]);
 
   useEffect(() => {
     if (feedback === null) return;
@@ -420,10 +475,8 @@ export function AttachmentsPanel({
       ),
     [query.data],
   );
-  const needle = search.trim().toLowerCase();
-  const visible = attachments.filter(
-    (item) => needle.length === 0 || item.name.toLowerCase().includes(needle),
-  );
+  const tagSuggestions = useMemo(() => collectKnownTags(attachments, docs), [attachments, docs]);
+  const visible = attachments.filter((item) => matchesAttachmentSearch(item, search));
   // Nothing picked yet, or the pick left the list (trashed, outside the dates, filtered out by
   // name): the sidebar shows the first card instead.
   const selected = infoOpen
@@ -431,6 +484,7 @@ export function AttachmentsPanel({
     : null;
   const canDelete = !readOnly && !offline;
   const deleteHint = readOnly ? "Unlock editing to delete" : "Reconnect to delete";
+  const editTagsHint = readOnly ? "Unlock editing to edit tags." : "Reconnect to edit tags.";
   const usedNames = (id: string) => (usage.get(id) ?? []).map((doc) => noteStem(doc.name));
 
   const controlClass =
@@ -473,6 +527,7 @@ export function AttachmentsPanel({
   } else {
     body = (
       <ul
+        ref={listRef}
         aria-label="Attachment list"
         className="grid grid-cols-[repeat(auto-fill,minmax(13rem,1fr))] gap-3"
       >
@@ -528,7 +583,7 @@ export function AttachmentsPanel({
           <input
             type="search"
             aria-label="Search attachments"
-            placeholder="Search by filename…"
+            placeholder="Search by filename or tag…"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             className={`${controlClass} min-w-0 flex-1 basis-40`}
@@ -545,6 +600,10 @@ export function AttachmentsPanel({
           attachment={selected}
           usedIn={docs === null ? null : (usage.get(selected.id) ?? [])}
           vaultPinned={vaultPinned}
+          tagSuggestions={tagSuggestions}
+          canEditTags={canDelete}
+          editTagsHint={editTagsHint}
+          onFilterTag={(tag) => setSearch(`#${tag}`)}
           onOpenNote={onOpenNote}
           onClose={() => setInfoOpen(false)}
         />
@@ -564,7 +623,15 @@ export function AttachmentsPanel({
 }
 
 /** The Attachments workspace over the vault's uploads and every locally cached note. */
-export function AttachmentsView({ header, offline }: { header?: ReactNode; offline: boolean }) {
+export function AttachmentsView({
+  header,
+  offline,
+  focusAttachment,
+}: {
+  header?: ReactNode;
+  offline: boolean;
+  focusAttachment?: FocusAttachmentRequest | null;
+}) {
   const pkm = usePkm();
   const docs = useVaultDocuments();
   const prefs = useViewPrefs();
@@ -574,6 +641,7 @@ export function AttachmentsView({ header, offline }: { header?: ReactNode; offli
       vaultPinned={pkm?.vaultPinned ?? false}
       offline={offline}
       readOnly={prefs.readOnly}
+      focusAttachment={focusAttachment}
       header={header}
       onOpenNote={(id) => pkm?.openNote(id)}
     />

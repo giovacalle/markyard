@@ -3,6 +3,7 @@
 // of the Drive v3 answers the attachment routes read.
 
 import { asciiLower } from "./drive.ts";
+import { utf8 } from "./encoding.ts";
 
 /** The only image types the BFF stores or serves inline. SVG and HTML can carry scripts. */
 export const IMAGE_MIMES = ["image/png", "image/jpeg", "image/webp", "image/gif"] as const;
@@ -238,7 +239,7 @@ export const decodeCreatedBlob = (json: unknown): CreatedBlob | undefined => {
   return { id: json["id"], name, size };
 };
 
-/** One image of `GET /api/attachments`. Key order is the wire order. */
+/** One image of `GET /api/attachments` or `GET /api/attachments/{id}`. Key order is the wire order. */
 export interface AttachmentItem {
   readonly id: string;
   readonly name: string;
@@ -249,7 +250,220 @@ export interface AttachmentItem {
   /** When the file was uploaded to Drive; absent when Drive sent none. */
   readonly createdTime?: string;
   readonly url: string;
+  /** Direct tags stored in Drive `appProperties`; absent when the image has none. */
+  readonly tags?: ReadonlyArray<string>;
 }
+
+/**
+ * Drive `appProperties` key prefix for direct attachment tags.
+ * Drive restricts property keys to `[a-zA-Z0-9.!@$%^&*()-_/]` (no `:`, spaces, or non-ASCII).
+ */
+export const ATTACHMENT_TAG_PREFIX = "tag_";
+
+/** Drive v3 cap on `appProperties` entries per app per file. */
+export const MAX_ATTACHMENT_TAGS = 30;
+
+/** Drive v3 cap on a single `appProperties` entry: `utf8(key).length + utf8(value).length`. */
+export const MAX_APP_PROPERTY_BYTES = 124;
+
+const compareTags = (a: string, b: string): number => {
+  const al = a.toLowerCase();
+  const bl = b.toLowerCase();
+  return al < bl ? -1 : al > bl ? 1 : a < b ? -1 : a > b ? 1 : 0;
+};
+
+const isSafeKeyByte = (byte: number): boolean =>
+  (byte >= 0x61 && byte <= 0x7a) || // a-z
+  (byte >= 0x30 && byte <= 0x39) || // 0-9
+  byte === 0x2d || // -
+  byte === 0x2e || // .
+  byte === 0x5f; // _
+
+/**
+ * Bijective, Drive-legal `appProperties` key for one tag (case-insensitive identity): keeps
+ * `[a-z0-9._-]` literal and percent-encodes every other UTF-8 byte (`%XX`), staying strictly
+ * inside Drive's allowed key charset `[a-zA-Z0-9.!@$%^&*()-_/]`.
+ */
+export const attachmentTagKey = (tag: string): string => {
+  const bytes = utf8(tag.toLowerCase());
+  let out = ATTACHMENT_TAG_PREFIX;
+  for (const byte of bytes) {
+    out += isSafeKeyByte(byte)
+      ? String.fromCharCode(byte)
+      : `%${byte.toString(16).toUpperCase().padStart(2, "0")}`;
+  }
+  return out;
+};
+
+/** Control characters and Unicode format characters (zero-width, bidi overrides). */
+const DISALLOWED_TAG_CHARS = /[\p{Cc}\p{Cf}]/u;
+
+const hasDisallowedTagChar = (text: string): boolean => DISALLOWED_TAG_CHARS.test(text);
+
+/** Cleans a raw tag string idempotently: strips leading `#`/whitespace, collapses whitespace, trims. */
+export const normalizeAttachmentTag = (raw: string): string =>
+  raw
+    .replace(/^[#\s]+/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+/** Counts non-tag `appProperties` keys that count toward Drive's 30-key private property cap. */
+export const nonTagAppPropertyCount = (current: Readonly<Record<string, string>>): number => {
+  let count = 0;
+  for (const key of Object.keys(current)) {
+    if (!key.startsWith(ATTACHMENT_TAG_PREFIX)) count += 1;
+  }
+  return count;
+};
+
+/**
+ * Validates and deduplicates a `tags` list for `PATCH /api/attachments/{id}/tags`. Returns
+ * `{ ok: true, tags }` (deterministically sorted) or `{ ok: false, message }` for a 400.
+ */
+export const validateAttachmentTags = (
+  raw: unknown,
+):
+  | { readonly ok: true; readonly tags: Array<string> }
+  | { readonly ok: false; readonly message: string } => {
+  if (!Array.isArray(raw)) {
+    return { ok: false, message: "tags must be an array of strings." };
+  }
+  const byKey = new Map<string, string>();
+  for (const entry of raw) {
+    if (!isString(entry)) {
+      return { ok: false, message: "tags must be an array of strings." };
+    }
+    if (hasDisallowedTagChar(entry)) {
+      return { ok: false, message: "Tags cannot contain control or invisible format characters." };
+    }
+    const cleaned = normalizeAttachmentTag(entry);
+    if (cleaned === "") continue;
+    const key = attachmentTagKey(cleaned);
+    if (utf8(key).length + utf8(cleaned).length > MAX_APP_PROPERTY_BYTES) {
+      return { ok: false, message: `Tag “${cleaned}” is too long for Google Drive metadata.` };
+    }
+    if (!byKey.has(key)) {
+      byKey.set(key, cleaned);
+    }
+  }
+  if (byKey.size > MAX_ATTACHMENT_TAGS) {
+    return { ok: false, message: `An image can have at most ${MAX_ATTACHMENT_TAGS} tags.` };
+  }
+  return { ok: true, tags: [...byKey.values()].sort(compareTags) };
+};
+
+/** Decodes `{ tags: string[] }` from raw UTF-8 JSON bytes for `PATCH /api/attachments/{id}/tags`. */
+export const decodeUpdateTagsBody = (
+  bytes: Uint8Array,
+):
+  | { readonly ok: true; readonly tags: Array<string> }
+  | { readonly ok: false; readonly message: string } => {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+  } catch {
+    return { ok: false, message: "Request body must be valid JSON." };
+  }
+  if (!isObject(parsed)) {
+    return { ok: false, message: "Request body must be a JSON object." };
+  }
+  return validateAttachmentTags(parsed["tags"]);
+};
+
+/** Extracts direct `tag:*` entries from a Drive `appProperties` map, deterministically sorted. */
+export const decodeAttachmentTags = (raw: unknown): Array<string> => {
+  if (!isObject(raw)) return [];
+  const byKey = new Map<string, string>();
+  for (const [key, value] of Object.entries(raw)) {
+    if (!key.startsWith(ATTACHMENT_TAG_PREFIX) || !isString(value)) continue;
+    const cleaned = normalizeAttachmentTag(value);
+    if (cleaned === "" || hasDisallowedTagChar(cleaned)) continue;
+    const canonical = attachmentTagKey(cleaned);
+    if (!byKey.has(canonical)) byKey.set(canonical, cleaned);
+  }
+  return [...byKey.values()].sort(compareTags);
+};
+
+/**
+ * Builds the Drive v3 `appProperties` merge patch that replaces every existing `tag:*` entry with
+ * `nextTags`, setting removed keys to `null` while leaving unrelated keys untouched. Returns
+ * `undefined` when Drive already holds the exact same `tag:*` entries.
+ */
+export const diffTagAppProperties = (
+  current: Readonly<Record<string, string>>,
+  nextTags: ReadonlyArray<string>,
+): Record<string, string | null> | undefined => {
+  const desired = new Map<string, string>();
+  for (const tag of nextTags) desired.set(attachmentTagKey(tag), tag);
+
+  const patch: Record<string, string | null> = {};
+  let changed = false;
+
+  for (const [key, value] of Object.entries(current)) {
+    if (!key.startsWith(ATTACHMENT_TAG_PREFIX)) continue;
+    const target = desired.get(key);
+    if (target === undefined) {
+      patch[key] = null;
+      changed = true;
+    } else if (target !== value) {
+      patch[key] = target;
+      changed = true;
+    }
+  }
+  for (const [key, value] of desired) {
+    if (current[key] !== value) {
+      patch[key] = value;
+      changed = true;
+    }
+  }
+  return changed ? patch : undefined;
+};
+
+/** Drive v3 metadata for one image attachment, including parents and raw `appProperties`. */
+export interface AttachmentMeta extends BlobMeta {
+  readonly name: string;
+  readonly modifiedTime: string;
+  readonly createdTime?: string;
+  readonly appProperties: Readonly<Record<string, string>>;
+}
+
+const decodeAppProperties = (raw: unknown): Record<string, string> => {
+  if (!isObject(raw)) return {};
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(raw)) {
+    if (isString(v)) out[k] = v;
+  }
+  return out;
+};
+
+export const decodeAttachmentMeta = (json: unknown): AttachmentMeta | undefined => {
+  const blob = decodeBlobMeta(json);
+  if (blob === undefined || !isObject(json)) return undefined;
+  const { name, modifiedTime, createdTime } = json;
+  if (!isString(name) || !isString(modifiedTime)) return undefined;
+  return {
+    ...blob,
+    name,
+    modifiedTime,
+    ...(isString(createdTime) ? { createdTime } : {}),
+    appProperties: decodeAppProperties(json["appProperties"]),
+  };
+};
+
+/** Converts verified Drive attachment metadata into the wire `AttachmentItem`. */
+export const toAttachmentItem = (meta: AttachmentMeta, mimeType: ImageMime): AttachmentItem => {
+  const tags = decodeAttachmentTags(meta.appProperties);
+  return {
+    id: meta.id,
+    name: meta.name,
+    mimeType,
+    ...(meta.size === undefined ? {} : { size: meta.size }),
+    modifiedTime: meta.modifiedTime,
+    ...(meta.createdTime === undefined ? {} : { createdTime: meta.createdTime }),
+    url: blobUrl(meta.id),
+    ...(tags.length === 0 ? {} : { tags }),
+  };
+};
 
 /** A half-open `[from, before)` window on `createdTime`, as normalized RFC 3339 UTC instants. */
 export interface UploadedRange {
@@ -292,6 +506,7 @@ export const decodeAttachmentPage = (
     const image = imageMimeOf(mimeType);
     if (image === undefined || file["trashed"] === true) continue;
     const size = decodeSize(file["size"]);
+    const tags = decodeAttachmentTags(file["appProperties"]);
     items.push({
       id,
       name,
@@ -300,6 +515,7 @@ export const decodeAttachmentPage = (
       modifiedTime,
       ...(isString(createdTime) ? { createdTime } : {}),
       url: blobUrl(id),
+      ...(tags.length === 0 ? {} : { tags }),
     });
   }
   return { items, nextPageToken: token };

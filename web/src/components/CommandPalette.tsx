@@ -1,6 +1,17 @@
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import { fetchChildren, searchDriveNotes, type DriveNode, type SearchHit } from "../api";
+import {
+  fetchAttachments,
+  fetchChildren,
+  searchDriveNotes,
+  type AttachmentItem,
+  type DriveNode,
+  type SearchHit,
+} from "../api";
+import { attachmentThumbUrl } from "../attachmentRefs";
+import { matchAttachmentTags } from "../attachmentTags";
+import { attachmentsQueryKey, AttachmentThumb } from "./AttachmentDialogs";
+import { ATTACHMENT_TAGS_MUTATION_KEY } from "./AttachmentTags";
 import {
   extractHeadings,
   findContentSnippet,
@@ -80,6 +91,8 @@ interface PaletteItem {
 
 const DRIVE_SEARCH_DEBOUNCE_MS = 220;
 const MAX_WARM_FOLDERS = 12;
+const ATTACHMENTS_WARM_STALE_MS = 30_000;
+const EMPTY_ATTACHMENTS: readonly AttachmentItem[] = [];
 
 function isHiddenAttachmentsFolder(folder: IndexedFolder, attachmentsFolder: string): boolean {
   return (
@@ -191,8 +204,8 @@ export function CommandPalette({
   onOpenTodayNote: () => void;
   /** Opens the vault-wide Tasks dashboard. */
   onOpenTasks?: () => void;
-  /** Opens the vault-wide Attachments manager. */
-  onOpenAttachments?: () => void;
+  /** Opens the vault-wide Attachments manager, optionally selecting `attachmentId`. */
+  onOpenAttachments?: (attachmentId?: string) => void;
   /** Opens the Settings dialog. */
   onOpenSettings?: () => void;
   onRenameCurrent: () => void;
@@ -222,6 +235,43 @@ export function CommandPalette({
   const [treeVersion, setTreeVersion] = useState(0);
   const [driveHits, setDriveHits] = useState<SearchHit[]>([]);
   const [searchingDrive, setSearchingDrive] = useState(false);
+
+  const attachmentsQuery = useQuery({
+    queryKey: attachmentsQueryKey(attachmentsFolder),
+    queryFn: ({ signal }) => fetchAttachments(signal, attachmentsFolder),
+    enabled: false,
+  });
+  const attachments = attachmentsQuery.data?.attachments ?? EMPTY_ATTACHMENTS;
+
+  const hasOpenAttachments = Boolean(onOpenAttachments);
+
+  // Opportunistically warm the attachments list without triggering the global offline detector.
+  useEffect(() => {
+    if (!open || offline || !hasOpenAttachments) {
+      return;
+    }
+    const key = attachmentsQueryKey(attachmentsFolder);
+    const state = queryClient.getQueryState(key);
+    const isFresh =
+      state?.data !== undefined && Date.now() - state.dataUpdatedAt < ATTACHMENTS_WARM_STALE_MS;
+    if (isFresh) {
+      return;
+    }
+    const controller = new AbortController();
+    void fetchAttachments(controller.signal, attachmentsFolder)
+      .then((data) => {
+        if (
+          !controller.signal.aborted &&
+          queryClient.isMutating({ mutationKey: ATTACHMENT_TAGS_MUTATION_KEY }) === 0
+        ) {
+          queryClient.setQueryData(key, data);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      controller.abort();
+    };
+  }, [open, offline, hasOpenAttachments, attachmentsFolder, queryClient]);
 
   // Reset state and load local full-text cache whenever opened.
   useEffect(() => {
@@ -308,7 +358,7 @@ export function CommandPalette({
   const isHeadingMode = trimmed.startsWith("#");
   const isTagMode = /^tag:/i.test(trimmed);
   const effectiveQuery = isTagMode
-    ? trimmed.slice(4).trim().replace(/^#/, "")
+    ? trimmed.slice(4).trim().replace(/^#+/, "")
     : isCommandMode || isHeadingMode
       ? trimmed.slice(1).trim()
       : trimmed;
@@ -441,7 +491,7 @@ export function CommandPalette({
         label: "Open Attachments",
         keywords: "images pictures files uploads media unused delete trash",
         icon: <ImageIcon className="size-4" />,
-        onSelect: () => runAndClose(onOpenAttachments),
+        onSelect: () => runAndClose(() => onOpenAttachments()),
       });
     }
 
@@ -655,7 +705,7 @@ export function CommandPalette({
       return out;
     }
 
-    // 1b. Frontmatter tag filter mode (`tag:...`).
+    // 1b. Frontmatter & attachment tag filter mode (`tag:...`).
     if (isTagMode) {
       const contentSources = new Map<string, string>();
       for (const f of cachedFiles) {
@@ -666,7 +716,7 @@ export function CommandPalette({
       }
 
       if (effectiveQuery.length === 0) {
-        const tagCounts = new Map<string, { label: string; count: number }>();
+        const tagCounts = new Map<string, { label: string; notes: number; images: number }>();
         for (const [fileId, text] of contentSources) {
           if (!notesById.has(fileId)) {
             continue;
@@ -675,26 +725,48 @@ export function CommandPalette({
             const key = tag.toLowerCase();
             const existing = tagCounts.get(key);
             if (existing) {
-              existing.count += 1;
+              existing.notes += 1;
             } else {
-              tagCounts.set(key, { label: tag, count: 1 });
+              tagCounts.set(key, { label: tag, notes: 1, images: 0 });
+            }
+          }
+        }
+        if (onOpenAttachments) {
+          for (const attachment of attachments) {
+            for (const tag of attachment.tags ?? []) {
+              const key = tag.toLowerCase();
+              const existing = tagCounts.get(key);
+              if (existing) {
+                existing.images += 1;
+              } else {
+                tagCounts.set(key, { label: tag, notes: 0, images: 1 });
+              }
             }
           }
         }
         return Array.from(tagCounts.values())
           .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: "accent" }))
-          .map(({ label, count }) => ({
-            id: `tag:${label.toLowerCase()}`,
-            section: "Tags",
-            label: `#${label}`,
-            badge: `${count} ${count === 1 ? "note" : "notes"}`,
-            icon: <HashIcon className="size-4" />,
-            onSelect: () => {
-              setQuery(`tag:${label}`);
-              setActiveIndex(0);
-              inputRef.current?.focus();
-            },
-          }));
+          .map(({ label, notes: noteCount, images: imageCount }) => {
+            const parts: string[] = [];
+            if (noteCount > 0) {
+              parts.push(`${noteCount} ${noteCount === 1 ? "note" : "notes"}`);
+            }
+            if (imageCount > 0) {
+              parts.push(`${imageCount} ${imageCount === 1 ? "image" : "images"}`);
+            }
+            return {
+              id: `tag:${label.toLowerCase()}`,
+              section: "Tags",
+              label: `#${label}`,
+              badge: parts.join(" · "),
+              icon: <HashIcon className="size-4" />,
+              onSelect: () => {
+                setQuery(`tag:${label}`);
+                setActiveIndex(0);
+                inputRef.current?.focus();
+              },
+            };
+          });
       }
 
       const needle = effectiveQuery.toLowerCase();
@@ -718,7 +790,7 @@ export function CommandPalette({
         matched.push({ fileId, entry, tags, rank });
       }
       matched.sort((a, b) => a.rank - b.rank || a.entry.node.name.localeCompare(b.entry.node.name));
-      return matched.map(({ fileId, entry, tags }) => ({
+      const noteResults: PaletteItem[] = matched.map(({ fileId, entry, tags }) => ({
         id: `tag-note:${fileId}`,
         section: "Tagged notes",
         label: entry.node.name,
@@ -727,6 +799,45 @@ export function CommandPalette({
         icon: <FileIcon className="size-4" />,
         onSelect: () => runAndClose(() => onOpenFile(fileId)),
       }));
+
+      const attachmentResults: PaletteItem[] = [];
+      if (onOpenAttachments) {
+        const matchedAttachments: {
+          attachment: (typeof attachments)[number];
+          tags: string[];
+          rank: number;
+        }[] = [];
+        for (const attachment of attachments) {
+          const tags = matchAttachmentTags(attachment.tags, effectiveQuery);
+          if (tags.length === 0) {
+            continue;
+          }
+          const best = tags[0].toLowerCase();
+          const rank = best === needle ? 0 : best.startsWith(needle) ? 1 : 2;
+          matchedAttachments.push({ attachment, tags, rank });
+        }
+        matchedAttachments.sort(
+          (a, b) => a.rank - b.rank || a.attachment.name.localeCompare(b.attachment.name),
+        );
+        for (const { attachment, tags } of matchedAttachments) {
+          attachmentResults.push({
+            id: `tag-attachment:${attachment.id}`,
+            section: "Tagged attachments",
+            label: attachment.name,
+            badge: tags.map((tag) => `#${tag}`).join(" "),
+            icon: (
+              <AttachmentThumb
+                src={attachmentThumbUrl(attachment.id, 64)}
+                alt=""
+                className="size-5 rounded border border-neutral-200 dark:border-neutral-700"
+              />
+            ),
+            onSelect: () => runAndClose(() => onOpenAttachments(attachment.id)),
+          });
+        }
+      }
+
+      return [...noteResults, ...attachmentResults];
     }
 
     // 2. Commands-only mode (`>...`).
@@ -974,6 +1085,51 @@ export function CommandPalette({
       result.push(...contentItems);
     }
 
+    // 4c2. Matching attachments (filename or direct Drive tags).
+    if (onOpenAttachments && attachments.length > 0) {
+      const needle = trimmed.replace(/^#+/, "").toLowerCase();
+      const attMatches = attachments
+        .map((attachment) => {
+          const nameHit = fuzzyMatch(trimmed, attachment.name);
+          const matchedTags =
+            needle.length > 0 ? matchAttachmentTags(attachment.tags, trimmed) : [];
+          if (!nameHit && matchedTags.length === 0) {
+            return null;
+          }
+          let score = nameHit ? nameHit.score + 50 : 0;
+          if (matchedTags.length > 0) {
+            const best = matchedTags[0].toLowerCase();
+            const tagBoost = best === needle ? 220 : best.startsWith(needle) ? 170 : 120;
+            score = Math.max(score, tagBoost);
+          }
+          return { attachment, score, indices: nameHit?.indices ?? [], matchedTags };
+        })
+        .filter((x): x is NonNullable<typeof x> => x !== null)
+        .sort((a, b) => b.score - a.score || a.attachment.name.localeCompare(b.attachment.name))
+        .slice(0, 6);
+
+      for (const { attachment, indices, matchedTags } of attMatches) {
+        const displayTags =
+          matchedTags.length > 0 ? matchedTags : (attachment.tags ?? []).slice(0, 3);
+        result.push({
+          id: `attachment:${attachment.id}`,
+          section: "Attachments",
+          label: attachment.name,
+          subtitle: displayTags.length > 0 ? displayTags.map((t) => `#${t}`).join(" ") : undefined,
+          badge: matchedTags.length > 0 ? "Tag" : "Image",
+          icon: (
+            <AttachmentThumb
+              src={attachmentThumbUrl(attachment.id, 64)}
+              alt=""
+              className="size-5 rounded border border-neutral-200 dark:border-neutral-700"
+            />
+          ),
+          matchIndices: indices,
+          onSelect: () => runAndClose(() => onOpenAttachments(attachment.id)),
+        });
+      }
+    }
+
     // 4d. Matching folders (quick create note in folder).
     const folderMatches = folders
       .map((f) => {
@@ -1074,6 +1230,7 @@ export function CommandPalette({
     recentIds,
     driveHits,
     cachedFiles,
+    attachments,
     offline,
     getCurrentText,
     runAndClose,

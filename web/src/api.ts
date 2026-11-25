@@ -359,6 +359,8 @@ export interface AttachmentItem {
   createdTime?: string;
   /** Same-origin blob URL: `/api/files/<id>/blob`. */
   url: string;
+  /** Direct tags stored in Drive `appProperties`; absent when the image has none. */
+  tags?: string[];
 }
 
 export interface AttachmentsResponse {
@@ -388,6 +390,26 @@ export async function fetchAttachments(
   const query = encoded === "" ? "" : `?${encoded}`;
   const response = await request(`/api/attachments${query}`, { signal });
   return (await response.json()) as AttachmentsResponse;
+}
+
+/** Fetches one attachment's metadata and direct `appProperties` tags. */
+export async function fetchAttachment(id: string, signal?: AbortSignal): Promise<AttachmentItem> {
+  const response = await request(`/api/attachments/${encodeURIComponent(id)}`, { signal });
+  return (await response.json()) as AttachmentItem;
+}
+
+/** Replaces the direct `appProperties` tags on one attachment; answers the updated metadata. */
+export async function updateAttachmentTags(
+  id: string,
+  tags: readonly string[],
+): Promise<AttachmentItem> {
+  const response = await request(`/api/attachments/${encodeURIComponent(id)}/tags`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ tags }),
+  });
+  markSelfWrite(id);
+  return (await response.json()) as AttachmentItem;
 }
 
 /** Metadata of an external page, proxied by the BFF; image URLs are same-origin. */

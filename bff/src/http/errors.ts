@@ -5,6 +5,7 @@ import * as HttpApiSchema from "effect/http-api/HttpApiSchema";
 
 import {
   Conflict,
+  Forbidden,
   InvalidRequest,
   NameExists,
   NotFound,
@@ -19,6 +20,7 @@ import {
 
 export const InvalidRequest400 = HttpApiSchema.status(400)(InvalidRequest);
 export const Unauthenticated401 = HttpApiSchema.status(401)(Unauthenticated);
+export const Forbidden403 = HttpApiSchema.status(403)(Forbidden);
 export const NotFound404 = HttpApiSchema.status(404)(NotFound);
 export const NameExists409 = HttpApiSchema.status(409)(NameExists);
 export const Conflict412 = HttpApiSchema.status(412)(Conflict);

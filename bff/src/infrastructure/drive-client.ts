@@ -25,10 +25,12 @@ import {
   type Node,
 } from "../domain/drive.ts";
 import {
+  decodeAttachmentMeta,
   decodeAttachmentPage,
   decodeBlobMeta,
   decodeCreatedBlob,
   type AttachmentItem,
+  type AttachmentMeta,
   type BlobMeta,
   type UploadedRange,
   type CreatedBlob,
@@ -37,9 +39,13 @@ import { concatBytes, hex, utf8 } from "../domain/encoding.ts";
 import {
   conflict,
   driveUnreachable,
+  forbidden,
+  invalidRequest,
   notFound,
   tokenExpired,
   type Conflict,
+  type Forbidden,
+  type InvalidRequest,
   type NotFound,
   type RateLimited,
   type TokenExpired,
@@ -197,6 +203,51 @@ export const getBlobMeta = (accessToken: string, id: string): DriveEffect<BlobMe
       decodeBlobMeta,
     ),
   );
+
+const ATTACHMENT_META_FIELDS =
+  "id,name,mimeType,modifiedTime,createdTime,size,trashed,parents,appProperties";
+
+/** v3 `files.get` for one attachment's metadata, parents, and `appProperties`. */
+export const getAttachmentMeta = (accessToken: string, id: string): DriveEffect<AttachmentMeta> =>
+  Effect.flatMap(driveBase, (base) =>
+    call(
+      bearerGet(`${base}/drive/v3/files/${id}?fields=${ATTACHMENT_META_FIELDS}`, accessToken),
+      decodeAttachmentMeta,
+    ),
+  );
+
+/** v3 `files.update` patching `appProperties` on an attachment; returns its updated metadata. */
+export const updateAttachmentAppProperties = (
+  accessToken: string,
+  id: string,
+  appProperties: Readonly<Record<string, string | null>>,
+): DriveEffect<AttachmentMeta, DriveFailure | InvalidRequest | Forbidden> =>
+  Effect.gen(function* () {
+    const base = yield* driveBase;
+    const res = yield* send(
+      jsonRequest(
+        "PATCH",
+        `${base}/drive/v3/files/${id}?fields=${ATTACHMENT_META_FIELDS}`,
+        accessToken,
+        { appProperties },
+      ),
+    );
+    if (!res.ok) {
+      if (res.status === 400) {
+        return yield* Effect.fail(
+          invalidRequest("Google Drive rejected these tags (metadata limit reached)."),
+        );
+      }
+      if (res.status === 403 && !isRateLimitBody(res.json)) {
+        return yield* Effect.fail(
+          forbidden("You do not have permission to edit this image on Google Drive."),
+        );
+      }
+      return yield* driveFailure(res);
+    }
+    const meta = decodeAttachmentMeta(res.json);
+    return meta === undefined ? yield* Effect.fail(driveUnreachable()) : meta;
+  });
 
 /** v3 `revisions.get` `alt=media` of one revision of a file, its body unread. */
 export const downloadRevision = (
@@ -480,7 +531,10 @@ export const listAttachments = (
       const fields: Array<[string, string]> = [
         ["q", q],
         ["pageSize", "1000"],
-        ["fields", "nextPageToken,files(id,name,mimeType,modifiedTime,createdTime,size,trashed)"],
+        [
+          "fields",
+          "nextPageToken,files(id,name,mimeType,modifiedTime,createdTime,size,trashed,appProperties)",
+        ],
       ];
       if (pageToken !== undefined) fields.push(["pageToken", pageToken]);
       const query = new URLSearchParams(fields).toString();

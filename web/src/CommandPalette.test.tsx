@@ -576,4 +576,61 @@ describe("Command Palette (Cmd+K)", () => {
     expect(contentMatch).toHaveTextContent("#quarterly");
     expect(contentMatch).toHaveTextContent("Tag");
   });
+
+  it("finds attachments by tag or filename in Cmd+K and tag: mode and opens them selected", async () => {
+    await writeCachedFile("work-id", "---\ntags: [Cybercore]\n---\nNotes.\n", "r1");
+    server.use(
+      http.get("/api/session", () => HttpResponse.json({ email: "owner@example.com" })),
+      http.get("/api/root", () => HttpResponse.json(node("root-id", "Notes", "folder"))),
+      http.get("/api/folders/root-id/children", () =>
+        HttpResponse.json({ nodes: [node("work-id", "work.md", "markdown")] }),
+      ),
+      http.get("/api/search", () => HttpResponse.json({ results: [] })),
+      http.get("/api/attachments", () =>
+        HttpResponse.json({
+          folderId: "att-folder",
+          attachments: [
+            {
+              id: "img-cyber",
+              name: "moodboard.png",
+              mimeType: "image/png",
+              size: 1024,
+              modifiedTime: "2026-11-22T10:00:00.000Z",
+              createdTime: "2026-11-22T10:00:00.000Z",
+              url: "/api/files/img-cyber/blob",
+              tags: ["Cybercore", "Y2K aesthetic"],
+            },
+          ],
+        }),
+      ),
+    );
+
+    render(<App />);
+    await screen.findByRole("treeitem", { name: /work\.md/ });
+
+    pressCmdK();
+    const dialog = await screen.findByRole("dialog", { name: "Command palette" });
+    const input = within(dialog).getByRole("combobox");
+
+    // `tag:` lists combined counts for notes and images.
+    fireEvent.change(input, { target: { value: "tag:" } });
+    const cyberTag = await within(dialog).findByRole("option", { name: /#Cybercore/ });
+    expect(cyberTag).toHaveTextContent("1 note · 1 image");
+    expect(within(dialog).getByRole("option", { name: /#Y2K aesthetic/ })).toHaveTextContent(
+      "1 image",
+    );
+
+    // `tag:y2k` surfaces matching attachments.
+    fireEvent.change(input, { target: { value: "tag:y2k" } });
+    expect(within(dialog).getByRole("option", { name: /moodboard\.png/ })).toBeInTheDocument();
+
+    // Global search also matches by tag and selecting opens Attachments with that image selected.
+    fireEvent.change(input, { target: { value: "y2k" } });
+    const attOption = within(dialog).getByRole("option", { name: /moodboard\.png/ });
+    fireEvent.click(attOption);
+
+    const info = await screen.findByRole("complementary", { name: "Attachment info" });
+    expect(within(info).getByRole("heading", { name: "moodboard.png" })).toBeInTheDocument();
+    expect(within(info).getByText("#Y2K aesthetic")).toBeInTheDocument();
+  });
 });

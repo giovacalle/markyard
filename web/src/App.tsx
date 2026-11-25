@@ -7,7 +7,15 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { type ReactNode, type RefObject, type SVGProps, useEffect, useRef, useState } from "react";
+import {
+  type ReactNode,
+  type RefObject,
+  type SVGProps,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import {
   ApiError,
   fetchChildren,
@@ -40,7 +48,7 @@ import { SettingsDialog } from "./components/SettingsDialog";
 import { VaultOnboarding, VaultPickerDialog } from "./components/VaultPickerDialog";
 import { SyncInspector } from "./components/SyncInspector";
 import { TasksView } from "./components/TasksView";
-import { AttachmentsView } from "./components/AttachmentsView";
+import { AttachmentsView, type FocusAttachmentRequest } from "./components/AttachmentsView";
 import { useOnlineStatus } from "./useOnlineStatus";
 import {
   DeleteFolderDialog,
@@ -521,6 +529,13 @@ function SessionContent({
   const accountEpochRef = useRef(0);
   const vaultNoteList = useVaultNotes();
   const [openPanel, setOpenPanel] = useState<WorkspacePanel | null>(null);
+  const [focusAttachment, setFocusAttachment] = useState<FocusAttachmentRequest | null>(null);
+  const handleOpenAttachments = useCallback((attachmentId?: string) => {
+    setFocusAttachment((prev) =>
+      attachmentId !== undefined ? { id: attachmentId, key: (prev?.key ?? 0) + 1 } : null,
+    );
+    setOpenPanel("attachments");
+  }, []);
   // A `[[Note#Heading]]` jump waiting for its note to load.
   const [pendingHeading, setPendingHeading] = useState<{
     fileId: string;
@@ -1351,6 +1366,7 @@ function SessionContent({
                     type="button"
                     aria-pressed={openPanel === panel}
                     onClick={() => {
+                      setFocusAttachment(null);
                       setOpenPanel((prev) => (prev === panel ? null : panel));
                       setMobileSidebarOpen(false);
                     }}
@@ -1504,7 +1520,11 @@ function SessionContent({
             {openPanel === "tasks" ? (
               <TasksView header={mainSidebarToggle} />
             ) : openPanel === "attachments" ? (
-              <AttachmentsView header={mainSidebarToggle} offline={isOffline} />
+              <AttachmentsView
+                header={mainSidebarToggle}
+                offline={isOffline}
+                focusAttachment={focusAttachment}
+              />
             ) : openFileId !== null ? (
               <DocumentView
                 fileId={openFileId}
@@ -1584,7 +1604,7 @@ function SessionContent({
             onCreateNamedNote={handleCreateNamedNote}
             onOpenTodayNote={() => void handleOpenTodayNote()}
             onOpenTasks={() => setOpenPanel("tasks")}
-            onOpenAttachments={() => setOpenPanel("attachments")}
+            onOpenAttachments={handleOpenAttachments}
             onOpenSettings={() => setSettingsOpen(true)}
             onRenameCurrent={() => documentRef.current?.startRename()}
             onDeleteCurrent={() => {

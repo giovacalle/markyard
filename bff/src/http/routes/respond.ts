@@ -7,6 +7,7 @@ import * as HttpServerResponse from "effect/http/HttpServerResponse";
 
 import {
   Conflict,
+  Forbidden,
   InvalidRequest,
   NameExists,
   NotFound,
@@ -25,6 +26,7 @@ export const respond = (response: Response): HttpServerResponse.HttpServerRespon
 const STATUS: ReadonlyArray<readonly [abstract new (...args: never) => ApiError, number]> = [
   [InvalidRequest, 400],
   [Unauthenticated, 401],
+  [Forbidden, 403],
   [NotFound, 404],
   [NameExists, 409],
   [Conflict, 412],

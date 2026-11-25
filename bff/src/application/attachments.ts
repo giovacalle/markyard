@@ -10,10 +10,15 @@ import * as Effect from "effect/Effect";
 import {
   ATTACHMENTS_FOLDER,
   MAX_ATTACHMENT_BYTES,
+  MAX_ATTACHMENT_TAGS,
   attachmentName,
   blobUrl,
+  decodeUpdateTagsBody,
+  diffTagAppProperties,
   imageMimeOf,
   newestAttachmentsFirst,
+  nonTagAppPropertyCount,
+  toAttachmentItem,
   utcInstant,
   thumbnailUrl,
   type Attachment,
@@ -28,6 +33,7 @@ import {
   invalidRequest,
   notFound,
   tooLarge,
+  type Forbidden,
   type InvalidRequest,
   type TooLarge,
 } from "../domain/errors.ts";
@@ -174,7 +180,7 @@ const checkedImage = (
   accessToken: string,
   rootFolderId: string,
   meta: BlobMeta,
-): Effect.Effect<ImageMime, AttachmentFailure, Drive.DriveR> =>
+): Effect.Effect<ImageMime, Drive.DriveFailure | InvalidRequest, Drive.DriveR> =>
   Effect.gen(function* () {
     if (
       meta.trashed ||
@@ -280,4 +286,52 @@ export const listAttachments = (
     if (folderId === undefined) return { folderId: null, attachments: [] };
     const items = yield* Drive.listAttachments(accessToken, folderId, range);
     return { folderId, attachments: newestAttachmentsFirst(items) };
+  });
+
+/**
+ * `GET /api/attachments/{id}`: metadata and direct tags (`appProperties`) of one live allowlisted
+ * image inside the root folder's subtree.
+ */
+export const getAttachment = (
+  accessToken: string,
+  rootFolderId: string,
+  id: string,
+): Effect.Effect<AttachmentItem, Drive.DriveFailure | InvalidRequest, Drive.DriveR> =>
+  Effect.gen(function* () {
+    if (!isValidId(id)) return yield* Effect.fail(notFound());
+    const meta = yield* Drive.getAttachmentMeta(accessToken, id);
+    const mimeType = yield* checkedImage(accessToken, rootFolderId, meta);
+    return toAttachmentItem(meta, mimeType);
+  });
+
+/**
+ * `PATCH /api/attachments/{id}/tags`: replaces the direct `tag:*` entries in the image's Drive
+ * `appProperties`, keeping unrelated appProperties intact, and returns the updated attachment.
+ */
+export const updateAttachmentTags = (
+  accessToken: string,
+  rootFolderId: string,
+  id: string,
+  body: Uint8Array,
+): Effect.Effect<AttachmentItem, Drive.DriveFailure | InvalidRequest | Forbidden, Drive.DriveR> =>
+  Effect.gen(function* () {
+    const parsed = decodeUpdateTagsBody(body);
+    if (!parsed.ok) return yield* Effect.fail(invalidRequest(parsed.message));
+    if (!isValidId(id)) return yield* Effect.fail(notFound());
+    const meta = yield* Drive.getAttachmentMeta(accessToken, id);
+    const mimeType = yield* checkedImage(accessToken, rootFolderId, meta);
+    const available = Math.max(0, MAX_ATTACHMENT_TAGS - nonTagAppPropertyCount(meta.appProperties));
+    if (parsed.tags.length > available) {
+      return yield* Effect.fail(
+        invalidRequest(
+          available === 0
+            ? "This image has no remaining Google Drive metadata slots for tags."
+            : `This image can have at most ${available} tags.`,
+        ),
+      );
+    }
+    const patch = diffTagAppProperties(meta.appProperties, parsed.tags);
+    if (patch === undefined) return toAttachmentItem(meta, mimeType);
+    const updated = yield* Drive.updateAttachmentAppProperties(accessToken, id, patch);
+    return toAttachmentItem(updated, mimeType);
   });

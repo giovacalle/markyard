@@ -7,15 +7,17 @@ import {
   extractAttachmentRefs,
   removeAttachmentRefs,
 } from "../attachmentRefs";
+import { collectKnownTags } from "../attachmentTags";
 import { extractHeadings, type HeadingItem } from "../commandSearch";
 import { documentStats } from "../documentStats";
-import type { Frontmatter } from "../frontmatter";
+import { extractFrontmatterTags, type Frontmatter } from "../frontmatter";
 import { findBacklinks } from "../linkIndex";
 import { usePkm } from "../pkm";
 import { useSettings } from "../settings";
 import { useVaultDocuments } from "../useVaultDocuments";
 import { noteStem } from "../wikilinks";
 import { attachmentsQueryKey, AttachmentThumb, RemoveAttachmentDialog } from "./AttachmentDialogs";
+import { AttachmentInfoDialog } from "./AttachmentTags";
 import { CloseIcon, TrashIcon } from "./icons";
 
 const LEVEL_INDENT = ["pl-2", "pl-2", "pl-5", "pl-8", "pl-11", "pl-14", "pl-17"];
@@ -55,7 +57,7 @@ function Backlinks({ fileId }: { fileId: string }) {
               <button
                 type="button"
                 onClick={() => pkm.openNote(note.id)}
-                className="block w-full rounded-md px-2 py-1.5 text-left transition-colors hover:bg-neutral-200/70 dark:hover:bg-neutral-800"
+                className="block w-full cursor-pointer rounded-md px-2 py-1.5 text-left transition-colors hover:bg-neutral-200/70 dark:hover:bg-neutral-800"
               >
                 <span className="block truncate font-medium text-neutral-800 dark:text-neutral-200">
                   {noteStem(note.name)}
@@ -87,7 +89,7 @@ function Backlinks({ fileId }: { fileId: string }) {
   );
 }
 
-/** The images the open note embeds from `_attachments`, each removable from the note or Drive. */
+/** The images the open note embeds from `_attachments`, each inspectable/taggable or removable. */
 function NoteAttachments({
   text,
   readOnly,
@@ -100,24 +102,32 @@ function NoteAttachments({
   onEditText?: (nextText: string) => void;
 }) {
   const { attachmentsFolder } = useSettings();
+  const pkm = usePkm();
   const refs = useMemo(() => extractAttachmentRefs(text), [text]);
+  const noteTags = useMemo(() => extractFrontmatterTags(text), [text]);
   const textRef = useRef(text);
   textRef.current = text;
   const [removing, setRemoving] = useState<AttachmentRef | null>(null);
-  // Filenames, when the Attachments list was already loaded; never fetched from here.
+  const [inspecting, setInspecting] = useState<AttachmentRef | null>(null);
+  const docs = useVaultDocuments(inspecting !== null && pkm !== null);
+  // Filenames & cached tags, when the Attachments list was already loaded; never fetched from here.
   const listing = useQuery({
     queryKey: attachmentsQueryKey(attachmentsFolder),
     queryFn: ({ signal }) => fetchAttachments(signal, attachmentsFolder),
     enabled: false,
   });
-  const names = useMemo(
-    () => new Map((listing.data?.attachments ?? []).map((item) => [item.id, item.name])),
+  const byId = useMemo(
+    () => new Map((listing.data?.attachments ?? []).map((item) => [item.id, item])),
     [listing.data],
+  );
+  const tagSuggestions = useMemo(
+    () => (inspecting === null ? [] : collectKnownTags(listing.data?.attachments ?? [], docs)),
+    [inspecting, listing.data, docs],
   );
   if (refs.length === 0) {
     return null;
   }
-  const label = (ref: AttachmentRef) => ref.alt.trim() || names.get(ref.id) || ref.id;
+  const label = (ref: AttachmentRef) => ref.alt.trim() || byId.get(ref.id)?.name || ref.id;
   const editable = !readOnly && onEditText !== undefined;
 
   return (
@@ -127,40 +137,71 @@ function NoteAttachments({
         <span className="ml-1 tabular-nums">· {refs.length}</span>
       </h3>
       <ul className="space-y-1">
-        {refs.map((ref) => (
-          <li
-            key={ref.id}
-            className="flex items-center gap-2 rounded-md px-1.5 py-1 hover:bg-neutral-200/50 dark:hover:bg-neutral-800/60"
-          >
-            <AttachmentThumb
-              src={attachmentThumbUrl(ref.id, 96)}
-              alt={label(ref)}
-              className="size-8 shrink-0 rounded border border-neutral-200 dark:border-neutral-700"
-            />
-            <span className="min-w-0 flex-1 truncate text-neutral-800 dark:text-neutral-200">
-              {label(ref)}
-            </span>
-            {ref.count > 1 && (
-              <span
-                title={`Shown ${ref.count} times`}
-                className="shrink-0 rounded-full bg-neutral-200 px-1.5 text-[11px] text-neutral-600 tabular-nums dark:bg-neutral-800 dark:text-neutral-300"
-              >
-                ×{ref.count}
-              </span>
-            )}
-            <button
-              type="button"
-              aria-label={`Remove ${label(ref)}`}
-              title={editable ? "Remove image" : "Unlock editing to remove"}
-              disabled={!editable}
-              onClick={() => setRemoving(ref)}
-              className="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-neutral-400 transition-colors hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-neutral-400 dark:text-neutral-500 dark:hover:bg-red-950/50 dark:hover:text-red-400"
+        {refs.map((ref) => {
+          const cached = byId.get(ref.id);
+          const itemTags = cached?.tags ?? [];
+          return (
+            <li
+              key={ref.id}
+              className="flex items-center gap-1 rounded-md px-1 py-0.5 hover:bg-neutral-200/50 dark:hover:bg-neutral-800/60"
             >
-              <TrashIcon className="size-3.5" />
-            </button>
-          </li>
-        ))}
+              <button
+                type="button"
+                aria-label={`Details for ${label(ref)}`}
+                onClick={() => setInspecting(ref)}
+                className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md px-0.5 py-0.5 text-left focus-visible:outline-2 focus-visible:outline-blue-600"
+              >
+                <AttachmentThumb
+                  src={attachmentThumbUrl(ref.id, 96)}
+                  alt={label(ref)}
+                  className="size-8 shrink-0 rounded border border-neutral-200 dark:border-neutral-700"
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-neutral-800 dark:text-neutral-200">
+                    {label(ref)}
+                  </span>
+                  {itemTags.length > 0 && (
+                    <span className="block truncate text-[11px] text-blue-600 dark:text-blue-400">
+                      {itemTags.map((tag) => `#${tag}`).join(" ")}
+                    </span>
+                  )}
+                </span>
+                {ref.count > 1 && (
+                  <span
+                    title={`Shown ${ref.count} times`}
+                    className="shrink-0 rounded-full bg-neutral-200 px-1.5 text-[11px] text-neutral-600 tabular-nums dark:bg-neutral-800 dark:text-neutral-300"
+                  >
+                    ×{ref.count}
+                  </span>
+                )}
+              </button>
+              <button
+                type="button"
+                aria-label={`Remove ${label(ref)}`}
+                title={editable ? "Remove image" : "Unlock editing to remove"}
+                disabled={!editable}
+                onClick={() => setRemoving(ref)}
+                className="inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-neutral-400 transition-colors hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-neutral-400 dark:text-neutral-500 dark:hover:bg-red-950/50 dark:hover:text-red-400"
+              >
+                <TrashIcon className="size-3.5" />
+              </button>
+            </li>
+          );
+        })}
       </ul>
+      {inspecting !== null && (
+        <AttachmentInfoDialog
+          key={inspecting.id}
+          attachmentId={inspecting.id}
+          fallbackLabel={label(inspecting)}
+          cachedItem={byId.get(inspecting.id)}
+          noteTags={noteTags}
+          suggestions={tagSuggestions}
+          readOnly={readOnly}
+          offline={offline}
+          onClose={() => setInspecting(null)}
+        />
+      )}
       {removing !== null && (
         <RemoveAttachmentDialog
           key={removing.id}
@@ -248,7 +289,7 @@ export function InfoDrawer({
                       type="button"
                       data-level={heading.level}
                       onClick={() => onJump(heading)}
-                      className={`block w-full truncate rounded-md py-1 pr-2 text-left text-neutral-700 transition-colors hover:bg-neutral-200/70 hover:text-neutral-950 dark:text-neutral-300 dark:hover:bg-neutral-800 dark:hover:text-neutral-50 ${
+                      className={`block w-full cursor-pointer truncate rounded-md py-1 pr-2 text-left text-neutral-700 transition-colors hover:bg-neutral-200/70 hover:text-neutral-950 dark:text-neutral-300 dark:hover:bg-neutral-800 dark:hover:text-neutral-50 ${
                         LEVEL_INDENT[heading.level] ?? "pl-2"
                       } ${heading.level === 1 ? "font-medium" : ""}`}
                     >

@@ -24,7 +24,13 @@ afterAll(() => {
   server.close();
 });
 
-const item = (id: string, name: string, modifiedTime: string, size?: number): AttachmentItem => ({
+const item = (
+  id: string,
+  name: string,
+  modifiedTime: string,
+  size?: number,
+  tags?: string[],
+): AttachmentItem => ({
   id,
   name,
   mimeType: "image/png",
@@ -32,12 +38,13 @@ const item = (id: string, name: string, modifiedTime: string, size?: number): At
   modifiedTime,
   createdTime: modifiedTime,
   url: `/api/files/${id}/blob`,
+  ...(tags === undefined ? {} : { tags }),
 });
 
 const ATTACHMENTS = [
-  item("img-a", "diagram.png", "2026-11-03T10:00:00.000Z", 2048),
+  item("img-a", "diagram.png", "2026-11-03T10:00:00.000Z", 2048, ["architecture", "Design"]),
   item("img-b", "orphan.png", "2026-11-02T10:00:00.000Z", 512),
-  item("img-c", "shared.png", "2026-11-01T10:00:00.000Z"),
+  item("img-c", "shared.png", "2026-11-01T10:00:00.000Z", undefined, ["Y2K aesthetic"]),
 ];
 
 const doc = (id: string, name: string, text: string): VaultDocument => ({
@@ -58,8 +65,15 @@ function renderPanel({
   readOnly = false,
   offline = false,
   docs = DOCS,
-}: { readOnly?: boolean; offline?: boolean; docs?: VaultDocument[] | null } = {}) {
+  focusAttachment,
+}: {
+  readOnly?: boolean;
+  offline?: boolean;
+  docs?: VaultDocument[] | null;
+  focusAttachment?: { id: string; key: number } | null;
+} = {}) {
   const deleted: string[] = [];
+  const patchedTags: { id: string; tags: string[] }[] = [];
   const listUrls: URL[] = [];
   let listed = [...ATTACHMENTS];
   server.use(
@@ -77,6 +91,29 @@ function renderPanel({
         ),
       });
     }),
+    http.patch("/api/attachments/:id/tags", async ({ params, request }) => {
+      const id = String(params.id);
+      const body = (await request.json()) as { tags: string[] };
+      patchedTags.push({ id, tags: body.tags });
+      const existing = listed.find((entry) => entry.id === id);
+      if (!existing) {
+        return HttpResponse.json({ code: "not_found", message: "Not found" }, { status: 404 });
+      }
+      const updated: AttachmentItem =
+        body.tags.length === 0
+          ? {
+              id: existing.id,
+              name: existing.name,
+              mimeType: existing.mimeType,
+              size: existing.size,
+              modifiedTime: existing.modifiedTime,
+              createdTime: existing.createdTime,
+              url: existing.url,
+            }
+          : { ...existing, tags: body.tags };
+      listed = listed.map((entry) => (entry.id === id ? updated : entry));
+      return HttpResponse.json(updated);
+    }),
     http.delete("/api/files/:id", ({ params }) => {
       deleted.push(String(params.id));
       listed = listed.filter((entry) => entry.id !== params.id);
@@ -93,11 +130,12 @@ function renderPanel({
         vaultPinned={false}
         offline={offline}
         readOnly={readOnly}
+        focusAttachment={focusAttachment}
         onOpenNote={onOpenNote}
       />
     </QueryClientProvider>,
   );
-  return { deleted, listUrls, onOpenNote };
+  return { deleted, patchedTags, listUrls, onOpenNote };
 }
 
 const cardNames = () =>
@@ -230,18 +268,117 @@ describe("AttachmentsPanel", () => {
     );
   });
 
-  it("filters by filename", async () => {
+  it("filters by filename and direct tags, including clicking a tag pill", async () => {
     renderPanel();
     await screen.findByRole("list", { name: "Attachment list" });
 
-    fireEvent.change(screen.getByRole("searchbox", { name: "Search attachments" }), {
-      target: { value: "SHA" },
-    });
+    const searchbox = screen.getByRole("searchbox", { name: "Search attachments" });
+    fireEvent.change(searchbox, { target: { value: "SHA" } });
     expect(cardNames()).toEqual(["shared.png"]);
-    fireEvent.change(screen.getByRole("searchbox", { name: "Search attachments" }), {
-      target: { value: "nothing" },
-    });
+
+    fireEvent.change(searchbox, { target: { value: "#y2k" } });
+    expect(cardNames()).toEqual(["shared.png"]);
+
+    fireEvent.change(searchbox, { target: { value: "design" } });
+    expect(cardNames()).toEqual(["diagram.png"]);
+
+    fireEvent.change(searchbox, { target: { value: "" } });
+    const info = screen.getByRole("complementary", { name: "Attachment info" });
+    fireEvent.click(within(info).getByRole("button", { name: "#architecture" }));
+    expect(searchbox).toHaveValue("#architecture");
+    expect(cardNames()).toEqual(["diagram.png"]);
+
+    fireEvent.change(searchbox, { target: { value: "nothing" } });
     expect(screen.getByText("No attachments match.")).toBeInTheDocument();
+  });
+
+  it("adds and removes direct image tags in the Attachment info sidebar", async () => {
+    const { patchedTags } = renderPanel();
+    await screen.findByRole("list", { name: "Attachment list" });
+
+    const info = screen.getByRole("complementary", { name: "Attachment info" });
+    const tagsSection = within(info).getByRole("region", { name: "Tags" });
+    expect(within(tagsSection).getByText("#architecture")).toBeInTheDocument();
+    expect(within(tagsSection).getByText("#Design")).toBeInTheDocument();
+
+    const input = within(tagsSection).getByRole("textbox", { name: "Add image tag" });
+    fireEvent.change(input, { target: { value: "Cybercore" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() =>
+      expect(patchedTags).toEqual([{ id: "img-a", tags: ["architecture", "Cybercore", "Design"] }]),
+    );
+    expect(within(tagsSection).getByText("#Cybercore")).toBeInTheDocument();
+
+    fireEvent.click(within(tagsSection).getByRole("button", { name: "Remove tag Design" }));
+    await waitFor(() =>
+      expect(patchedTags.at(-1)).toEqual({ id: "img-a", tags: ["architecture", "Cybercore"] }),
+    );
+    expect(within(tagsSection).queryByText("#Design")).toBeNull();
+    // Removing a pill returns keyboard focus to the tag input.
+    expect(document.activeElement).toBe(input);
+  });
+
+  it("serializes rapid add-then-remove saves so Drive never keeps a removed tag", async () => {
+    let releaseFirst!: () => void;
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const requests: string[][] = [];
+    let inFlight = 0;
+    let maxConcurrent = 0;
+
+    renderPanel();
+    await screen.findByRole("list", { name: "Attachment list" });
+
+    server.use(
+      http.patch("/api/attachments/img-a/tags", async ({ request }) => {
+        const body = (await request.json()) as { tags: string[] };
+        requests.push(body.tags);
+        inFlight += 1;
+        maxConcurrent = Math.max(maxConcurrent, inFlight);
+        if (requests.length === 1) {
+          await firstGate;
+        }
+        inFlight -= 1;
+        return HttpResponse.json({
+          ...ATTACHMENTS[0],
+          tags: body.tags,
+        });
+      }),
+    );
+
+    const info = screen.getByRole("complementary", { name: "Attachment info" });
+    const tagsSection = within(info).getByRole("region", { name: "Tags" });
+    const input = within(tagsSection).getByRole("textbox", { name: "Add image tag" });
+
+    // Add "Temp", then immediately remove it before the first PATCH completes.
+    fireEvent.change(input, { target: { value: "Temp" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(requests).toHaveLength(1));
+    expect(within(tagsSection).getByText("#Temp")).toBeInTheDocument();
+
+    fireEvent.click(within(tagsSection).getByRole("button", { name: "Remove tag Temp" }));
+    await waitFor(() => expect(within(tagsSection).queryByText("#Temp")).toBeNull());
+    // Second request must wait for the first scoped mutation to finish.
+    expect(requests).toHaveLength(1);
+
+    releaseFirst();
+    await waitFor(() => expect(requests).toHaveLength(2));
+    expect(maxConcurrent).toBe(1);
+    expect(requests).toEqual([
+      ["architecture", "Design", "Temp"],
+      ["architecture", "Design"],
+    ]);
+    expect(within(tagsSection).queryByText("#Temp")).toBeNull();
+  });
+
+  it("pre-selects a focused attachment in the Attachment info sidebar", async () => {
+    renderPanel({ focusAttachment: { id: "img-c", key: 1 } });
+    await screen.findByRole("list", { name: "Attachment list" });
+    const info = screen.getByRole("complementary", { name: "Attachment info" });
+    expect(within(info).getByRole("heading", { name: "shared.png" })).toBeInTheDocument();
+    expect(within(info).getByText("#Y2K aesthetic")).toBeInTheDocument();
   });
 
   it("copies the image Markdown from the copy menu", async () => {

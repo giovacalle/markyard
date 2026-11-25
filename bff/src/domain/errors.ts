@@ -13,6 +13,7 @@ const fields = {
 
 export class InvalidRequest extends Schema.Error<InvalidRequest>("InvalidRequest")(fields) {}
 export class Unauthenticated extends Schema.Error<Unauthenticated>("Unauthenticated")(fields) {}
+export class Forbidden extends Schema.Error<Forbidden>("Forbidden")(fields) {}
 export class NotFound extends Schema.Error<NotFound>("NotFound")(fields) {}
 export class NameExists extends Schema.Error<NameExists>("NameExists")(fields) {}
 export class Conflict extends Schema.Error<Conflict>("Conflict")(fields) {}
@@ -28,6 +29,7 @@ export class UpstreamError extends Schema.Error<UpstreamError>("UpstreamError")(
 export type ApiError =
   | InvalidRequest
   | Unauthenticated
+  | Forbidden
   | NotFound
   | NameExists
   | Conflict
@@ -39,6 +41,9 @@ export type ApiError =
   | UpstreamError;
 
 export const notFound = (): NotFound => new NotFound({ code: "not_found", message: "Not found" });
+
+export const forbidden = (message: string): Forbidden =>
+  new Forbidden({ code: "forbidden", message });
 
 export const notSignedIn = (): Unauthenticated =>
   new Unauthenticated({ code: "unauthenticated", message: "Not signed in" });

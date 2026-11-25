@@ -339,4 +339,74 @@ describe("Info Drawer attachments", () => {
     const { section } = await openAttachments();
     expect(within(section).getByRole("button", { name: "Remove Beach" })).toBeDisabled();
   });
+
+  it("opens an attachment modal on click and lets the user edit tags with note suggestions", async () => {
+    const TAGGED_NOTE = [
+      "---",
+      "tags: [Summer, Travel]",
+      "---",
+      "",
+      "# Trip",
+      "",
+      "![Beach](/api/files/img-1/blob)",
+      "",
+    ].join("\n");
+    const patched: { id: string; tags: string[] }[] = [];
+    let currentTags = ["Coastal"];
+    server.use(
+      http.get("/api/attachments/img-1", () =>
+        HttpResponse.json({
+          id: "img-1",
+          name: "beach.png",
+          mimeType: "image/png",
+          size: 2048,
+          modifiedTime: "2026-11-20T10:00:00.000Z",
+          createdTime: "2026-11-19T10:00:00.000Z",
+          url: "/api/files/img-1/blob",
+          tags: currentTags,
+        }),
+      ),
+      http.patch("/api/attachments/img-1/tags", async ({ request }) => {
+        const body = (await request.json()) as { tags: string[] };
+        currentTags = body.tags;
+        patched.push({ id: "img-1", tags: body.tags });
+        return HttpResponse.json({
+          id: "img-1",
+          name: "beach.png",
+          mimeType: "image/png",
+          size: 2048,
+          modifiedTime: "2026-11-20T10:00:00.000Z",
+          createdTime: "2026-11-19T10:00:00.000Z",
+          url: "/api/files/img-1/blob",
+          tags: currentTags,
+        });
+      }),
+    );
+
+    const preview = await openNote(TAGGED_NOTE);
+    fireEvent.click(await within(preview).findByRole("button", { name: "Document info" }));
+    const drawer = screen.getByRole("complementary", { name: "Document info" });
+    const section = within(drawer).getByRole("region", { name: "Attachments" });
+
+    fireEvent.click(within(section).getByRole("button", { name: "Details for Beach" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(await within(dialog).findByText("#Coastal")).toBeInTheDocument();
+    expect(within(dialog).getByText("From this note")).toBeInTheDocument();
+
+    // One-click assign a tag from the current note's frontmatter.
+    fireEvent.click(within(dialog).getByRole("button", { name: "+ #Summer" }));
+    await waitFor(() => expect(patched).toEqual([{ id: "img-1", tags: ["Coastal", "Summer"] }]));
+    expect(within(dialog).getByText("#Summer")).toBeInTheDocument();
+
+    // Add another tag directly via the inline input.
+    const input = within(dialog).getByRole("textbox", { name: "Add image tag" });
+    fireEvent.change(input, { target: { value: "Sunset" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() =>
+      expect(patched.at(-1)).toEqual({
+        id: "img-1",
+        tags: ["Coastal", "Summer", "Sunset"],
+      }),
+    );
+  });
 });
