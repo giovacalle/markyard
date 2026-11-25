@@ -10,6 +10,7 @@ import {
   useCallback,
   useEffect,
   useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -1109,6 +1110,26 @@ function DocumentSession({
     },
     [fileId, toaster],
   );
+  // The toast region lives in the top layer, so ui-sdk centers it on the window; pin its center to
+  // the note column instead, where the former inline notices sat. CSSOM keeps the CSP intact.
+  const columnRef = useRef<HTMLDivElement>(null);
+  const [toastRegion, setToastRegion] = useState<HTMLElement | null>(null);
+  useLayoutEffect(() => {
+    const column = columnRef.current;
+    if (!column || !toastRegion) return;
+    const place = () => {
+      const { left, width } = column.getBoundingClientRect();
+      toastRegion.style.setProperty("left", `${left + width / 2}px`);
+    };
+    place();
+    const observer = new ResizeObserver(place);
+    observer.observe(column);
+    window.addEventListener("resize", place);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", place);
+    };
+  }, [toastRegion]);
   // A restored version is one undoable edit in the editor, saved through the sync queue with the
   // note's current Drive tag, so a concurrent change on Drive still surfaces as a conflict.
   const handleRestore = (text: string, revision: Revision) => {
@@ -1412,7 +1433,11 @@ function DocumentSession({
 
   return (
     <div className="flex min-h-0 flex-1 overflow-hidden">
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <div
+        ref={columnRef}
+        data-slot="document-column"
+        className="flex min-h-0 min-w-0 flex-1 flex-col"
+      >
         <header
           data-offline={offline ? "true" : undefined}
           className={`flex min-h-14 shrink-0 flex-wrap items-center justify-between gap-3 border-b px-4 py-2 transition-colors sm:px-6 ${
@@ -1617,7 +1642,13 @@ function DocumentSession({
           </div>
         </div>
       </div>
-      <ToastRegion toaster={toaster} side="top" align="center" className={TOAST_REGION_CLASS}>
+      <ToastRegion
+        ref={setToastRegion}
+        toaster={toaster}
+        side="top"
+        align="center"
+        className={TOAST_REGION_CLASS}
+      >
         {() => (
           <Toast className={TOAST_CLASS}>
             <ToastTitle />

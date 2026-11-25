@@ -161,6 +161,31 @@ describe("live Drive sync", () => {
     await vi.waitFor(() => expect(screen.queryByText("Updated from Drive")).toBeNull());
   });
 
+  it("centers the toast region on the note column, not on the window", async () => {
+    history.replaceState(null, "", "/?file=doc-1");
+    signedIn([node("doc-1", "a.md", "markdown")]);
+    await changesFeed([externalChange("doc-1", "a.md")]);
+    let reads = 0;
+    server.use(
+      http.get("/api/files/doc-1/content", () => {
+        reads += 1;
+        return reads === 1 ? contentResponse("mine", '"r1"') : contentResponse("theirs", '"r2"');
+      }),
+    );
+    const rect = vi
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockImplementation(function (this: HTMLElement) {
+        const column = this.dataset.slot === "document-column";
+        return DOMRect.fromRect(column ? { x: 288, y: 56, width: 992, height: 744 } : {});
+      });
+
+    render(<App />);
+    await screen.findByText("Updated from Drive");
+    const region = screen.getByRole("region", { name: "Notifications" });
+    expect(region.style.getPropertyValue("left")).toBe("784px");
+    rect.mockRestore();
+  });
+
   it("warns with Reload and Compare & Merge when Drive changed a note with unsaved edits", async () => {
     history.replaceState(null, "", "/?file=doc-1");
     signedIn();
