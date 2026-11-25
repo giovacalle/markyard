@@ -257,7 +257,9 @@ describe("Sync & offline inspector", () => {
     const inspector = openInspector();
     expect(inspector).toHaveTextContent("Vault not synced for offline use yet");
 
-    fireEvent.click(within(inspector).getByRole("switch", { name: "Pin vault offline" }));
+    const pin = within(inspector).getByRole("switch", { name: "Pin vault offline" });
+    expect(pin).toHaveAttribute("data-slot", "switch");
+    fireEvent.click(pin);
     expect(localStorage.getItem(VAULT_PIN_STORAGE_KEY)).toBe("1");
     expect(await within(inspector).findByText("1 / 1 notes cached offline")).toBeInTheDocument();
     expect(within(inspector).getByText(/Last synced just now/)).toBeInTheDocument();

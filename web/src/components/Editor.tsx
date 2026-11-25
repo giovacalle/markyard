@@ -20,6 +20,7 @@ import {
 } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import { tags as t } from "@lezer/highlight";
+import { Toggle } from "@ui-sdk/react/toggle";
 import { Toolbar, ToolbarButton, ToolbarSeparator } from "@ui-sdk/react/toolbar";
 import { type ReactNode, type RefObject, useEffect, useRef, useState } from "react";
 import { ATTACHMENT_TYPES, uploadAttachment } from "../api";
@@ -39,7 +40,7 @@ import {
 } from "../markdownEditing";
 import { usePkm } from "../pkm";
 import type { TemplateNote } from "../templates";
-import { getViewPrefs, toggleViewPref, useViewPrefs } from "../viewPrefs";
+import { getViewPrefs, setViewPref, useViewPrefs } from "../viewPrefs";
 import { noteStem } from "../wikilinks";
 import { AccessoryBar, type AccessoryAction } from "./AccessoryBar";
 import {
@@ -336,7 +337,7 @@ const EDITOR_THEME = EditorView.theme({
 });
 
 const TOOLBAR_BUTTON_CLASS =
-  "inline-flex h-7 min-w-7 shrink-0 items-center justify-center rounded-md px-1.5 text-xs font-medium text-neutral-600 transition-colors hover:bg-neutral-200/70 hover:text-neutral-950 focus-visible:outline-2 focus-visible:outline-blue-600 aria-pressed:bg-blue-100 aria-pressed:text-blue-700 aria-pressed:ring-1 aria-pressed:ring-inset aria-pressed:ring-blue-300 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-50 dark:aria-pressed:bg-blue-950/70 dark:aria-pressed:text-blue-300 dark:aria-pressed:ring-blue-800";
+  "inline-flex h-7 min-w-7 shrink-0 items-center justify-center rounded-md px-1.5 text-xs font-medium text-neutral-600 transition-colors hover:bg-neutral-200/70 hover:text-neutral-950 focus-visible:outline-2 focus-visible:outline-blue-600 data-pressed:bg-blue-100 data-pressed:text-blue-700 data-pressed:ring-1 data-pressed:ring-inset data-pressed:ring-blue-300 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-50 dark:data-pressed:bg-blue-950/70 dark:data-pressed:text-blue-300 dark:data-pressed:ring-blue-800";
 
 /** Indents a list item, or the line with the default indent unit elsewhere. */
 function indent(view: EditorView): boolean {
@@ -860,28 +861,26 @@ export function Editor({
 
         <ToolbarSeparator className="mx-1 h-4 w-px shrink-0 bg-neutral-200 dark:bg-neutral-700" />
 
-        <ToolbarButton
-          type="button"
+        <Toggle
           aria-label="Focus mode"
-          aria-pressed={prefs.focusMode}
           title="Focus mode: dim everything but the current paragraph"
+          pressed={prefs.focusMode}
+          onPressedChange={(pressed) => setViewPref("focusMode", pressed)}
           onMouseDown={keepFocus}
-          onClick={() => toggleViewPref("focusMode")}
           className={TOOLBAR_BUTTON_CLASS}
         >
           <FocusIcon className="size-3.5" />
-        </ToolbarButton>
-        <ToolbarButton
-          type="button"
+        </Toggle>
+        <Toggle
           aria-label="Typewriter mode"
-          aria-pressed={prefs.typewriterMode}
           title="Typewriter mode: keep the current line centered"
+          pressed={prefs.typewriterMode}
+          onPressedChange={(pressed) => setViewPref("typewriterMode", pressed)}
           onMouseDown={keepFocus}
-          onClick={() => toggleViewPref("typewriterMode")}
           className={TOOLBAR_BUTTON_CLASS}
         >
           <TypewriterIcon className="size-3.5" />
-        </ToolbarButton>
+        </Toggle>
       </Toolbar>
 
       {aboveEditor}

@@ -7,6 +7,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
+import { Toggle, ToggleGroup } from "@ui-sdk/react/toggle";
 import {
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
@@ -1383,28 +1384,28 @@ function SessionContent({
                   {modShortcut("K")}
                 </kbd>
               </button>
-              <div className="mt-1.5 flex flex-col gap-0.5">
+              <ToggleGroup
+                aria-label="Workspace panels"
+                orientation="vertical"
+                value={openPanel === null ? [] : [openPanel]}
+                onValueChange={(next) => {
+                  setFocusAttachment(null);
+                  setOpenPanel(WORKSPACE_PANELS.find((p) => p.panel === next[0])?.panel ?? null);
+                  setMobileSidebarOpen(false);
+                }}
+                className="mt-1.5 flex flex-col gap-0.5"
+              >
                 {WORKSPACE_PANELS.map(({ panel, label, Icon }) => (
-                  <button
+                  <Toggle
                     key={panel}
-                    type="button"
-                    aria-pressed={openPanel === panel}
-                    onClick={() => {
-                      setFocusAttachment(null);
-                      setOpenPanel((prev) => (prev === panel ? null : panel));
-                      setMobileSidebarOpen(false);
-                    }}
-                    className={`flex w-full min-w-0 items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-blue-600 ${
-                      openPanel === panel
-                        ? "bg-neutral-200/80 text-neutral-900 dark:bg-neutral-800 dark:text-neutral-100"
-                        : "text-neutral-600 hover:bg-neutral-200/70 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
-                    }`}
+                    value={panel}
+                    className="flex w-full min-w-0 items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-medium text-neutral-600 transition-colors hover:bg-neutral-200/70 hover:text-neutral-900 focus-visible:outline-2 focus-visible:outline-blue-600 data-pressed:bg-neutral-200/80 data-pressed:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100 dark:data-pressed:bg-neutral-800 dark:data-pressed:text-neutral-100"
                   >
                     <Icon className="size-3.5" />
                     <span className="truncate">{label}</span>
-                  </button>
+                  </Toggle>
                 ))}
-              </div>
+              </ToggleGroup>
             </div>
 
             <nav aria-label="Files" className="min-h-0 flex-1 overflow-y-auto px-2 py-2.5">

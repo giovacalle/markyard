@@ -181,6 +181,7 @@ describe("Direction A frontmatter editing (PropertiesEditor + DocumentView)", ()
     // Toggle boolean switch.
     const pubSwitch = within(propsEditor).getByRole("switch", { name: "published" });
     expect(pubSwitch).toHaveAttribute("aria-checked", "false");
+    expect(pubSwitch).toHaveAttribute("data-slot", "switch");
     fireEvent.click(pubSwitch);
     expect(within(propsEditor).getByRole("switch", { name: "published" })).toHaveAttribute(
       "aria-checked",

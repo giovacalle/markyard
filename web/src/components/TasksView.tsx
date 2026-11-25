@@ -8,6 +8,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@ui-sdk/react/select";
+import { Toggle, ToggleGroup } from "@ui-sdk/react/toggle";
 import { type ReactNode, useMemo, useState } from "react";
 import { usePkm } from "../pkm";
 import { useSyncQueue } from "../syncQueue";
@@ -198,23 +199,22 @@ export function TasksPanel({
           </SelectContent>
         </Select>
         {tags.length > 0 && (
-          <div className="flex w-full flex-wrap gap-1">
+          <ToggleGroup
+            aria-label="Tags"
+            value={tag === null ? [] : [tag]}
+            onValueChange={(next) => setTag(next[0] ?? null)}
+            className="flex w-full flex-wrap gap-1"
+          >
             {tags.map((name) => (
-              <button
+              <Toggle
                 key={name}
-                type="button"
-                aria-pressed={tag === name}
-                onClick={() => setTag((prev) => (prev === name ? null : name))}
-                className={`rounded-full border px-2 py-0.5 text-xs transition-colors ${
-                  tag === name
-                    ? "border-blue-600 bg-blue-600 text-white"
-                    : "border-neutral-200 text-neutral-600 hover:border-neutral-400 dark:border-neutral-700 dark:text-neutral-400"
-                }`}
+                value={name}
+                className="rounded-full border border-neutral-200 px-2 py-0.5 text-xs text-neutral-600 transition-colors hover:border-neutral-400 focus-visible:outline-2 focus-visible:outline-blue-600 data-pressed:border-blue-600 data-pressed:bg-blue-600 data-pressed:text-white data-pressed:hover:border-blue-600 dark:border-neutral-700 dark:text-neutral-400 dark:data-pressed:border-blue-600 dark:data-pressed:text-white"
               >
                 #{name}
-              </button>
+              </Toggle>
             ))}
-          </div>
+          </ToggleGroup>
         )}
       </div>
 

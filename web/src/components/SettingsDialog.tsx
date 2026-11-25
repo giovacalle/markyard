@@ -7,6 +7,7 @@ import {
   DialogTitle,
 } from "@ui-sdk/react/dialog";
 import { SegmentedControl, SegmentedControlItem } from "@ui-sdk/react/segmented-control";
+import { Switch, SwitchThumb } from "@ui-sdk/react/switch";
 import { type ReactNode, useId, useState } from "react";
 import {
   type AppSettings,
@@ -162,7 +163,7 @@ function Segmented<T extends string>({
   );
 }
 
-function Switch({
+function SwitchRow({
   label,
   description,
   checked,
@@ -188,21 +189,16 @@ function Switch({
           </span>
         )}
       </span>
-      <button
-        type="button"
-        role="switch"
+      <Switch
         aria-label={label}
-        aria-checked={checked}
         aria-describedby={description ? descriptionId : undefined}
+        checked={checked}
         disabled={disabled}
-        onClick={() => onChange(!checked)}
-        className="group relative inline-flex h-5 w-9 shrink-0 items-center rounded-full bg-neutral-300 transition-colors aria-checked:bg-blue-600 disabled:opacity-50 dark:bg-neutral-700 dark:aria-checked:bg-blue-500"
+        onCheckedChange={onChange}
+        className="relative inline-flex h-5 w-9 shrink-0 items-center rounded-full bg-neutral-300 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 data-checked:bg-blue-600 data-disabled:opacity-50 dark:bg-neutral-700 dark:data-checked:bg-blue-500"
       >
-        <span
-          aria-hidden="true"
-          className="inline-block size-4 translate-x-0.5 rounded-full bg-white shadow-sm transition-transform group-aria-checked:translate-x-4.5"
-        />
-      </button>
+        <SwitchThumb className="inline-block size-4 translate-x-0.5 rounded-full bg-white shadow-sm transition-transform data-checked:translate-x-4.5" />
+      </Switch>
     </div>
   );
 }
@@ -375,7 +371,7 @@ function SettingsBody({
           placeholder={DEFAULT_SETTINGS.attachmentsFolder}
           help="Uploaded images go here, directly under the vault folder."
         />
-        <Switch
+        <SwitchRow
           label="Show attachments folder"
           description="Show the attachments folder in the file tree, move picker and command palette."
           checked={settings.showAttachmentsFolder}
@@ -404,14 +400,14 @@ function SettingsBody({
           options={MODES}
           onChange={(defaultMode) => updateSettings({ defaultMode })}
         />
-        <Switch
+        <SwitchRow
           label="URL link previews"
           description="Hover cards and bookmark cards for web links."
           checked={settings.linkPreviewsEnabled}
           onChange={(linkPreviewsEnabled) => updateSettings({ linkPreviewsEnabled })}
         />
         {VIEW_TOGGLES.map(({ key, label, description }) => (
-          <Switch
+          <SwitchRow
             key={key}
             label={label}
             description={description}
@@ -442,7 +438,7 @@ function SettingsBody({
           </span>
         </div>
         {onPinVaultChange && (
-          <Switch
+          <SwitchRow
             label="Offline vault"
             description={
               vaultPinned

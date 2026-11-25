@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Toggle } from "@ui-sdk/react/toggle";
 import {
   lazy,
   type MouseEvent,
@@ -55,7 +56,7 @@ import {
 } from "../syncQueue";
 import { renameChild, useNodeFolderPath, useNodeName } from "../treeCache";
 import type { HeadingItem } from "../commandSearch";
-import { toggleViewPref, useViewPrefs } from "../viewPrefs";
+import { setViewPref, toggleViewPref, useViewPrefs } from "../viewPrefs";
 import { modShortcut } from "../platform";
 import { CopyRichTextButton } from "./CopyRichTextButton";
 import type { EditorHandle } from "./Editor";
@@ -1471,16 +1472,15 @@ function DocumentSession({
             >
               <HistoryIcon className="size-4" />
             </button>
-            <button
-              type="button"
+            <Toggle
               aria-label="Read-only mode"
-              aria-pressed={readOnly}
               title={readOnly ? "Unlock editing" : "Lock the note against accidental edits"}
-              onClick={() => toggleViewPref("readOnly")}
+              pressed={readOnly}
+              onPressedChange={(pressed) => setViewPref("readOnly", pressed)}
               className={HEADER_ICON_BUTTON_CLASS}
             >
               {readOnly ? <LockIcon className="size-4" /> : <UnlockIcon className="size-4" />}
-            </button>
+            </Toggle>
             <button
               type="button"
               aria-label="Document info"
@@ -1660,7 +1660,7 @@ function DocumentSession({
 }
 
 const HEADER_ICON_BUTTON_CLASS =
-  "inline-flex size-8 shrink-0 items-center justify-center rounded-md text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-neutral-900 focus-visible:outline-2 focus-visible:outline-blue-600 aria-expanded:bg-neutral-100 aria-expanded:text-neutral-900 aria-pressed:bg-amber-100 aria-pressed:text-amber-800 aria-pressed:ring-1 aria-pressed:ring-inset aria-pressed:ring-amber-300 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100 dark:aria-expanded:bg-neutral-800 dark:aria-expanded:text-neutral-100 dark:aria-pressed:bg-amber-950/70 dark:aria-pressed:text-amber-300 dark:aria-pressed:ring-amber-800";
+  "inline-flex size-8 shrink-0 items-center justify-center rounded-md text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-neutral-900 focus-visible:outline-2 focus-visible:outline-blue-600 aria-expanded:bg-neutral-100 aria-expanded:text-neutral-900 data-pressed:bg-amber-100 data-pressed:text-amber-800 data-pressed:ring-1 data-pressed:ring-inset data-pressed:ring-amber-300 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100 dark:aria-expanded:bg-neutral-800 dark:aria-expanded:text-neutral-100 dark:data-pressed:bg-amber-950/70 dark:data-pressed:text-amber-300 dark:data-pressed:ring-amber-800";
 
 const CONFLICT_BUTTON_CLASS =
   "rounded-md border border-neutral-300 bg-white px-2.5 py-1 text-xs font-medium text-neutral-900 hover:bg-neutral-50 disabled:opacity-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 dark:hover:bg-neutral-800";

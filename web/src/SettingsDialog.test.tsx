@@ -156,8 +156,14 @@ describe("Settings dialog", () => {
       name: "Show attachments folder",
     });
     expect(showAttachments).toHaveAttribute("aria-checked", "true");
+    expect(showAttachments).toHaveAttribute("data-slot", "switch");
+    expect(showAttachments).toHaveAttribute("data-checked");
+    expect(showAttachments).toHaveAccessibleDescription(
+      "Show the attachments folder in the file tree, move picker and command palette.",
+    );
     fireEvent.click(showAttachments);
     expect(showAttachments).toHaveAttribute("aria-checked", "false");
+    expect(showAttachments).not.toHaveAttribute("data-checked");
     expect(getSettings().showAttachmentsFolder).toBe(false);
 
     const previews = within(dialog).getByRole("switch", { name: "URL link previews" });

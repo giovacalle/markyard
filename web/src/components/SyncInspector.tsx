@@ -1,4 +1,5 @@
 import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from "@ui-sdk/react/popover";
+import { Switch, SwitchThumb } from "@ui-sdk/react/switch";
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { describeError, isConflict, isNameExists, type VaultIndex } from "../api";
@@ -348,13 +349,13 @@ export function SyncInspector({
           )}
           <label className="flex items-center justify-between gap-2 text-xs font-medium">
             <span>Pin vault offline</span>
-            <input
-              type="checkbox"
-              role="switch"
+            <Switch
               checked={vault.pinned}
-              onChange={(event) => onPinChange(event.currentTarget.checked)}
-              className="size-4 accent-neutral-900 dark:accent-neutral-100"
-            />
+              onCheckedChange={(next) => onPinChange(next)}
+              className="relative inline-flex h-4.5 w-8 shrink-0 items-center rounded-full bg-neutral-300 transition-colors focus-visible:outline-2 focus-visible:outline-blue-600 data-checked:bg-blue-600 dark:bg-neutral-700 dark:data-checked:bg-blue-500"
+            >
+              <SwitchThumb className="inline-block size-3.5 translate-x-0.5 rounded-full bg-white shadow-sm transition-transform data-checked:translate-x-4" />
+            </Switch>
           </label>
           <button
             type="button"

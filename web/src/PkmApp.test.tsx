@@ -154,9 +154,16 @@ describe("PKM in the app", () => {
     serve({});
     render(<App />);
     await screen.findByRole("treeitem", { name: /alpha\.md/ });
-    fireEvent.click(screen.getByRole("button", { name: "Tasks" }));
+    const panels = screen.getByRole("group", { name: "Workspace panels" });
+    const tasksToggle = within(panels).getByRole("button", { name: "Tasks" });
+    fireEvent.click(tasksToggle);
     const tasks = await screen.findByRole("region", { name: "Tasks" });
+    expect(tasksToggle).toHaveAttribute("aria-pressed", "true");
     expect(await within(tasks).findByRole("checkbox", { name: "call #home" })).not.toBeChecked();
+
+    fireEvent.click(tasksToggle);
+    expect(tasksToggle).toHaveAttribute("aria-pressed", "false");
+    expect(screen.queryByRole("region", { name: "Tasks" })).toBeNull();
   });
 
   it("leaves a workspace panel for the note it names even when that note is already open", async () => {

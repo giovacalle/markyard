@@ -33,11 +33,14 @@ describe("TasksPanel", () => {
   it("groups open tasks by note and filters by status, search, folder and tag", async () => {
     renderPanel();
     const groups = () =>
-      screen.getAllByRole("group").map((g) =>
-        within(g)
-          .getAllByRole("checkbox")
-          .map((c) => c.getAttribute("aria-label")),
-      );
+      screen
+        .getAllByRole("group")
+        .filter((g) => g.getAttribute("aria-label") !== "Tags")
+        .map((g) =>
+          within(g)
+            .getAllByRole("checkbox")
+            .map((c) => c.getAttribute("aria-label")),
+        );
     expect(groups()).toEqual([["milk #shop"], ["ship #release @2026-12-01"]]);
     expect(screen.getByText("Pin vault offline to include every note.")).toBeInTheDocument();
 
@@ -63,6 +66,35 @@ describe("TasksPanel", () => {
       target: { value: "ship" },
     });
     expect(groups()).toEqual([["ship #release @2026-12-01"]]);
+  });
+
+  it("filters by tag with a keyboard-navigable toggle group", () => {
+    renderPanel();
+    const tagGroup = screen.getByRole("group", { name: "Tags" });
+    const shop = within(tagGroup).getByRole("button", { name: "#shop" });
+    const release = within(tagGroup).getByRole("button", { name: "#release" });
+    expect(shop).toHaveAttribute("data-slot", "toggle");
+
+    fireEvent.click(shop);
+    expect(shop).toHaveAttribute("aria-pressed", "true");
+    expect(shop).toHaveAttribute("data-pressed");
+    expect(screen.queryByRole("checkbox", { name: "ship #release @2026-12-01" })).toBeNull();
+
+    fireEvent.click(release);
+    expect(release).toHaveAttribute("aria-pressed", "true");
+    expect(shop).toHaveAttribute("aria-pressed", "false");
+    expect(screen.queryByRole("checkbox", { name: "milk #shop" })).toBeNull();
+
+    fireEvent.click(release);
+    expect(release).toHaveAttribute("aria-pressed", "false");
+    expect(shop).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("checkbox", { name: "milk #shop" })).toBeInTheDocument();
+
+    const [first, second] = within(tagGroup).getAllByRole("button");
+    first.focus();
+    fireEvent.keyDown(first, { key: "ArrowRight" });
+    expect(second).toHaveFocus();
+    expect(second).toHaveAttribute("aria-pressed", "false");
   });
 
   it("toggles the exact line byte for byte and opens notes from their header", () => {

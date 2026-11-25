@@ -210,6 +210,7 @@ describe("Read-only lock", () => {
     const preview = await openNote();
     const lock = await within(preview).findByRole("button", { name: "Read-only mode" });
     expect(lock).toHaveAttribute("aria-pressed", "false");
+    expect(lock).toHaveAttribute("data-slot", "toggle");
     expect(await within(preview).findByRole("checkbox", { name: "build it" })).toBeEnabled();
 
     fireEvent.click(lock);

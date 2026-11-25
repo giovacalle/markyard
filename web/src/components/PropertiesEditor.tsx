@@ -1,3 +1,4 @@
+import { Switch, SwitchThumb } from "@ui-sdk/react/switch";
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import {
   addFrontmatterProperty,
@@ -585,23 +586,16 @@ export function PropertiesEditor({
                         }
                       />
                     ) : prop.kind === "boolean" ? (
-                      <button
-                        type="button"
-                        role="switch"
+                      <Switch
                         aria-label={prop.key}
-                        aria-checked={prop.booleanValue === true}
-                        onClick={() =>
-                          onChange(
-                            setFrontmatterProperty(text, index, !(prop.booleanValue === true)),
-                          )
+                        checked={prop.booleanValue === true}
+                        onCheckedChange={(next) =>
+                          onChange(setFrontmatterProperty(text, index, next))
                         }
-                        className="group relative mt-0.5 inline-flex h-4.5 w-8 shrink-0 items-center rounded-full bg-neutral-300 transition-colors aria-checked:bg-blue-600 focus-visible:outline-2 focus-visible:outline-blue-600 dark:bg-neutral-700 dark:aria-checked:bg-blue-500"
+                        className="relative mt-0.5 inline-flex h-4.5 w-8 shrink-0 items-center rounded-full bg-neutral-300 transition-colors focus-visible:outline-2 focus-visible:outline-blue-600 data-checked:bg-blue-600 dark:bg-neutral-700 dark:data-checked:bg-blue-500"
                       >
-                        <span
-                          aria-hidden="true"
-                          className="inline-block size-3.5 translate-x-0.5 rounded-full bg-white shadow-sm transition-transform group-aria-checked:translate-x-4"
-                        />
-                      </button>
+                        <SwitchThumb className="inline-block size-3.5 translate-x-0.5 rounded-full bg-white shadow-sm transition-transform data-checked:translate-x-4" />
+                      </Switch>
                     ) : prop.kind === "list" ? (
                       <ListValueEditor
                         propKey={prop.key}

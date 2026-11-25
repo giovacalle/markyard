@@ -131,10 +131,12 @@ describe("Editor focus and typewriter modes", () => {
     const { view } = mountEditor("a\n\nb");
     const button = screen.getByRole("button", { name: "Focus mode" });
     expect(button).toHaveAttribute("aria-pressed", "false");
+    expect(button).toHaveAttribute("data-slot", "toggle");
     expect(dimmedLines(view)).toEqual([]);
 
     fireEvent.click(button);
     expect(button).toHaveAttribute("aria-pressed", "true");
+    expect(button).toHaveAttribute("data-pressed");
     expect(getViewPrefs().focusMode).toBe(true);
     expect(dimmedLines(view).length).toBeGreaterThan(0);
 
