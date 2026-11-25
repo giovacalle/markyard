@@ -2,7 +2,8 @@
 // (optionally only those uploaded in a time window),
 // `POST /api/attachments` stores an image in the attachments folder (`_attachments` unless the
 // request names another) directly under the account's vault root,
-// and `GET /api/files/{id}/blob` serves an image of the root folder's subtree inline. Only the strict image allowlist ever goes in or out (no SVG, no HTML).
+// `GET /api/files/{id}/blob` serves an image of the root folder's subtree inline, and
+// `GET /api/files/{id}/thumb` serves Drive's small thumbnail of one. Only the strict image allowlist ever goes in or out (no SVG, no HTML).
 
 import * as Effect from "effect/Effect";
 
@@ -14,8 +15,10 @@ import {
   imageMimeOf,
   newestAttachmentsFirst,
   utcInstant,
+  thumbnailUrl,
   type Attachment,
   type AttachmentItem,
+  type BlobMeta,
   type ImageMime,
   type UploadedRange,
 } from "../domain/attachments.ts";
@@ -164,6 +167,43 @@ export interface ImageBlob {
 const GOOGLE_NATIVE_PREFIX = "application/vnd.google-apps.";
 
 /**
+ * A live file inside the root folder's subtree (404 otherwise, so nothing outside it is even
+ * confirmed to exist) of an allowlisted image type (400): its metadata and checked type.
+ */
+const checkedImage = (
+  accessToken: string,
+  rootFolderId: string,
+  meta: BlobMeta,
+): Effect.Effect<ImageMime, AttachmentFailure, Drive.DriveR> =>
+  Effect.gen(function* () {
+    if (
+      meta.trashed ||
+      meta.mimeType === FOLDER_MIME ||
+      meta.mimeType.startsWith(GOOGLE_NATIVE_PREFIX)
+    )
+      return yield* Effect.fail(notFound());
+    const parent = meta.parents[0];
+    if (parent === undefined) return yield* Effect.fail(notFound());
+    yield* pathToRoot(accessToken, rootFolderId, parent);
+    const mimeType = imageMimeOf(meta.mimeType);
+    if (mimeType === undefined) return yield* Effect.fail(invalidRequest(NOT_AN_IMAGE));
+    return mimeType;
+  });
+
+/** Drive's media stream of a checked image, refused when over 10 MiB (413). */
+const original = (
+  accessToken: string,
+  meta: BlobMeta,
+  mimeType: ImageMime,
+): Effect.Effect<ImageBlob, AttachmentFailure, Drive.DriveR> =>
+  Effect.gen(function* () {
+    if (meta.size === undefined) return yield* Effect.fail(driveUnreachable());
+    if (meta.size > MAX_ATTACHMENT_BYTES) return yield* Effect.fail(tooLarge());
+    const res = yield* Drive.download(accessToken, meta.id);
+    return { mimeType, body: res.body };
+  });
+
+/**
  * `GET /api/files/{id}/blob`: a live file inside the root folder's subtree (404 otherwise, so
  * nothing outside it is even confirmed to exist), of an allowlisted image type (400), at most
  * 10 MiB (413); then Drive's media stream.
@@ -176,21 +216,47 @@ export const readBlob = (
   Effect.gen(function* () {
     if (!isValidId(id)) return yield* Effect.fail(notFound());
     const meta = yield* Drive.getBlobMeta(accessToken, id);
-    if (
-      meta.trashed ||
-      meta.mimeType === FOLDER_MIME ||
-      meta.mimeType.startsWith(GOOGLE_NATIVE_PREFIX)
-    )
-      return yield* Effect.fail(notFound());
-    const parent = meta.parents[0];
-    if (parent === undefined) return yield* Effect.fail(notFound());
-    yield* pathToRoot(accessToken, rootFolderId, parent);
-    const mimeType = imageMimeOf(meta.mimeType);
-    if (mimeType === undefined) return yield* Effect.fail(invalidRequest(NOT_AN_IMAGE));
-    if (meta.size === undefined) return yield* Effect.fail(driveUnreachable());
-    if (meta.size > MAX_ATTACHMENT_BYTES) return yield* Effect.fail(tooLarge());
-    const res = yield* Drive.download(accessToken, id);
-    return { mimeType, body: res.body };
+    const mimeType = yield* checkedImage(accessToken, rootFolderId, meta);
+    return yield* original(accessToken, meta, mimeType);
+  });
+
+/** What `GET /api/files/{id}/thumb` answers: a blob, and whether Drive's thumbnail was used. */
+export interface ImageThumb extends ImageBlob {
+  readonly source: "thumbnail" | "original";
+}
+
+const discard = (response: Response): void => {
+  void response.body?.cancel().catch(() => undefined);
+};
+
+/**
+ * `GET /api/files/{id}/thumb?size=`: the blob route's checks, then Drive's thumbnail at `size`
+ * pixels on its longest edge (a few KB instead of up to 10 MiB). The original image is served
+ * instead while Drive has no thumbnail yet (just after an upload), when its link is not one the
+ * token may be sent to, or when fetching it fails or answers anything but an allowlisted image.
+ */
+export const readThumb = (
+  accessToken: string,
+  rootFolderId: string,
+  id: string,
+  size: number,
+): Effect.Effect<ImageThumb, AttachmentFailure, Drive.DriveR> =>
+  Effect.gen(function* () {
+    if (!isValidId(id)) return yield* Effect.fail(notFound());
+    const meta = yield* Drive.getThumbMeta(accessToken, id);
+    const mimeType = yield* checkedImage(accessToken, rootFolderId, meta);
+    const url =
+      meta.thumbnailLink === undefined ? undefined : thumbnailUrl(meta.thumbnailLink, size);
+    if (url !== undefined) {
+      const res = yield* Drive.fetchThumbnail(accessToken, url);
+      if (res !== undefined) {
+        const thumbMime = res.ok ? imageMimeOf(res.headers.get("content-type")) : undefined;
+        if (thumbMime !== undefined && res.body !== null)
+          return { mimeType: thumbMime, body: res.body, source: "thumbnail" };
+        discard(res);
+      }
+    }
+    return { ...(yield* original(accessToken, meta, mimeType)), source: "original" };
   });
 
 /** The answer of `GET /api/attachments`. */

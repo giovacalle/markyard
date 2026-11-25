@@ -158,6 +158,34 @@ const media = (accessToken: string, path: string): DriveEffect<Response> =>
     return yield* driveFailure(buffered);
   });
 
+/** v3 `files.get` for what the thumb route checks: the blob route's fields and the thumbnail link. */
+export const getThumbMeta = (accessToken: string, id: string): DriveEffect<BlobMeta> =>
+  Effect.flatMap(driveBase, (base) =>
+    call(
+      bearerGet(
+        `${base}/drive/v3/files/${id}?fields=id,mimeType,size,trashed,parents,thumbnailLink`,
+        accessToken,
+      ),
+      decodeBlobMeta,
+    ),
+  );
+
+/**
+ * A GET of Drive's thumbnail link with the user's token: the `Response` unread, `undefined` on a
+ * transport failure (the caller falls back to the original). `url` must come from
+ * `thumbnailUrl`, which only lets `*.googleusercontent.com` through.
+ */
+export const fetchThumbnail = (
+  accessToken: string,
+  url: string,
+): Effect.Effect<Response | undefined, never, Upstream> =>
+  Effect.flatMap(Upstream, (upstream) =>
+    upstream.send(bearerGet(url, accessToken)).pipe(
+      Effect.map((res): Response | undefined => res),
+      Effect.orElseSucceed(() => undefined),
+    ),
+  );
+
 /** v3 `files.get` for what the blob route checks: type, size, trashed state, parents. */
 export const getBlobMeta = (accessToken: string, id: string): DriveEffect<BlobMeta> =>
   Effect.flatMap(driveBase, (base) =>

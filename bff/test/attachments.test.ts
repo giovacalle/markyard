@@ -19,6 +19,7 @@ import {
   setCookies,
   signedInCookie,
   streamOf,
+  text,
   unreachable,
   type Answer,
   type Recorded,
@@ -996,5 +997,136 @@ describe("GET /api/attachments", () => {
     expect(res.status).toBe(204);
     const patch = google.calls.find((c) => c.method === "PATCH");
     expect(JSON.parse(patch!.text)).toEqual({ trashed: true });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/files/{id}/thumb
+// ---------------------------------------------------------------------------
+
+const THUMB_LINK = "https://lh3.googleusercontent.com/drive-storage/AJQWtBabc=s220";
+const THUMB_FETCH = "https://lh3.googleusercontent.com/drive-storage/AJQWtBabc=s";
+
+const thumbMeta = (
+  id: string,
+  mimeType: string,
+  size: number,
+  parents: ReadonlyArray<string>,
+  thumbnailLink?: string,
+): R => [
+  "GET",
+  `${V3}/${id}?fields=id,mimeType,size,trashed,parents,thumbnailLink`,
+  json(200, {
+    id,
+    mimeType,
+    size: String(size),
+    trashed: false,
+    parents,
+    ...(thumbnailLink === undefined ? {} : { thumbnailLink }),
+  }),
+];
+
+const JPEG_THUMB = new Uint8Array([0xff, 0xd8, 0xff, 9, 9]);
+
+const getThumb = async (id: string, google: FakeGoogle, query = ""): Promise<Response> =>
+  send(get(`/api/files/${id}/thumb${query}`, { cookie: await signedInCookie() }), { google });
+
+describe("GET /api/files/{id}/thumb", () => {
+  it("streams_drives_thumbnail_resized_with_the_users_token_and_private_caching", async () => {
+    const google = fake([
+      thumbMeta("img-1", "image/png", PNG.length, ["att-folder"], THUMB_LINK),
+      folderMeta(ATT_FOLDER),
+      [
+        "GET",
+        THUMB_FETCH,
+        { status: 200, headers: { "content-type": "image/jpeg" }, body: JPEG_THUMB },
+      ],
+    ]);
+    const res = await getThumb("img-1", google, "?size=800");
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("image/jpeg");
+    expect(res.headers.get("cache-control")).toBe("private, max-age=3600, no-transform");
+    expect(res.headers.get("x-thumbnail-source")).toBe("thumbnail");
+    expectSecurityHeaders(res);
+    expect(new Uint8Array(await res.arrayBuffer())).toEqual(JPEG_THUMB);
+    expect(google.calls.map((c) => c.url)).toEqual([
+      `${V3}/img-1?fields=id,mimeType,size,trashed,parents,thumbnailLink`,
+      `${V3}/att-folder?fields=id,name,mimeType,modifiedTime,trashed,parents`,
+      "https://lh3.googleusercontent.com/drive-storage/AJQWtBabc=s800",
+    ]);
+    for (const call of google.calls) expect(call.headers.get("authorization")).toBe(`Bearer ${AT}`);
+  });
+
+  it("defaults_to_400_px_and_clamps_the_size", async () => {
+    for (const [query, expected] of [
+      ["", "=s400"],
+      ["?size=5", "=s32"],
+      ["?size=99999", "=s1600"],
+    ] as const) {
+      const google = fake([
+        thumbMeta("img-1", "image/png", 3, ["root-id"], THUMB_LINK),
+        ["GET", THUMB_FETCH, { status: 200, headers: { "content-type": "image/png" }, body: PNG }],
+      ]);
+      expect((await getThumb("img-1", google, query)).status, query).toBe(200);
+      expect(google.calls.at(-1)?.url.endsWith(expected), query).toBe(true);
+    }
+  });
+
+  it("is_400_for_a_size_that_is_not_a_whole_number_without_any_drive_call", async () => {
+    for (const query of ["?size=", "?size=1.5", "?size=-4", "?size=abc"]) {
+      const google = fake();
+      const res = await getThumb("img-1", google, query);
+      expect(res.status, query).toBe(400);
+      expect(google.calls, query).toHaveLength(0);
+    }
+  });
+
+  it("serves_the_original_while_drive_has_no_usable_thumbnail", async () => {
+    const cases: ReadonlyArray<readonly [string, ReadonlyArray<R>]> = [
+      ["no link yet", []],
+      ["foreign host", []],
+      ["thumb 403", [["GET", THUMB_FETCH, json(403, {})]]],
+      ["thumb html", [["GET", THUMB_FETCH, text(200, "<html>", { "content-type": "text/html" })]]],
+      ["thumb unreachable", [["GET", THUMB_FETCH, unreachable()]]],
+    ];
+    for (const [label, extra] of cases) {
+      const link =
+        label === "no link yet"
+          ? undefined
+          : label === "foreign host"
+            ? "https://evil.test/drive-storage/x=s220"
+            : THUMB_LINK;
+      const google = fake([
+        thumbMeta("img-1", "image/png", PNG.length, ["root-id"], link),
+        ...extra,
+        media("img-1", { status: 200, body: streamOf(PNG) }),
+      ]);
+      const res = await getThumb("img-1", google);
+      expect(res.status, label).toBe(200);
+      expect(res.headers.get("content-type"), label).toBe("image/png");
+      expect(res.headers.get("x-thumbnail-source"), label).toBe("original");
+      expect(new Uint8Array(await res.arrayBuffer()), label).toEqual(PNG);
+      expect(google.callsContaining("evil.test"), label).toHaveLength(0);
+    }
+  });
+
+  it("keeps_the_blob_routes_subtree_and_type_checks", async () => {
+    const outside = fake([
+      thumbMeta("img-1", "image/png", 3, ["elsewhere"], THUMB_LINK),
+      ["GET", `${V3}/elsewhere?fields=id,name`, json(200, folder("elsewhere", "x", []))],
+    ]);
+    expect((await getThumb("img-1", outside)).status).toBe(404);
+    expect(outside.callsContaining("googleusercontent")).toHaveLength(0);
+
+    const svg = fake([thumbMeta("img-1", "image/svg+xml", 3, ["root-id"], THUMB_LINK)]);
+    expect((await getThumb("img-1", svg)).status).toBe(400);
+    expect(svg.callsContaining("googleusercontent")).toHaveLength(0);
+  });
+
+  it("needs_a_session", async () => {
+    const google = fake();
+    expect((await send(get("/api/files/img-1/thumb"), { google })).status).toBe(401);
+    expect(google.calls).toHaveLength(0);
   });
 });

@@ -4,7 +4,9 @@ import { HttpResponse, http } from "msw";
 import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vite-plus/test";
 import type { AttachmentItem } from "./api";
+import { startOfMonth, todayDate } from "@ui-sdk/core/date";
 import { AttachmentsPanel, attachmentMarkdown, formatBytes } from "./components/AttachmentsView";
+import { dayRangeLabel } from "./components/UploadDateFilter";
 import type { VaultDocument } from "./vaultDocuments";
 
 const server = setupServer();
@@ -104,35 +106,40 @@ const cardNames = () =>
     .map((card) => card.getAttribute("aria-label"));
 
 describe("AttachmentsPanel", () => {
-  it("lists attachments newest first as a lazy thumbnail, the name and two actions", async () => {
+  it("lists attachments newest first as a lazy Drive thumbnail, the name and two actions", async () => {
     renderPanel();
     await screen.findByRole("list", { name: "Attachment list" });
     expect(cardNames()).toEqual(["diagram.png", "orphan.png", "shared.png"]);
 
     const diagram = screen.getByRole("listitem", { name: "diagram.png" });
     const thumb = diagram.querySelector("img");
-    expect(thumb).toHaveAttribute("src", "/api/files/img-a/blob");
+    expect(thumb).toHaveAttribute("src", "/api/files/img-a/thumb?size=640");
     expect(thumb).toHaveAttribute("loading", "lazy");
     expect(within(diagram).getByText("diagram.png")).toBeInTheDocument();
     expect(
       within(diagram)
         .getAllByRole("button")
         .map((button) => button.getAttribute("aria-label")),
-    ).toEqual(["Details for diagram.png", "Copy Markdown for diagram.png", "Delete diagram.png"]);
+    ).toEqual(["Details for diagram.png", "Copy diagram.png", "Delete diagram.png"]);
     expect(within(diagram).queryByText(/KB|Used in|Unused/)).toBeNull();
-    expect(screen.queryByText(/Usage counts only notes cached on this device/)).toBeNull();
-    expect(screen.queryByRole("complementary", { name: "Attachment info" })).toBeNull();
   });
 
   it("shows details and the notes using an attachment in the info sidebar", async () => {
     const { onOpenNote } = renderPanel();
     await screen.findByRole("list", { name: "Attachment list" });
 
+    // Open from the start on the newest card; pressing that card keeps it open.
     const details = screen.getByRole("button", { name: "Details for diagram.png" });
+    expect(details).toHaveAttribute("aria-expanded", "true");
     fireEvent.click(details);
     expect(details).toHaveAttribute("aria-expanded", "true");
     let info = screen.getByRole("complementary", { name: "Attachment info" });
     expect(within(info).getByRole("heading", { name: "diagram.png" })).toBeInTheDocument();
+    expect(within(info).getByRole("img", { name: "diagram.png" })).toHaveAttribute(
+      "src",
+      "/api/files/img-a/thumb?size=800",
+    );
+    expect(within(info).getByRole("link")).toHaveAttribute("href", "/api/files/img-a/blob");
     expect(within(info).getByText("2.0 KB")).toBeInTheDocument();
     expect(within(info).getByText("Uploaded")).toBeInTheDocument();
     expect(within(info).getByText("PNG")).toBeInTheDocument();
@@ -152,22 +159,75 @@ describe("AttachmentsPanel", () => {
 
     fireEvent.click(within(info).getByRole("button", { name: "Close attachment info" }));
     expect(screen.queryByRole("complementary", { name: "Attachment info" })).toBeNull();
+    expect(details).toHaveAttribute("aria-expanded", "false");
+
+    fireEvent.click(screen.getByRole("button", { name: "Details for shared.png" }));
+    info = screen.getByRole("complementary", { name: "Attachment info" });
+    expect(within(info).getByRole("heading", { name: "shared.png" })).toBeInTheDocument();
   });
 
-  it("filters by upload day through the API, as local calendar days", async () => {
+  it("starts with the info sidebar closed on narrow screens", async () => {
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn((query: string) => ({
+        matches: query === "(max-width: 47.99rem)",
+        media: query,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+      })),
+    );
+    try {
+      renderPanel();
+      await screen.findByRole("list", { name: "Attachment list" });
+      expect(screen.queryByRole("complementary", { name: "Attachment info" })).toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("filters by upload days picked in one calendar field, as local calendar days", async () => {
     const { listUrls } = renderPanel();
     await screen.findByRole("list", { name: "Attachment list" });
-    expect(screen.queryByRole("button", { name: /Unused only/ })).toBeNull();
 
-    fireEvent.change(screen.getByLabelText("Uploaded from"), { target: { value: "2026-11-02" } });
-    fireEvent.change(screen.getByLabelText("Uploaded to"), { target: { value: "2026-11-02" } });
-    await waitFor(() => expect(cardNames()).toEqual(["orphan.png"]));
-    const last = listUrls.at(-1)!;
-    expect(last.searchParams.get("uploadedFrom")).toBe(new Date(2026, 10, 2).toISOString());
-    expect(last.searchParams.get("uploadedBefore")).toBe(new Date(2026, 10, 3).toISOString());
+    fireEvent.click(screen.getByRole("button", { name: "Upload date: any" }));
+    const first = startOfMonth(todayDate());
+    const day = () => document.querySelector<HTMLElement>(`[data-value="${first}"]`)!;
+    fireEvent.click(day());
+    fireEvent.click(day());
+    const [year, month] = first.split("-").map(Number);
+    await waitFor(() =>
+      expect(listUrls.at(-1)!.searchParams.get("uploadedFrom")).toBe(
+        new Date(year, month - 1, 1).toISOString(),
+      ),
+    );
+    expect(listUrls.at(-1)!.searchParams.get("uploadedBefore")).toBe(
+      new Date(year, month - 1, 2).toISOString(),
+    );
+    expect(
+      screen.getByRole("button", { name: `Upload date: ${dayRangeLabel([first, first])}` }),
+    ).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Clear dates" }));
-    await waitFor(() => expect(cardNames()).toEqual(["diagram.png", "orphan.png", "shared.png"]));
+    await waitFor(() => expect(listUrls.at(-1)!.searchParams.has("uploadedFrom")).toBe(false));
+    expect(screen.getByRole("button", { name: "Upload date: any" })).toBeInTheDocument();
+  });
+
+  it("filters by an upload-date preset", async () => {
+    const { listUrls } = renderPanel();
+    await screen.findByRole("list", { name: "Attachment list" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Upload date: any" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Last 7 days" }));
+    const today = todayDate();
+    const [year, month, date] = today.split("-").map(Number);
+    await waitFor(() =>
+      expect(listUrls.at(-1)!.searchParams.get("uploadedFrom")).toBe(
+        new Date(year, month - 1, date - 6).toISOString(),
+      ),
+    );
+    expect(listUrls.at(-1)!.searchParams.get("uploadedBefore")).toBe(
+      new Date(year, month - 1, date + 1).toISOString(),
+    );
   });
 
   it("filters by filename", async () => {
@@ -184,7 +244,7 @@ describe("AttachmentsPanel", () => {
     expect(screen.getByText("No attachments match.")).toBeInTheDocument();
   });
 
-  it("copies the image Markdown", async () => {
+  it("copies the image Markdown from the copy menu", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
@@ -192,10 +252,44 @@ describe("AttachmentsPanel", () => {
     });
     renderPanel();
     await screen.findByRole("list", { name: "Attachment list" });
-    fireEvent.click(screen.getByRole("button", { name: "Copy Markdown for orphan.png" }));
+    fireEvent.click(screen.getByRole("button", { name: "Copy orphan.png" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Copy Markdown" }));
     expect(writeText).toHaveBeenCalledWith("![orphan.png](/api/files/img-b/blob)");
-    expect(await screen.findByRole("button", { name: "Copied" })).toBeInTheDocument();
+    expect(await screen.findByText("Copied Markdown.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Copy Markdown" })).toBeNull();
     Reflect.deleteProperty(navigator, "clipboard");
+  });
+
+  it("copies the original image as a PNG clipboard item", async () => {
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
+    server.use(
+      http.get(
+        "/api/files/img-b/blob",
+        () => new HttpResponse(png, { headers: { "content-type": "image/png" } }),
+      ),
+    );
+    const items: Record<string, Promise<Blob>>[] = [];
+    class FakeClipboardItem {
+      constructor(data: Record<string, Promise<Blob>>) {
+        items.push(data);
+      }
+    }
+    vi.stubGlobal("ClipboardItem", FakeClipboardItem);
+    const write = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { write } });
+    try {
+      renderPanel();
+      await screen.findByRole("list", { name: "Attachment list" });
+      fireEvent.click(screen.getByRole("button", { name: "Copy orphan.png" }));
+      fireEvent.click(await screen.findByRole("button", { name: "Copy image" }));
+      expect(write).toHaveBeenCalledTimes(1);
+      const blob = await items[0]["image/png"];
+      expect(new Uint8Array(await blob.arrayBuffer())).toEqual(png);
+      expect(await screen.findByText("Copied image.")).toBeInTheDocument();
+    } finally {
+      vi.unstubAllGlobals();
+      Reflect.deleteProperty(navigator, "clipboard");
+    }
   });
 
   it("warns about referencing notes, trashes the file and drops it from the list", async () => {

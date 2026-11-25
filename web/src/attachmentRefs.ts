@@ -16,6 +16,14 @@ export function attachmentUrl(id: string): string {
   return `/api/files/${encodeURIComponent(id)}/blob`;
 }
 
+/**
+ * A small preview of an attachment, `size` pixels on its longest edge: Drive's thumbnail through
+ * the BFF (a few KB), or the original while Drive has none yet. GIFs come back as a still frame.
+ */
+export function attachmentThumbUrl(id: string, size: number): string {
+  return `/api/files/${encodeURIComponent(id)}/thumb?size=${size}`;
+}
+
 const ID = String.raw`([^\s/?#)>"'\\]+)`;
 const TITLE = String.raw`(?:[ \t]+(?:"[^"\n]*"|'[^'\n]*'|\([^)\n]*\)))?`;
 /** `![alt](/api/files/<id>/blob "title")`; group 1: alt, group 2: id. */

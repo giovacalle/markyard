@@ -155,6 +155,8 @@ export interface BlobMeta {
   readonly size: number | undefined;
   readonly trashed: boolean;
   readonly parents: ReadonlyArray<string>;
+  /** Drive's short-lived thumbnail link, when it was asked for and Drive has one yet. */
+  readonly thumbnailLink?: string;
 }
 
 export const decodeBlobMeta = (json: unknown): BlobMeta | undefined => {
@@ -166,7 +168,47 @@ export const decodeBlobMeta = (json: unknown): BlobMeta | undefined => {
   const parents = json["parents"] ?? [];
   if (size === null || typeof trashed !== "boolean") return undefined;
   if (!Array.isArray(parents) || !parents.every(isString)) return undefined;
-  return { id, mimeType, size, trashed, parents };
+  const thumbnailLink = json["thumbnailLink"];
+  return isString(thumbnailLink) && thumbnailLink !== ""
+    ? { id, mimeType, size, trashed, parents, thumbnailLink }
+    : { id, mimeType, size, trashed, parents };
+};
+
+/** Longest edge of a thumbnail when the request names none, in pixels. */
+export const DEFAULT_THUMB_SIZE = 400;
+export const MIN_THUMB_SIZE = 32;
+export const MAX_THUMB_SIZE = 1600;
+
+/**
+ * The `size` query of `GET /api/files/{id}/thumb`: absent is the default, a decimal integer is
+ * clamped into `[MIN_THUMB_SIZE, MAX_THUMB_SIZE]`, anything else is `undefined` (a 400).
+ */
+export const thumbSizeOf = (raw: string | null): number | undefined => {
+  if (raw === null) return DEFAULT_THUMB_SIZE;
+  if (!/^[0-9]{1,5}$/.test(raw)) return undefined;
+  return Math.min(MAX_THUMB_SIZE, Math.max(MIN_THUMB_SIZE, Number(raw)));
+};
+
+/** The only hosts Drive thumbnails are fetched from; the access token goes nowhere else. */
+const THUMB_HOST_SUFFIX = ".googleusercontent.com";
+
+/**
+ * The URL to fetch Drive's thumbnail at `size` pixels: its `=s220` suffix rewritten to
+ * `=s{size}`. `undefined` unless the link is https on a `*.googleusercontent.com` host (the
+ * request carries the user's access token) and ends in that suffix.
+ */
+export const thumbnailUrl = (link: string, size: number): string | undefined => {
+  let url: URL;
+  try {
+    url = new URL(link);
+  } catch {
+    return undefined;
+  }
+  if (url.protocol !== "https:" || !url.hostname.endsWith(THUMB_HOST_SUFFIX)) return undefined;
+  if (url.username !== "" || url.password !== "" || url.port !== "") return undefined;
+  if (url.search !== "" || url.hash !== "" || !/=s[0-9]+$/.test(url.pathname)) return undefined;
+  url.pathname = url.pathname.replace(/=s[0-9]+$/, `=s${size}`);
+  return url.href;
 };
 
 /** The answer of `POST /api/attachments`. Key order is the wire order. */

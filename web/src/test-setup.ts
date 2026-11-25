@@ -15,6 +15,25 @@ if (!("getAnimations" in Element.prototype)) {
   });
 }
 
+// @ui-sdk/core picks a popup presentation ("auto": popover or sheet) via matchMedia, which jsdom
+// lacks. Tests see a wide screen unless they stub it.
+if (typeof window.matchMedia !== "function") {
+  Object.defineProperty(window, "matchMedia", {
+    configurable: true,
+    writable: true,
+    value: (query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+      dispatchEvent: () => false,
+    }),
+  });
+}
+
 // jsdom ships `[popover] { display: none }` without implementing `showPopover()`, which
 // hides open @ui-sdk popups/dialogs from Testing Library's accessibility queries.
 if (!("showPopover" in HTMLElement.prototype)) {

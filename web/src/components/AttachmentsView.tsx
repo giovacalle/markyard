@@ -1,7 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
+import { Popover, PopoverContent, PopoverTrigger } from "@ui-sdk/react/popover";
 import { type ReactNode, useEffect, useId, useMemo, useState } from "react";
 import { type AttachmentItem, describeError, fetchAttachments, type UploadedRange } from "../api";
-import { attachmentUsage } from "../attachmentRefs";
+import { attachmentThumbUrl, attachmentUsage } from "../attachmentRefs";
+import { canCopyImages, copyImage } from "../copyImage";
 import { usePkm } from "../pkm";
 import { useSettings } from "../settings";
 import { useVaultDocuments } from "../useVaultDocuments";
@@ -9,10 +11,13 @@ import type { VaultDocument } from "../vaultDocuments";
 import { useViewPrefs } from "../viewPrefs";
 import { noteStem } from "../wikilinks";
 import { attachmentsQueryKey, AttachmentThumb, DeleteAttachmentDialog } from "./AttachmentDialogs";
-import { CalendarIcon, CheckIcon, CloseIcon, CopyIcon, TrashIcon } from "./icons";
+import { CloseIcon, CopyIcon, ImageIcon, TrashIcon } from "./icons";
+import { type DayRange, UploadDateFilter } from "./UploadDateFilter";
 
 const FEEDBACK_MS = 3_000;
-const COPIED_MS = 1_500;
+/** Thumbnail sizes (longest edge, px): grid cards and the info sidebar, both at 2x density. */
+const CARD_THUMB_PX = 640;
+const INFO_THUMB_PX = 800;
 
 /** `1.2 MB`-style size, or `null` when Drive reported none. */
 export function formatBytes(size: number | undefined): string | null {
@@ -47,6 +52,13 @@ function formatDate(time: string | undefined, withTime = false): string | null {
       });
 }
 
+/** Whether the info sidebar would open as an overlay sheet (below Tailwind's `md`). */
+function narrowScreen(): boolean {
+  return (
+    typeof window.matchMedia === "function" && window.matchMedia("(max-width: 47.99rem)").matches
+  );
+}
+
 /** `image/png` → `PNG`. */
 function imageKind(mimeType: string): string {
   const subtype = mimeType.split("/")[1] ?? mimeType;
@@ -78,31 +90,71 @@ export function attachmentMarkdown(attachment: Pick<AttachmentItem, "name" | "ur
   return `![${alt}](${attachment.url})`;
 }
 
-const ICON_ACTION_CLASS =
-  "inline-flex size-7 shrink-0 items-center justify-center rounded-md text-neutral-500 transition-colors focus-visible:outline-2 focus-visible:outline-blue-600 dark:text-neutral-400";
+const OVERLAY_ACTION_CLASS =
+  "inline-flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md border border-neutral-200/80 bg-white/90 text-neutral-600 shadow-sm backdrop-blur-sm transition-colors focus-visible:outline-2 focus-visible:outline-blue-600 dark:border-neutral-700/80 dark:bg-neutral-900/85 dark:text-neutral-300";
 
-function CopyMarkdownButton({ attachment }: { attachment: AttachmentItem }) {
-  const [copied, setCopied] = useState(false);
-  useEffect(() => {
-    if (!copied) return;
-    const timer = window.setTimeout(() => setCopied(false), COPIED_MS);
-    return () => window.clearTimeout(timer);
-  }, [copied]);
+const MENU_ITEM_CLASS =
+  "flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-medium text-neutral-700 transition-colors hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent dark:text-neutral-200 dark:hover:bg-neutral-800";
+
+/** The copy menu of a card: the image Markdown, or the original image itself. */
+function CopyMenu({
+  attachment,
+  onFeedback,
+}: {
+  attachment: AttachmentItem;
+  onFeedback: (message: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const imageCopyable = canCopyImages();
   return (
-    <button
-      type="button"
-      aria-label={copied ? "Copied" : `Copy Markdown for ${attachment.name}`}
-      title={copied ? "Copied" : "Copy Markdown"}
-      onClick={() => {
-        void navigator.clipboard?.writeText(attachmentMarkdown(attachment)).then(
-          () => setCopied(true),
-          () => undefined,
-        );
-      }}
-      className={`${ICON_ACTION_CLASS} hover:bg-neutral-100 hover:text-neutral-900 dark:hover:bg-neutral-800 dark:hover:text-neutral-100`}
-    >
-      {copied ? <CheckIcon className="size-4" /> : <CopyIcon className="size-4" />}
-    </button>
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger
+        type="button"
+        aria-label={`Copy ${attachment.name}`}
+        title="Copy"
+        className={`${OVERLAY_ACTION_CLASS} hover:bg-white hover:text-neutral-900 data-[open]:bg-white data-[open]:text-neutral-900 dark:hover:bg-neutral-800 dark:hover:text-neutral-100 dark:data-[open]:bg-neutral-800`}
+      >
+        <CopyIcon className="size-4" />
+      </PopoverTrigger>
+      <PopoverContent
+        side="top"
+        align="end"
+        sideOffset={6}
+        className="z-50 w-40 rounded-xl border border-neutral-200 bg-white p-1 text-neutral-900 shadow-lg outline-none dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-100"
+      >
+        <button
+          type="button"
+          onClick={() => {
+            setOpen(false);
+            void navigator.clipboard?.writeText(attachmentMarkdown(attachment)).then(
+              () => onFeedback("Copied Markdown."),
+              () => onFeedback("Unable to copy Markdown."),
+            );
+          }}
+          className={MENU_ITEM_CLASS}
+        >
+          <CopyIcon className="size-3.5 text-neutral-500 dark:text-neutral-400" />
+          <span>Copy Markdown</span>
+        </button>
+        <button
+          type="button"
+          disabled={!imageCopyable}
+          title={imageCopyable ? undefined : "This browser cannot copy images"}
+          onClick={() => {
+            setOpen(false);
+            onFeedback("Copying image…");
+            copyImage(attachment.url).then(
+              () => onFeedback("Copied image."),
+              () => onFeedback("Unable to copy the image."),
+            );
+          }}
+          className={MENU_ITEM_CLASS}
+        >
+          <ImageIcon className="size-3.5 text-neutral-500 dark:text-neutral-400" />
+          <span>Copy image</span>
+        </button>
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -114,6 +166,7 @@ function AttachmentCard({
   deleteHint,
   onSelect,
   onDelete,
+  onFeedback,
 }: {
   attachment: AttachmentItem;
   selected: boolean;
@@ -122,6 +175,7 @@ function AttachmentCard({
   deleteHint: string;
   onSelect: () => void;
   onDelete: () => void;
+  onFeedback: (message: string) => void;
 }) {
   return (
     <li
@@ -132,35 +186,41 @@ function AttachmentCard({
           : "border-neutral-200 dark:border-neutral-800"
       }`}
     >
-      <button
-        type="button"
-        aria-label={`Details for ${attachment.name}`}
-        aria-expanded={selected}
-        aria-controls={selected ? detailsId : undefined}
-        onClick={onSelect}
-        className="block w-full border-b border-neutral-200 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-blue-600 dark:border-neutral-800"
-      >
-        <AttachmentThumb src={attachment.url} alt="" className="aspect-video w-full" />
-      </button>
-      <div className="flex min-w-0 items-center gap-0.5 py-1.5 pr-1.5 pl-3">
-        <p
-          className="min-w-0 flex-1 truncate text-sm font-medium text-neutral-900 dark:text-neutral-100"
-          title={attachment.name}
-        >
-          {attachment.name}
-        </p>
-        <CopyMarkdownButton attachment={attachment} />
+      <div className="relative border-b border-neutral-200 dark:border-neutral-800">
         <button
           type="button"
-          aria-label={`Delete ${attachment.name}`}
-          title={canDelete ? "Move to Drive Trash" : deleteHint}
-          disabled={!canDelete}
-          onClick={onDelete}
-          className={`${ICON_ACTION_CLASS} hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-neutral-500 dark:hover:bg-red-950/50 dark:hover:text-red-400`}
+          aria-label={`Details for ${attachment.name}`}
+          aria-expanded={selected}
+          aria-controls={selected ? detailsId : undefined}
+          onClick={onSelect}
+          className="block w-full cursor-pointer focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-blue-600"
         >
-          <TrashIcon className="size-4" />
+          <AttachmentThumb
+            src={attachmentThumbUrl(attachment.id, CARD_THUMB_PX)}
+            alt=""
+            className="aspect-video w-full"
+          />
         </button>
+        <div className="absolute right-1.5 bottom-1.5 flex gap-1">
+          <CopyMenu attachment={attachment} onFeedback={onFeedback} />
+          <button
+            type="button"
+            aria-label={`Delete ${attachment.name}`}
+            title={canDelete ? "Move to Drive Trash" : deleteHint}
+            disabled={!canDelete}
+            onClick={onDelete}
+            className={`${OVERLAY_ACTION_CLASS} hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-white/90 disabled:hover:text-neutral-600 dark:hover:bg-red-950 dark:hover:text-red-400 dark:disabled:hover:bg-neutral-900/85 dark:disabled:hover:text-neutral-300`}
+          >
+            <TrashIcon className="size-4" />
+          </button>
+        </div>
       </div>
+      <p
+        className="min-w-0 truncate px-3 py-2 text-sm font-medium text-neutral-900 dark:text-neutral-100"
+        title={attachment.name}
+      >
+        {attachment.name}
+      </p>
     </li>
   );
 }
@@ -231,7 +291,7 @@ function AttachmentDetails({
               className="block overflow-hidden rounded-lg border border-neutral-200 focus-visible:outline-2 focus-visible:outline-blue-600 dark:border-neutral-700"
             >
               <AttachmentThumb
-                src={attachment.url}
+                src={attachmentThumbUrl(attachment.id, INFO_THUMB_PX)}
                 alt={attachment.name}
                 fit="contain"
                 className="aspect-video w-full"
@@ -322,9 +382,8 @@ export function AttachmentsPanel({
   header?: ReactNode;
 }) {
   const { attachmentsFolder } = useSettings();
-  const [fromDay, setFromDay] = useState("");
-  const [toDay, setToDay] = useState("");
-  const range = useMemo(() => uploadedRangeOf(fromDay, toDay), [fromDay, toDay]);
+  const [days, setDays] = useState<DayRange>(null);
+  const range = useMemo(() => uploadedRangeOf(days?.[0] ?? "", days?.[1] ?? ""), [days]);
   const filtered = range.from !== undefined || range.before !== undefined;
   const query = useQuery({
     // The unfiltered list keeps the shared key the Document info drawer reads names from.
@@ -341,6 +400,8 @@ export function AttachmentsPanel({
   });
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Open from the start where it docks beside the grid; on narrow screens it would cover it.
+  const [infoOpen, setInfoOpen] = useState(() => !narrowScreen());
   const [deleting, setDeleting] = useState<AttachmentItem | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
   const detailsId = useId();
@@ -363,8 +424,11 @@ export function AttachmentsPanel({
   const visible = attachments.filter(
     (item) => needle.length === 0 || item.name.toLowerCase().includes(needle),
   );
-  // Gone from the list (trashed, or outside the dates): the sidebar closes with it.
-  const selected = attachments.find((item) => item.id === selectedId) ?? null;
+  // Nothing picked yet, or the pick left the list (trashed, outside the dates, filtered out by
+  // name): the sidebar shows the first card instead.
+  const selected = infoOpen
+    ? (visible.find((item) => item.id === selectedId) ?? visible[0] ?? null)
+    : null;
   const canDelete = !readOnly && !offline;
   const deleteHint = readOnly ? "Unlock editing to delete" : "Reconnect to delete";
   const usedNames = (id: string) => (usage.get(id) ?? []).map((doc) => noteStem(doc.name));
@@ -420,10 +484,12 @@ export function AttachmentsPanel({
             detailsId={detailsId}
             canDelete={canDelete}
             deleteHint={deleteHint}
-            onSelect={() =>
-              setSelectedId((prev) => (prev === attachment.id ? null : attachment.id))
-            }
+            onSelect={() => {
+              setSelectedId(attachment.id);
+              setInfoOpen(true);
+            }}
             onDelete={() => setDeleting(attachment)}
+            onFeedback={setFeedback}
           />
         ))}
       </ul>
@@ -467,44 +533,7 @@ export function AttachmentsPanel({
             onChange={(event) => setSearch(event.target.value)}
             className={`${controlClass} min-w-0 flex-1 basis-40`}
           />
-          <div role="group" aria-label="Upload date" className="flex items-center gap-1.5">
-            <CalendarIcon className="size-4 shrink-0 text-neutral-400 dark:text-neutral-500" />
-            <input
-              type="date"
-              aria-label="Uploaded from"
-              title="Uploaded from"
-              value={fromDay}
-              max={toDay || undefined}
-              onChange={(event) => setFromDay(event.target.value)}
-              className={controlClass}
-            />
-            <span aria-hidden="true" className="text-neutral-400 dark:text-neutral-500">
-              –
-            </span>
-            <input
-              type="date"
-              aria-label="Uploaded to"
-              title="Uploaded to"
-              value={toDay}
-              min={fromDay || undefined}
-              onChange={(event) => setToDay(event.target.value)}
-              className={controlClass}
-            />
-            {(fromDay !== "" || toDay !== "") && (
-              <button
-                type="button"
-                aria-label="Clear dates"
-                title="Clear dates"
-                onClick={() => {
-                  setFromDay("");
-                  setToDay("");
-                }}
-                className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
-              >
-                <CloseIcon className="size-4" />
-              </button>
-            )}
-          </div>
+          <UploadDateFilter value={days} onChange={setDays} />
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6">{body}</div>
@@ -517,7 +546,7 @@ export function AttachmentsPanel({
           usedIn={docs === null ? null : (usage.get(selected.id) ?? [])}
           vaultPinned={vaultPinned}
           onOpenNote={onOpenNote}
-          onClose={() => setSelectedId(null)}
+          onClose={() => setInfoOpen(false)}
         />
       )}
 

@@ -3,7 +3,7 @@ import { type RefObject, useMemo, useRef, useState } from "react";
 import { fetchAttachments } from "../api";
 import {
   type AttachmentRef,
-  attachmentUrl,
+  attachmentThumbUrl,
   extractAttachmentRefs,
   removeAttachmentRefs,
 } from "../attachmentRefs";
@@ -133,7 +133,7 @@ function NoteAttachments({
             className="flex items-center gap-2 rounded-md px-1.5 py-1 hover:bg-neutral-200/50 dark:hover:bg-neutral-800/60"
           >
             <AttachmentThumb
-              src={attachmentUrl(ref.id)}
+              src={attachmentThumbUrl(ref.id, 96)}
               alt={label(ref)}
               className="size-8 shrink-0 rounded border border-neutral-200 dark:border-neutral-700"
             />

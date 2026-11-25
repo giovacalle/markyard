@@ -300,7 +300,7 @@ describe("Info Drawer attachments", () => {
     expect(rows.map((row) => row.textContent)).toEqual(["Beach×2", "img-2"]);
     expect(within(rows[0]).getByRole("img", { name: "Beach" })).toHaveAttribute(
       "src",
-      "/api/files/img-1/blob",
+      "/api/files/img-1/thumb?size=96",
     );
 
     fireEvent.click(within(section).getByRole("button", { name: "Remove Beach" }));
