@@ -56,6 +56,7 @@ import {
 import { renameChild, useNodeFolderPath, useNodeName } from "../treeCache";
 import type { HeadingItem } from "../commandSearch";
 import { toggleViewPref, useViewPrefs } from "../viewPrefs";
+import { modShortcut } from "../platform";
 import { CopyRichTextButton } from "./CopyRichTextButton";
 import type { EditorHandle } from "./Editor";
 import { HistoryIcon, LockIcon, PanelRightIcon, UnlockIcon } from "./icons";
@@ -1485,7 +1486,7 @@ function DocumentSession({
               aria-label="Document info"
               aria-expanded={prefs.infoDrawerOpen}
               aria-controls={prefs.infoDrawerOpen ? drawerId : undefined}
-              title="Document info (⌘⇧I)"
+              title={`Document info (${modShortcut("⇧I")})`}
               onClick={() => toggleViewPref("infoDrawerOpen")}
               className={HEADER_ICON_BUTTON_CLASS}
             >

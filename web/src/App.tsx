@@ -8,6 +8,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import {
+  type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
   type RefObject,
   type SVGProps,
@@ -16,6 +17,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { flushSync } from "react-dom";
 import {
   ApiError,
   fetchChildren,
@@ -91,6 +93,7 @@ import {
   type PendingOp,
 } from "./localCache";
 import { isLocalId } from "./localIds";
+import { modKeyShortcut, modShortcut } from "./platform";
 import {
   OpsQueue,
   OpsQueueContext,
@@ -1275,12 +1278,33 @@ function SessionContent({
       setPaletteOpen(true);
     };
 
+    // The palette commits inside the tap so its input is focused within the user gesture,
+    // the only way iOS raises the on-screen keyboard. A printable key typed on a focused
+    // trigger opens the palette with that key already in the query.
+    const paletteTriggerProps = {
+      "aria-keyshortcuts": modKeyShortcut("K"),
+      onClick: () => flushSync(() => openPalette()),
+      onKeyDown: (event: ReactKeyboardEvent<HTMLButtonElement>) => {
+        if (
+          event.key.length !== 1 ||
+          event.key === " " ||
+          event.metaKey ||
+          event.ctrlKey ||
+          event.altKey
+        ) {
+          return;
+        }
+        event.preventDefault();
+        flushSync(() => openPalette(event.key));
+      },
+    };
+
     const headerSearchButton = (
       <button
         type="button"
         aria-label="Search notes and commands"
-        title="Search notes and commands (Cmd/Ctrl+K)"
-        onClick={() => openPalette()}
+        title={`Search notes and commands (${modShortcut("K")})`}
+        {...paletteTriggerProps}
         className={`${
           sidebarCollapsed ? "inline-flex" : "inline-flex md:hidden"
         } size-7 shrink-0 items-center justify-center rounded-md text-neutral-600 transition-colors hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100`}
@@ -1347,7 +1371,7 @@ function SessionContent({
             <div className="shrink-0 border-b border-neutral-200 px-2.5 py-2 dark:border-neutral-800">
               <button
                 type="button"
-                onClick={() => openPalette()}
+                {...paletteTriggerProps}
                 aria-label="Search notes and commands"
                 className="flex w-full cursor-pointer items-center justify-between gap-2 rounded-lg border border-neutral-200 bg-white px-2.5 py-1.5 text-xs text-neutral-500 transition-colors hover:border-neutral-300 hover:text-neutral-800 focus-visible:outline-2 focus-visible:outline-blue-600 dark:border-neutral-800 dark:bg-neutral-950/60 dark:text-neutral-400 dark:hover:border-neutral-700 dark:hover:text-neutral-200"
               >
@@ -1355,8 +1379,8 @@ function SessionContent({
                   <SearchIcon className="size-3.5" />
                   <span>Search…</span>
                 </span>
-                <kbd className="rounded border border-neutral-200 bg-neutral-50 px-1 py-0.5 font-sans text-[10px] font-medium text-neutral-400 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-500">
-                  ⌘K
+                <kbd className="rounded border border-neutral-200 bg-neutral-50 px-1 py-0.5 font-sans text-[10px] font-medium text-neutral-400 pointer-coarse:hidden dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-500">
+                  {modShortcut("K")}
                 </kbd>
               </button>
               <div className="mt-1.5 flex flex-col gap-0.5">

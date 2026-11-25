@@ -1,5 +1,15 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { modShortcut } from "../platform";
 import {
   fetchAttachments,
   fetchChildren,
@@ -273,8 +283,9 @@ export function CommandPalette({
     };
   }, [open, offline, hasOpenAttachments, attachmentsFolder, queryClient]);
 
-  // Reset state and load local full-text cache whenever opened.
-  useEffect(() => {
+  // Reset state and focus the input in the same commit that opens the palette. A trigger that
+  // opens it with flushSync keeps focus() inside the user gesture, so iOS raises the keyboard.
+  useLayoutEffect(() => {
     if (!open) {
       return;
     }
@@ -284,6 +295,14 @@ export function CommandPalette({
     setSearchingDrive(false);
     setRecentIds(getRecentFileIds());
     setTreeVersion((v) => v + 1);
+    inputRef.current?.focus();
+  }, [open, initialQuery]);
+
+  // Load the local full-text cache whenever opened.
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
 
     let active = true;
     void Promise.all([readAllCachedFiles(), readAllPendingWrites()]).then(([files, pending]) => {
@@ -305,14 +324,8 @@ export function CommandPalette({
       setCachedFiles(Array.from(merged.values()));
     });
 
-    // Focus input immediately on open.
-    const focusTimer = window.setTimeout(() => {
-      inputRef.current?.focus();
-    }, 0);
-
     return () => {
       active = false;
-      window.clearTimeout(focusTimer);
     };
   }, [open, initialQuery]);
 
@@ -580,7 +593,7 @@ export function CommandPalette({
           id: "cmd:toggle-info-drawer",
           label: "Toggle Info Drawer",
           keywords: "outline stats words properties frontmatter details panel",
-          badge: "⌘⇧I",
+          badge: modShortcut("⇧I"),
           icon: <PanelRightIcon className="size-4" />,
           onSelect: () => runAndClose(() => toggleViewPref("infoDrawerOpen")),
         },
@@ -635,7 +648,7 @@ export function CommandPalette({
       id: "cmd:toggle-sidebar",
       label: sidebarCollapsed ? "Show sidebar" : "Hide sidebar",
       keywords: "toggle sidebar panel navigation zen",
-      badge: "⌘\\",
+      badge: modShortcut("\\"),
       icon: <PanelLeftIcon className="size-4" />,
       quick: true,
       onSelect: () => runAndClose(onToggleSidebar),
@@ -1457,7 +1470,7 @@ export function CommandPalette({
             <span>&gt; Commands</span>
             <span># Headings</span>
           </div>
-          <span>⌘K</span>
+          <span>{modShortcut("K")}</span>
         </div>
       </div>
     </div>

@@ -190,6 +190,55 @@ describe("Command Palette (Cmd+K)", () => {
     ).toBeInTheDocument();
   });
 
+  it("sidebar search trigger: focuses the palette input in the click, forwards a typed key, labels the shortcut", async () => {
+    server.use(
+      http.get("/api/session", () => HttpResponse.json({ email: "owner@example.com" })),
+      http.get("/api/root", () => HttpResponse.json(node("root-id", "Notes", "folder"))),
+      http.get("/api/folders/root-id/children", () => HttpResponse.json({ nodes: [] })),
+      http.get("/api/search", () => HttpResponse.json({ results: [] })),
+    );
+
+    render(<App />);
+
+    const sidebar = await screen.findByRole("complementary", { name: "Sidebar" });
+    const trigger = within(sidebar).getByRole("button", { name: "Search notes and commands" });
+    // jsdom reports a Linux user agent, so the hint is spelled out and hidden on touch-only screens.
+    const hint = within(trigger).getByText("Ctrl+K");
+    expect(hint).toHaveClass("pointer-coarse:hidden");
+    expect(trigger).toHaveAttribute("aria-keyshortcuts", "Control+K");
+
+    // iOS only raises the keyboard when focus() runs inside the tap, so no timers here.
+    fireEvent.click(trigger);
+    const dialog = screen.getByRole("dialog", { name: "Command palette" });
+    const input = within(dialog).getByRole("combobox", { name: "Search notes and commands" });
+    expect(input).toHaveFocus();
+
+    fireEvent.keyDown(input, { key: "Escape" });
+    await vi.waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Command palette" })).not.toBeInTheDocument();
+    });
+
+    // A printable key typed on the focused trigger opens the palette with that key as the query.
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: "r" });
+    const reopened = screen.getByRole("dialog", { name: "Command palette" });
+    const reopenedInput = within(reopened).getByRole("combobox", {
+      name: "Search notes and commands",
+    });
+    expect(reopenedInput).toHaveValue("r");
+    expect(reopenedInput).toHaveFocus();
+    expect((reopenedInput as HTMLInputElement).selectionStart).toBe(1);
+
+    // Modifier chords and Space keep their usual meaning.
+    fireEvent.keyDown(reopenedInput, { key: "Escape" });
+    await vi.waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Command palette" })).not.toBeInTheDocument();
+    });
+    fireEvent.keyDown(trigger, { key: "c", metaKey: true });
+    fireEvent.keyDown(trigger, { key: " " });
+    expect(screen.queryByRole("dialog", { name: "Command palette" })).not.toBeInTheDocument();
+  });
+
   it("merges local full-text snippets from IndexedDB with remote Google Drive /api/search hits", async () => {
     await writeCachedFile("a-id", "# Alpha\n\nThis note mentions quantum computing.\n", '"e-1"');
 
