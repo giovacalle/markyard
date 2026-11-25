@@ -10,6 +10,7 @@ Self-hosted Markdown notes PWA backed by Google Drive, served by a TypeScript + 
   - Saves use Google Drive v2 `If-Match` ETags (ADR 0002).
   - Optional Cloudflare D1 (`STATE_DB`) is duck-typed and gracefully disabled when unbound.
 - **Web (`web/`)**:
+  - **ui-sdk first** (ADR 0004): build every interactive widget (select, menu, toggle, switch, list, popup, toast, ...) on the matching `@ui-sdk/react` component, starting from `web/node_modules/@ui-sdk/react/docs/llms.txt`. Plain buttons and standalone text inputs stay native; anything else off ui-sdk states why in the commit body.
   - Strict Content Security Policy (`web/public/_headers`): `default-src 'self'`. Zero JSX `style={...}`, zero `setAttribute("style", ...)`, zero inline `<style>` tags (use CSSOM `element.style.setProperty(...)` or `adoptedStyleSheets` when dynamic positioning/styles are required).
   - Keep `skipHtml` enabled in `Preview.tsx` and keep `web/public/sw.js` precaching lean.
 
