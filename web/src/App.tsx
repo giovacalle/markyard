@@ -1126,6 +1126,10 @@ function SessionContent({
       const note = vaultNoteList.find((item) => item.id === id);
       if (id !== openFileId) {
         handleOpenFile(id, note?.path);
+      } else {
+        // Already open behind a workspace panel (Tasks, Attachments): bring it back to the front.
+        setOpenPanel(null);
+        setMobileSidebarOpen(false);
       }
       if (options?.heading) {
         setPendingHeading((prev) => ({

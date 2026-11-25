@@ -158,6 +158,20 @@ describe("PKM in the app", () => {
     const tasks = await screen.findByRole("region", { name: "Tasks" });
     expect(await within(tasks).findByRole("checkbox", { name: "call #home" })).not.toBeChecked();
   });
+
+  it("leaves a workspace panel for the note it names even when that note is already open", async () => {
+    await writeCachedFile("a-id", "- [ ] call #home\n", '"etag-a-id"');
+    history.replaceState(null, "", "/?file=a-id");
+    serve({ "a-id": "- [ ] call #home\n" });
+    render(<App />);
+    await screen.findByRole("region", { name: "Preview" });
+    fireEvent.click(screen.getByRole("button", { name: "Tasks" }));
+    const tasks = await screen.findByRole("region", { name: "Tasks" });
+    const group = await within(tasks).findByRole("group", { name: "alpha" });
+    fireEvent.click(within(group).getByRole("button", { name: /alpha/ }));
+    expect(await screen.findByRole("region", { name: "Preview" })).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Tasks" })).toBeNull();
+  });
 });
 
 describe("heading links", () => {
