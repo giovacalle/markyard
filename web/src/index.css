@@ -25,6 +25,8 @@
   --cm-link: #2563eb;
   --cm-quote: #525252;
   --cm-active-line: rgba(0, 0, 0, 0.025);
+  --cm-popup-bg: #ffffff;
+  --cm-popup-border: #e5e5e5;
   --cm-yaml-key: #0369a1;
   --cm-yaml-string: #047857;
   --cm-yaml-atom: #b45309;
@@ -46,6 +48,8 @@
   --cm-link: #60a5fa;
   --cm-quote: #a3a3a3;
   --cm-active-line: rgba(255, 255, 255, 0.03);
+  --cm-popup-bg: #171717;
+  --cm-popup-border: #262626;
   --cm-yaml-key: #74d4ff;
   --cm-yaml-string: #5ee9b5;
   --cm-yaml-atom: #ffd230;
