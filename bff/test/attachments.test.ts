@@ -880,10 +880,69 @@ describe("GET /api/attachments", () => {
     const params = new URL(listCalls[0]!.url).searchParams;
     expect(params.get("q")).toBe("'att-folder' in parents and trashed=false");
     expect(params.get("fields")).toBe(
-      "nextPageToken,files(id,name,mimeType,modifiedTime,size,trashed)",
+      "nextPageToken,files(id,name,mimeType,modifiedTime,createdTime,size,trashed)",
     );
     expect(listCalls[0]!.headers.get("authorization")).toBe(`Bearer ${AT}`);
     expect(google.calls.every((c) => c.method === "GET")).toBe(true);
+  });
+
+  it("filters_by_upload_time_in_the_drive_query_and_answers_created_time", async () => {
+    const google = fake([
+      findAnswer([ATT_FOLDER]),
+      [
+        "GET",
+        "pageSize=1000",
+        listAnswer([
+          {
+            ...file("a", "a.png", "image/png", "2026-11-02T09:00:00.000Z", "3"),
+            createdTime: "2026-11-01T08:00:00.000Z",
+          },
+        ]),
+      ],
+    ]);
+    const res = await send(
+      get(
+        "/api/attachments?uploadedFrom=2026-11-01T00:00:00.000Z&uploadedBefore=2026-11-02T00:00:00Z",
+        { cookie: await signedInCookie() },
+      ),
+      { google },
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      folderId: "att-folder",
+      attachments: [
+        {
+          id: "a",
+          name: "a.png",
+          mimeType: "image/png",
+          size: 3,
+          modifiedTime: "2026-11-02T09:00:00.000Z",
+          createdTime: "2026-11-01T08:00:00.000Z",
+          url: "/api/files/a/blob",
+        },
+      ],
+    });
+    const listCall = google.calls.find((c) => c.url.includes("pageSize=1000"))!;
+    expect(new URL(listCall.url).searchParams.get("q")).toBe(
+      "'att-folder' in parents and trashed=false and createdTime >= '2026-11-01T00:00:00.000Z' and createdTime < '2026-11-02T00:00:00.000Z'",
+    );
+  });
+
+  it("rejects_a_malformed_upload_bound_with_400_and_no_drive_call", async () => {
+    for (const bad of [
+      "uploadedFrom=2026-11-01",
+      "uploadedBefore=2026-11-01T00:00:00Z'%20or%20name%20contains%20'x",
+      "uploadedFrom=2026-13-40T00:00:00Z",
+      "uploadedFrom=",
+    ]) {
+      const google = fake();
+      const res = await send(get(`/api/attachments?${bad}`, { cookie: await signedInCookie() }), {
+        google,
+      });
+      expect(res.status, bad).toBe(400);
+      expect((await jsonBody(res))["code"], bad).toBe("invalid_request");
+      expect(google.calls, bad).toHaveLength(0);
+    }
   });
 
   it("needs_a_session", async () => {

@@ -1,4 +1,5 @@
-// Image attachment use cases: `GET /api/attachments` lists the stored images newest first,
+// Image attachment use cases: `GET /api/attachments` lists the stored images newest first
+// (optionally only those uploaded in a time window),
 // `POST /api/attachments` stores an image in the attachments folder (`_attachments` unless the
 // request names another) directly under the account's vault root,
 // and `GET /api/files/{id}/blob` serves an image of the root folder's subtree inline. Only the strict image allowlist ever goes in or out (no SVG, no HTML).
@@ -12,9 +13,11 @@ import {
   blobUrl,
   imageMimeOf,
   newestAttachmentsFirst,
+  utcInstant,
   type Attachment,
   type AttachmentItem,
   type ImageMime,
+  type UploadedRange,
 } from "../domain/attachments.ts";
 import { FOLDER_MIME, isLiveFolder, isValidId } from "../domain/drive.ts";
 import {
@@ -47,6 +50,30 @@ export const attachmentsFolderName = (
   if (name === "") return Effect.succeed(ATTACHMENTS_FOLDER);
   const problem = folderNameProblem(name);
   return problem === undefined ? Effect.succeed(name) : Effect.fail(invalidRequest(problem));
+};
+
+export const BAD_UPLOADED_BOUND =
+  "uploadedFrom and uploadedBefore must be UTC instants like 2026-11-01T00:00:00.000Z.";
+
+/**
+ * The `[uploadedFrom, uploadedBefore)` window a request asked for; an absent parameter leaves that
+ * side open, anything else that is not a UTC RFC 3339 instant (even an empty one) is a 400.
+ */
+export const uploadedRange = (
+  from: string | null,
+  before: string | null,
+): Effect.Effect<UploadedRange, InvalidRequest> => {
+  const range: { from?: string; before?: string } = {};
+  for (const [key, raw] of [
+    ["from", from],
+    ["before", before],
+  ] as const) {
+    if (raw === null) continue;
+    const instant = utcInstant(raw);
+    if (instant === undefined) return Effect.fail(invalidRequest(BAD_UPLOADED_BOUND));
+    range[key] = instant;
+  }
+  return Effect.succeed(range);
 };
 
 /** Where attachments live: the vault root and the folder name directly under it. */
@@ -174,16 +201,17 @@ export interface AttachmentList {
 }
 
 /**
- * `GET /api/attachments`: the allowlisted images in `_attachments`, newest first. The folder is
- * looked up, never created: without one the list is empty.
+ * `GET /api/attachments`: the allowlisted images in `_attachments` uploaded within `range`, newest
+ * first. The folder is looked up, never created: without one the list is empty.
  */
 export const listAttachments = (
   accessToken: string,
   location: AttachmentsLocation,
+  range: UploadedRange = {},
 ): Effect.Effect<AttachmentList, Drive.DriveFailure, Drive.DriveR> =>
   Effect.gen(function* () {
     const folderId = yield* findAttachmentsFolder(accessToken, location);
     if (folderId === undefined) return { folderId: null, attachments: [] };
-    const items = yield* Drive.listAttachments(accessToken, folderId);
+    const items = yield* Drive.listAttachments(accessToken, folderId, range);
     return { folderId, attachments: newestAttachmentsFirst(items) };
   });

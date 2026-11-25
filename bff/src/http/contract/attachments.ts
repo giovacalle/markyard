@@ -1,5 +1,6 @@
-// `GET /api/attachments?folder=`: the images stored in the attachments folder (`_attachments`
-// unless `folder` names another), newest first. Uploading and
+// `GET /api/attachments?folder=&uploadedFrom=&uploadedBefore=`: the images stored in the
+// attachments folder (`_attachments` unless `folder` names another), newest first, optionally only
+// those uploaded in `[uploadedFrom, uploadedBefore)` (UTC RFC 3339 instants). Uploading and
 // serving the bytes stay plain-router routes (`routes/attachments.ts`).
 
 import * as HttpApiEndpoint from "effect/http-api/HttpApiEndpoint";
@@ -15,6 +16,7 @@ export const AttachmentItemSchema = Schema.Struct({
   mimeType: Schema.String,
   size: Schema.optionalKey(Schema.Number),
   modifiedTime: Schema.String,
+  createdTime: Schema.optionalKey(Schema.String),
   url: Schema.String,
 });
 

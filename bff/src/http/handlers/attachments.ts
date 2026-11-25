@@ -1,9 +1,13 @@
-// `GET /api/attachments?folder=`.
+// `GET /api/attachments?folder=&uploadedFrom=&uploadedBefore=`.
 
 import * as Effect from "effect/Effect";
 import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder";
 
-import { attachmentsFolderName, listAttachments } from "../../application/attachments.ts";
+import {
+  attachmentsFolderName,
+  listAttachments,
+  uploadedRange,
+} from "../../application/attachments.ts";
 import { Api } from "../api.ts";
 import { queryParam, vaultAccess } from "../request.ts";
 
@@ -12,7 +16,11 @@ export const AttachmentsListLive = HttpApiBuilder.group(Api, "attachments", (han
     Effect.gen(function* () {
       const { token, rootFolderId } = yield* vaultAccess;
       const folderName = yield* attachmentsFolderName(yield* queryParam("folder"));
-      return yield* listAttachments(token, { rootFolderId, folderName });
+      const range = yield* uploadedRange(
+        yield* queryParam("uploadedFrom"),
+        yield* queryParam("uploadedBefore"),
+      );
+      return yield* listAttachments(token, { rootFolderId, folderName }, range);
     }),
   ),
 );

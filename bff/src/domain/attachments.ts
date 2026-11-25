@@ -204,8 +204,29 @@ export interface AttachmentItem {
   /** Bytes; absent when Drive sent no valid size. */
   readonly size?: number;
   readonly modifiedTime: string;
+  /** When the file was uploaded to Drive; absent when Drive sent none. */
+  readonly createdTime?: string;
   readonly url: string;
 }
+
+/** A half-open `[from, before)` window on `createdTime`, as normalized RFC 3339 UTC instants. */
+export interface UploadedRange {
+  readonly from?: string;
+  readonly before?: string;
+}
+
+const UTC_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/;
+
+/**
+ * `raw` as a normalized `YYYY-MM-DDTHH:MM:SS.sssZ` instant, or `undefined` when it is not a UTC
+ * RFC 3339 instant. The result only ever holds digits, `-`, `:`, `.`, `T` and `Z`, so it is safe
+ * to splice into a Drive `q`.
+ */
+export const utcInstant = (raw: string): string | undefined => {
+  if (!UTC_INSTANT.test(raw)) return undefined;
+  const ms = Date.parse(raw);
+  return Number.isNaN(ms) ? undefined : new Date(ms).toISOString();
+};
 
 /**
  * The allowlisted images of a `files.list` page of the attachments folder, in Drive's order.
@@ -223,7 +244,7 @@ export const decodeAttachmentPage = (
   const items: Array<AttachmentItem> = [];
   for (const file of files) {
     if (!isObject(file)) return undefined;
-    const { id, name, mimeType, modifiedTime } = file;
+    const { id, name, mimeType, modifiedTime, createdTime } = file;
     if (!isString(id) || !isString(name) || !isString(mimeType) || !isString(modifiedTime))
       return undefined;
     const image = imageMimeOf(mimeType);
@@ -235,6 +256,7 @@ export const decodeAttachmentPage = (
       mimeType: image,
       ...(size === undefined || size === null ? {} : { size }),
       modifiedTime,
+      ...(isString(createdTime) ? { createdTime } : {}),
       url: blobUrl(id),
     });
   }

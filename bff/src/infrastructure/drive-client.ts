@@ -30,6 +30,7 @@ import {
   decodeCreatedBlob,
   type AttachmentItem,
   type BlobMeta,
+  type UploadedRange,
   type CreatedBlob,
 } from "../domain/attachments.ts";
 import { concatBytes, hex, utf8 } from "../domain/encoding.ts";
@@ -429,23 +430,29 @@ export const listChildFolders = (
 
 /**
  * v3 `files.list` for the live allowlisted images directly inside the attachments folder (with
- * their size), following `nextPageToken` to the end. `folderId` is spliced into `q`, so callers
- * must have checked it with `isValidId`.
+ * their size), following `nextPageToken` to the end, optionally only those created in `range`.
+ * `folderId` and the `range` bounds are spliced into `q`, so callers must have checked them with
+ * `isValidId` and `utcInstant`.
  */
 export const listAttachments = (
   accessToken: string,
   folderId: string,
+  range: UploadedRange = {},
 ): DriveEffect<ReadonlyArray<AttachmentItem>> =>
   Effect.gen(function* () {
     const base = yield* driveBase;
-    const q = `'${folderId}' in parents and trashed=false`;
+    const q = [
+      `'${folderId}' in parents and trashed=false`,
+      ...(range.from === undefined ? [] : [`createdTime >= '${range.from}'`]),
+      ...(range.before === undefined ? [] : [`createdTime < '${range.before}'`]),
+    ].join(" and ");
     const items: Array<AttachmentItem> = [];
     let pageToken: string | undefined;
     for (;;) {
       const fields: Array<[string, string]> = [
         ["q", q],
         ["pageSize", "1000"],
-        ["fields", "nextPageToken,files(id,name,mimeType,modifiedTime,size,trashed)"],
+        ["fields", "nextPageToken,files(id,name,mimeType,modifiedTime,createdTime,size,trashed)"],
       ];
       if (pageToken !== undefined) fields.push(["pageToken", pageToken]);
       const query = new URLSearchParams(fields).toString();
