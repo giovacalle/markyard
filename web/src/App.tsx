@@ -1556,23 +1556,22 @@ function SessionContent({
                         : "flex border-neutral-200 md:hidden dark:border-neutral-800"
                   }`}
                 >
-                  <div className="flex items-center gap-2">
+                  <div className="flex min-w-0 flex-1 items-center gap-2.5">
                     {mainSidebarToggle}
                     <span className="truncate text-sm font-semibold text-neutral-900 dark:text-neutral-100">
                       {rootTitle}
                     </span>
-                  </div>
-                  <div className="flex items-center gap-2">
                     {offlineMessage && (
                       <span
-                        className="text-xs font-medium text-red-700 dark:text-red-300"
+                        title={offlineMessage}
+                        className="min-w-0 truncate text-xs font-medium text-red-700 dark:text-red-300"
                         role="status"
                       >
                         {offlineMessage}
                       </span>
                     )}
-                    {headerControls}
                   </div>
+                  <div className="flex shrink-0 items-center gap-2">{headerControls}</div>
                 </header>
                 <EmptyWorkspace
                   rootFolder={rootQuery.data}

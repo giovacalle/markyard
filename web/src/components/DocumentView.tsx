@@ -483,7 +483,7 @@ function DocumentContent({
                   : "border-neutral-200 dark:border-neutral-800"
               }`}
             >
-              <div className="flex min-w-0 flex-1 items-center gap-2">
+              <div className="flex min-w-0 flex-1 items-center gap-2.5">
                 {leadingControl}
                 <div className="flex min-w-0 flex-col">
                   <h2 className="truncate text-sm font-semibold text-neutral-900 dark:text-neutral-100">
@@ -491,18 +491,19 @@ function DocumentContent({
                   </h2>
                   <FolderPath path={folderPath} onReveal={onRevealInTree} />
                 </div>
-              </div>
-              <div className="flex shrink-0 items-center gap-2">
                 {offline && offlineMessage && (
                   <span
                     role="status"
-                    className="text-xs font-medium text-red-700 dark:text-red-300"
+                    title={offlineMessage}
+                    className="min-w-0 truncate text-xs font-medium text-red-700 dark:text-red-300"
                   >
                     {offlineMessage}
                   </span>
                 )}
-                {trailingControl}
               </div>
+              {trailingControl && (
+                <div className="flex shrink-0 items-center gap-2">{trailingControl}</div>
+              )}
             </header>
           )}
           <div className="mx-auto w-full max-w-3xl px-4 py-8 sm:px-8">
@@ -1435,6 +1436,15 @@ function DocumentSession({
             <span className="shrink-0 text-xs text-neutral-500 dark:text-neutral-400" role="status">
               {statusText}
             </span>
+            {offline && offlineMessage && (
+              <span
+                title={offlineMessage}
+                className="min-w-0 truncate text-xs font-medium text-red-700 dark:text-red-300"
+                role="status"
+              >
+                {offlineMessage}
+              </span>
+            )}
             {readOnly && (
               <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-950/60 dark:text-amber-300">
                 <LockIcon className="size-3" />
@@ -1443,14 +1453,6 @@ function DocumentSession({
             )}
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            {offline && offlineMessage && (
-              <span
-                className="shrink-0 text-xs font-medium text-red-700 dark:text-red-300"
-                role="status"
-              >
-                {offlineMessage}
-              </span>
-            )}
             <CopyRichTextButton getText={() => draftRef.current} />
             <button
               type="button"
