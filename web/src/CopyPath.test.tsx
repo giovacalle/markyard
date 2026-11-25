@@ -72,13 +72,15 @@ describe("Copy path in the file tree", () => {
     await screen.findByRole("treeitem", { name: /drive-notes/ });
 
     fireEvent.click(screen.getByRole("button", { name: "Actions for drive-notes" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Copy path" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Copy path" }));
 
     expect(writeText).toHaveBeenCalledWith("0Projects/drive-notes");
-    expect(await screen.findByRole("button", { name: "Copied" })).toBeInTheDocument();
+    // Choosing the item keeps the menu open so the confirmation is visible inside it.
+    const menu = screen.getByRole("menu");
+    expect(await within(menu).findByRole("menuitem", { name: "Copied" })).toBeInTheDocument();
     // The confirmation is brief: the popover closes by itself.
     await vi.waitFor(() =>
-      expect(screen.queryByRole("button", { name: "Copied" })).not.toBeInTheDocument(),
+      expect(screen.queryByRole("menuitem", { name: "Copied" })).not.toBeInTheDocument(),
     );
   });
 
@@ -90,10 +92,10 @@ describe("Copy path in the file tree", () => {
     const readme = await screen.findByRole("treeitem", { name: /README\.md/ });
 
     fireEvent.contextMenu(within(readme).getByText("README.md"));
-    fireEvent.click(await screen.findByRole("button", { name: "Copy path" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Copy path" }));
 
     expect(writeText).toHaveBeenCalledWith("0Projects/drive-notes/README.md");
-    expect(await screen.findByRole("button", { name: "Copied" })).toBeInTheDocument();
+    expect(await screen.findByRole("menuitem", { name: "Copied" })).toBeInTheDocument();
   });
 
   it("copies a top-level note as just its name", async () => {
@@ -102,7 +104,7 @@ describe("Copy path in the file tree", () => {
     await screen.findByRole("treeitem", { name: /top\.md/ });
 
     fireEvent.click(screen.getByRole("button", { name: "Actions for top.md" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Copy path" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Copy path" }));
 
     expect(writeText).toHaveBeenCalledWith("top.md");
   });

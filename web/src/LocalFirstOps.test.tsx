@@ -331,7 +331,7 @@ describe("local-first structural vault operations (App integration)", () => {
 
     // 2. Create a note inside "Scratch".
     fireEvent.click(screen.getByRole("button", { name: "Actions for Scratch" }));
-    fireEvent.click(await screen.findByRole("button", { name: "New note" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "New note" }));
     const editor = await screen.findByRole("region", { name: "Editor" });
     expect(within(editor).getByRole("heading", { level: 2 })).toHaveTextContent("Untitled.md");
 
@@ -344,7 +344,7 @@ describe("local-first structural vault operations (App integration)", () => {
 
     // 4. Move the folder "Scratch" into "Archive" via Move dialog.
     fireEvent.click(screen.getByRole("button", { name: "Actions for Scratch" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Move to…" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Move to…" }));
     const moveDialog = await screen.findByRole("dialog", { name: "Move to…" });
     fireEvent.click(await within(moveDialog).findByRole("option", { name: /Archive/ }));
     await vi.waitFor(() =>
@@ -356,7 +356,7 @@ describe("local-first structural vault operations (App integration)", () => {
     expect(await screen.findByText("Scratch")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Actions for Scratch" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Delete" }));
     const delDialog = await screen.findByRole("dialog", { name: "Delete folder" });
     fireEvent.click(within(delDialog).getByRole("button", { name: "Delete folder" }));
 
@@ -409,7 +409,7 @@ describe("local-first structural vault operations (App integration)", () => {
 
     // Op 2: Move renamed.md into Work.
     fireEvent.click(screen.getByRole("button", { name: "Actions for renamed.md" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Move to…" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Move to…" }));
     const moveDialog = await screen.findByRole("dialog", { name: "Move to…" });
     fireEvent.click(await within(moveDialog).findByRole("option", { name: /Work/ }));
     await vi.waitFor(() =>
@@ -418,7 +418,7 @@ describe("local-first structural vault operations (App integration)", () => {
 
     // Op 3: Delete trash-me.md.
     fireEvent.click(screen.getByRole("button", { name: "Actions for trash-me.md" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Delete" }));
     const delDialog = await screen.findByRole("dialog", { name: "Delete note" });
     fireEvent.click(within(delDialog).getByRole("button", { name: "Delete" }));
     await vi.waitFor(() => expect(screen.queryByText("trash-me.md")).not.toBeInTheDocument());

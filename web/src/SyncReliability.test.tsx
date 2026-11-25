@@ -514,7 +514,7 @@ describe("sync reliability", () => {
     await replaceText(editor, "start", "unflushed edit");
 
     fireEvent.click(screen.getByRole("button", { name: "Actions for a.md" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Delete" }));
     const dialog = await screen.findByRole("dialog", { name: "Delete note" });
     fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
 
@@ -547,7 +547,7 @@ describe("sync reliability", () => {
     await screen.findByText("Projects");
     // Delete Projects without expanding it (sub-1/deep-note are only in IndexedDB).
     fireEvent.click(screen.getByRole("button", { name: "Actions for Projects" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Delete" }));
     const dialog = await screen.findByRole("dialog");
     fireEvent.click(within(dialog).getByRole("button", { name: "Delete folder" }));
 

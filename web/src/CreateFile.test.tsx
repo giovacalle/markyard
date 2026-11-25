@@ -191,7 +191,7 @@ describe("dashboard shell, instant create, inline rename, and delete", () => {
     await within(folder).findByRole("treeitem", { name: /plan\.md/ });
 
     fireEvent.click(within(folder).getByRole("button", { name: "Actions for Projects" }));
-    fireEvent.click(await screen.findByRole("button", { name: "New note" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "New note" }));
 
     const editor = await screen.findByRole("region", { name: "Editor" });
     expect(
@@ -360,7 +360,7 @@ describe("dashboard shell, instant create, inline rename, and delete", () => {
 
     // Open per-file popover and click Delete -> opens confirmation modal.
     fireEvent.click(screen.getByRole("button", { name: "Actions for alpha.md" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Delete" }));
 
     const dialog = await screen.findByRole("dialog", { name: "Delete note" });
     expect(dialog).toHaveTextContent("alpha.md");
@@ -372,7 +372,7 @@ describe("dashboard shell, instant create, inline rename, and delete", () => {
 
     // Confirm deletion removes the file from tree and closes the open editor.
     fireEvent.click(screen.getByRole("button", { name: "Actions for alpha.md" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Delete" }));
     const confirmDialog = await screen.findByRole("dialog", { name: "Delete note" });
     fireEvent.click(within(confirmDialog).getByRole("button", { name: "Delete" }));
 

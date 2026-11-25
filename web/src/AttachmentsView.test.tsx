@@ -390,10 +390,14 @@ describe("AttachmentsPanel", () => {
     renderPanel();
     await screen.findByRole("list", { name: "Attachment list" });
     fireEvent.click(screen.getByRole("button", { name: "Copy orphan.png" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Copy Markdown" }));
+    // jsdom has no ClipboardItem, so copying the image is unavailable but still discoverable.
+    const copyImageItem = await screen.findByRole("menuitem", { name: "Copy image" });
+    expect(copyImageItem).toHaveAttribute("aria-disabled", "true");
+    expect(copyImageItem).toHaveAttribute("title", "This browser cannot copy images");
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Copy Markdown" }));
     expect(writeText).toHaveBeenCalledWith("![orphan.png](/api/files/img-b/blob)");
     expect(await screen.findByText("Copied Markdown.")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Copy Markdown" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Copy Markdown" })).toBeNull();
     Reflect.deleteProperty(navigator, "clipboard");
   });
 
@@ -418,7 +422,7 @@ describe("AttachmentsPanel", () => {
       renderPanel();
       await screen.findByRole("list", { name: "Attachment list" });
       fireEvent.click(screen.getByRole("button", { name: "Copy orphan.png" }));
-      fireEvent.click(await screen.findByRole("button", { name: "Copy image" }));
+      fireEvent.click(await screen.findByRole("menuitem", { name: "Copy image" }));
       expect(write).toHaveBeenCalledTimes(1);
       const blob = await items[0]["image/png"];
       expect(new Uint8Array(await blob.arrayBuffer())).toEqual(png);

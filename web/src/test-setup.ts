@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto";
 import "@testing-library/jest-dom/vitest";
 import { cleanup, configure } from "@testing-library/react";
-import { afterEach } from "vite-plus/test";
+import { afterEach, beforeEach } from "vite-plus/test";
 import { clearLocalCache } from "./localCache";
 import { resetSettings } from "./settings";
 import { resetViewPrefs } from "./viewPrefs";
@@ -87,6 +87,18 @@ if (!("execCommand" in Document.prototype)) {
     value: () => false,
   });
 }
+
+// @ui-sdk/core menus call scrollIntoView() unguarded on the highlighted item; jsdom lacks it.
+// Installed before each test because some suites delete their own stub when they finish.
+beforeEach(() => {
+  if (!("scrollIntoView" in Element.prototype)) {
+    Object.defineProperty(Element.prototype, "scrollIntoView", {
+      configurable: true,
+      writable: true,
+      value: () => {},
+    });
+  }
+});
 
 afterEach(async () => {
   cleanup();

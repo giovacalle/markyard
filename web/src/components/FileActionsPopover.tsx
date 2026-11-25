@@ -1,8 +1,15 @@
-import { Popover, PopoverContent, PopoverTrigger } from "@ui-sdk/react/popover";
+import { Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger } from "@ui-sdk/react/menu";
 import { useState } from "react";
 import type { DriveNode } from "../api";
 import { CopyPathItem } from "./CopyPathItem";
 import { FolderInputIcon, MoreHorizontalIcon, TrashIcon } from "./icons";
+import {
+  ACTIONS_MENU_CONTENT_CLASS,
+  ACTIONS_MENU_TRIGGER_CLASS,
+  MENU_ITEM_CLASS,
+  MENU_ITEM_DESTRUCTIVE_CLASS,
+  MENU_SEPARATOR_CLASS,
+} from "./menuStyles";
 
 export function FileActionsPopover({
   file,
@@ -25,59 +32,51 @@ export function FileActionsPopover({
   const setOpen = onOpenChange ?? setUncontrolledOpen;
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger
-        type="button"
+    <Menu open={open} onOpenChange={(next) => setOpen(next)}>
+      <MenuTrigger
         aria-label={`Actions for ${file.name}`}
         title="More actions"
         onKeyDown={(event) => event.stopPropagation()}
         onClick={(event) => event.stopPropagation()}
-        className="rounded p-0.5 text-neutral-400 transition-colors hover:bg-neutral-300/70 hover:text-neutral-900 data-[open]:bg-neutral-300/70 data-[open]:text-neutral-900 dark:text-neutral-500 dark:hover:bg-neutral-700 dark:hover:text-neutral-100 dark:data-[open]:bg-neutral-700 dark:data-[open]:text-neutral-100"
+        className={ACTIONS_MENU_TRIGGER_CLASS}
       >
         <MoreHorizontalIcon className="size-3.5" />
-      </PopoverTrigger>
+      </MenuTrigger>
 
-      <PopoverContent
+      <MenuContent
         side="right"
         align="start"
         sideOffset={6}
         onKeyDown={(event) => event.stopPropagation()}
         onClick={(event) => event.stopPropagation()}
-        className="z-50 w-44 rounded-xl border border-neutral-200 bg-white p-1 text-neutral-900 shadow-lg outline-none dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-100"
+        className={ACTIONS_MENU_CONTENT_CLASS}
       >
         {onMove && (
-          <button
-            type="button"
-            onClick={(event) => {
-              event.stopPropagation();
-              setOpen(false);
+          <MenuItem
+            onSelect={() => {
               onMove(file);
             }}
-            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-medium text-neutral-700 transition-colors hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-neutral-800"
+            className={MENU_ITEM_CLASS}
           >
             <FolderInputIcon className="size-3.5 text-neutral-500 dark:text-neutral-400" />
             <span>Move to…</span>
-          </button>
+          </MenuItem>
         )}
         {getPath && <CopyPathItem getPath={getPath} onDone={() => setOpen(false)} />}
-        {(getPath || onMove) && onDelete && (
-          <div className="my-1 border-t border-neutral-200 dark:border-neutral-800" />
-        )}
+        {(getPath || onMove) && onDelete && <MenuSeparator className={MENU_SEPARATOR_CLASS} />}
         {onDelete && (
-          <button
-            type="button"
-            onClick={(event) => {
-              event.stopPropagation();
-              setOpen(false);
+          <MenuItem
+            destructive
+            onSelect={() => {
               onDelete(file);
             }}
-            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-medium text-red-600 transition-colors hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/60"
+            className={MENU_ITEM_DESTRUCTIVE_CLASS}
           >
             <TrashIcon className="size-3.5" />
             <span>Delete</span>
-          </button>
+          </MenuItem>
         )}
-      </PopoverContent>
-    </Popover>
+      </MenuContent>
+    </Menu>
   );
 }

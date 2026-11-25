@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { setupServer } from "msw/node";
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vite-plus/test";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vite-plus/test";
 import { App } from "./App";
 
 const server = setupServer();
@@ -96,7 +96,7 @@ describe("folder actions popover and dialogs", () => {
     await screen.findByText("Projects");
 
     fireEvent.click(screen.getByRole("button", { name: "Actions for Projects" }));
-    fireEvent.click(await screen.findByRole("button", { name: "New subfolder" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "New subfolder" }));
 
     const dialog = await screen.findByRole("dialog");
     expect(dialog).toHaveTextContent("Projects");
@@ -124,7 +124,7 @@ describe("folder actions popover and dialogs", () => {
     await screen.findByText("Projects");
 
     fireEvent.click(screen.getByRole("button", { name: "Actions for Projects" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Rename" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Rename" }));
 
     const dialog = await screen.findByRole("dialog");
     const input = within(dialog).getByLabelText("Folder name");
@@ -168,7 +168,7 @@ describe("folder actions popover and dialogs", () => {
 
     // Open folder popover -> Delete -> Cancel keeps everything intact.
     fireEvent.click(screen.getByRole("button", { name: "Actions for Projects" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Delete" }));
     let dialog = await screen.findByRole("dialog");
     expect(dialog).toHaveTextContent("All notes and subfolders inside Projects");
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
@@ -177,13 +177,48 @@ describe("folder actions popover and dialogs", () => {
 
     // Open folder popover -> Delete -> Confirm trashes folder & closes active note.
     fireEvent.click(screen.getByRole("button", { name: "Actions for Projects" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Delete" }));
     dialog = await screen.findByRole("dialog");
     fireEvent.click(within(dialog).getByRole("button", { name: "Delete folder" }));
 
     expect(await screen.findByText("No note selected")).toBeInTheDocument();
     expect(screen.queryByText("Projects")).not.toBeInTheDocument();
     expect(deletedIds).toEqual(["dir-1"]);
+  });
+
+  it("opens folder actions as a keyboard-navigable menu", async () => {
+    signedInWithRoot([node("dir-1", "Projects", "folder")]);
+
+    render(<App />);
+    await screen.findByText("Projects");
+
+    const trigger = screen.getByRole("button", { name: "Actions for Projects" });
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: "ArrowDown" });
+
+    const menu = await screen.findByRole("menu");
+    const items = within(menu).getAllByRole("menuitem");
+    expect(items.map((item) => item.textContent)).toEqual([
+      "New note",
+      "New subfolder",
+      "Rename",
+      "Move to…",
+      "Copy path",
+      "Delete",
+    ]);
+    for (const item of items) {
+      expect(item).toHaveAttribute("data-slot", "menu-item");
+    }
+    expect(within(menu).getByRole("separator")).toBeInTheDocument();
+
+    await vi.waitFor(() => expect(items[0]).toHaveAttribute("data-highlighted"));
+    fireEvent.keyDown(document.activeElement ?? menu, { key: "ArrowDown" });
+    await vi.waitFor(() => expect(items[1]).toHaveAttribute("data-highlighted"));
+    expect(items[0]).not.toHaveAttribute("data-highlighted");
+
+    fireEvent.keyDown(document.activeElement ?? menu, { key: "Escape" });
+    await vi.waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+    expect(document.activeElement).toBe(trigger);
   });
 
   it("opens the actions popover on right-click for both folders and files", async () => {
@@ -198,14 +233,14 @@ describe("folder actions popover and dialogs", () => {
 
     // Right-click on folder opens the folder actions popover (including New note, New subfolder, Rename, Delete).
     fireEvent.contextMenu(folderLabel);
-    expect(await screen.findByRole("button", { name: "New note" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "New subfolder" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Rename" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Delete" })).toBeInTheDocument();
+    expect(await screen.findByRole("menuitem", { name: "New note" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "New subfolder" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Rename" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Delete" })).toBeInTheDocument();
 
     // Right-click on file switches the popover to the file actions popover.
     fireEvent.contextMenu(fileLabel);
-    expect(await screen.findByRole("button", { name: "Delete" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "New subfolder" })).not.toBeInTheDocument();
+    expect(await screen.findByRole("menuitem", { name: "Delete" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "New subfolder" })).not.toBeInTheDocument();
   });
 });

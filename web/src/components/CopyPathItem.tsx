@@ -1,11 +1,13 @@
+import { MenuItem } from "@ui-sdk/react/menu";
 import { useEffect, useRef, useState } from "react";
 import { CheckIcon, CopyIcon } from "./icons";
+import { MENU_ITEM_CLASS } from "./menuStyles";
 
 const CONFIRM_MS = 900;
 
 /**
- * "Copy path" row of a tree actions popover: writes the root-relative path to the clipboard, shows
- * "Copied" briefly, then closes the popover.
+ * "Copy path" item of a tree actions menu: writes the root-relative path to the clipboard, shows
+ * "Copied" briefly inside the still-open menu, then closes it via `onDone`.
  */
 export function CopyPathItem({
   getPath,
@@ -31,10 +33,9 @@ export function CopyPathItem({
   };
 
   return (
-    <button
-      type="button"
-      onClick={(event) => {
-        event.stopPropagation();
+    <MenuItem
+      closeOnSelect={false}
+      onSelect={() => {
         const path = getPath();
         if (path === null || navigator.clipboard?.writeText === undefined) {
           settle("failed");
@@ -45,7 +46,7 @@ export function CopyPathItem({
           () => settle("failed"),
         );
       }}
-      className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-medium text-neutral-700 transition-colors hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-neutral-800"
+      className={MENU_ITEM_CLASS}
     >
       {state === "copied" ? (
         <CheckIcon className="size-3.5 text-emerald-600 dark:text-emerald-400" />
@@ -55,6 +56,6 @@ export function CopyPathItem({
       <span aria-live="polite">
         {state === "copied" ? "Copied" : state === "failed" ? "Couldn’t copy" : "Copy path"}
       </span>
-    </button>
+    </MenuItem>
   );
 }

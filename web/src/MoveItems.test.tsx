@@ -107,7 +107,7 @@ function dataTransfer() {
 
 async function openMovePicker(name: string): Promise<HTMLElement> {
   fireEvent.click(screen.getByRole("button", { name: `Actions for ${name}` }));
-  fireEvent.click(await screen.findByRole("button", { name: "Move to…" }));
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Move to…" }));
   return screen.findByRole("dialog", { name: "Move to…" });
 }
 

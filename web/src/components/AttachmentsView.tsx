@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Popover, PopoverContent, PopoverTrigger } from "@ui-sdk/react/popover";
+import { Menu, MenuContent, MenuItem, MenuTrigger } from "@ui-sdk/react/menu";
 import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
 import { type AttachmentItem, describeError, fetchAttachments, type UploadedRange } from "../api";
 import { attachmentThumbUrl, attachmentUsage } from "../attachmentRefs";
@@ -14,6 +14,7 @@ import { noteStem } from "../wikilinks";
 import { attachmentsQueryKey, AttachmentThumb, DeleteAttachmentDialog } from "./AttachmentDialogs";
 import { AttachmentTagsEditor } from "./AttachmentTags";
 import { CloseIcon, CopyIcon, ImageIcon, TrashIcon } from "./icons";
+import { COPY_MENU_CONTENT_CLASS, MENU_ITEM_CLASS } from "./menuStyles";
 import { type DayRange, UploadDateFilter } from "./UploadDateFilter";
 
 const FEEDBACK_MS = 3_000;
@@ -95,9 +96,6 @@ export function attachmentMarkdown(attachment: Pick<AttachmentItem, "name" | "ur
 const OVERLAY_ACTION_CLASS =
   "inline-flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md border border-neutral-200/80 bg-white/90 text-neutral-600 shadow-sm backdrop-blur-sm transition-colors focus-visible:outline-2 focus-visible:outline-blue-600 dark:border-neutral-700/80 dark:bg-neutral-900/85 dark:text-neutral-300";
 
-const MENU_ITEM_CLASS =
-  "flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-medium text-neutral-700 transition-colors hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent dark:text-neutral-200 dark:hover:bg-neutral-800";
-
 /** The copy menu of a card: the image Markdown, or the original image itself. */
 function CopyMenu({
   attachment,
@@ -106,28 +104,19 @@ function CopyMenu({
   attachment: AttachmentItem;
   onFeedback: (message: string) => void;
 }) {
-  const [open, setOpen] = useState(false);
   const imageCopyable = canCopyImages();
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger
-        type="button"
+    <Menu>
+      <MenuTrigger
         aria-label={`Copy ${attachment.name}`}
         title="Copy"
         className={`${OVERLAY_ACTION_CLASS} hover:bg-white hover:text-neutral-900 data-[open]:bg-white data-[open]:text-neutral-900 dark:hover:bg-neutral-800 dark:hover:text-neutral-100 dark:data-[open]:bg-neutral-800 dark:data-[open]:text-neutral-100`}
       >
         <CopyIcon className="size-4" />
-      </PopoverTrigger>
-      <PopoverContent
-        side="top"
-        align="end"
-        sideOffset={6}
-        className="z-50 w-40 rounded-xl border border-neutral-200 bg-white p-1 text-neutral-900 shadow-lg outline-none dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-100"
-      >
-        <button
-          type="button"
-          onClick={() => {
-            setOpen(false);
+      </MenuTrigger>
+      <MenuContent side="top" align="end" sideOffset={6} className={COPY_MENU_CONTENT_CLASS}>
+        <MenuItem
+          onSelect={() => {
             void navigator.clipboard?.writeText(attachmentMarkdown(attachment)).then(
               () => onFeedback("Copied Markdown."),
               () => onFeedback("Unable to copy Markdown."),
@@ -137,13 +126,11 @@ function CopyMenu({
         >
           <CopyIcon className="size-3.5 text-neutral-500 dark:text-neutral-400" />
           <span>Copy Markdown</span>
-        </button>
-        <button
-          type="button"
+        </MenuItem>
+        <MenuItem
           disabled={!imageCopyable}
           title={imageCopyable ? undefined : "This browser cannot copy images"}
-          onClick={() => {
-            setOpen(false);
+          onSelect={() => {
             onFeedback("Copying image…");
             copyImage(attachment.url).then(
               () => onFeedback("Copied image."),
@@ -154,9 +141,9 @@ function CopyMenu({
         >
           <ImageIcon className="size-3.5 text-neutral-500 dark:text-neutral-400" />
           <span>Copy image</span>
-        </button>
-      </PopoverContent>
-    </Popover>
+        </MenuItem>
+      </MenuContent>
+    </Menu>
   );
 }
 
