@@ -8,6 +8,7 @@ import {
   TreeItemLabel,
   type TreeController,
 } from "@ui-sdk/react/tree";
+import { createMenuController, type MenuController } from "@ui-sdk/react/menu";
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { fetchChildren, fetchVaultIndex, type DriveNode } from "../api";
 import { readAllCachedFolders, writeCachedFolder } from "../localCache";
@@ -664,6 +665,18 @@ function Nodes({ nodes, parentId }: { nodes: DriveNode[]; parentId: string }) {
     flashId,
   } = useTreeContext();
   const duplicates = duplicateNames(nodes);
+  // One controller per row menu, so a right-click can open it with focus on
+  // the first item, as the ⋯ button does. Its payload is the row it opened
+  // from, where focus returns on close; the ⋯ button opens it without one.
+  const menus = useRef(new Map<string, MenuController<HTMLElement>>());
+  const menuFor = (id: string) => {
+    let menu = menus.current.get(id);
+    if (!menu) {
+      menu = createMenuController<HTMLElement>();
+      menus.current.set(id, menu);
+    }
+    return menu;
+  };
 
   return (
     <>
@@ -685,6 +698,23 @@ function Nodes({ nodes, parentId }: { nodes: DriveNode[]; parentId: string }) {
             branch={isFolder}
             disabled={node.kind === "other"}
             className="outline-none"
+            onContextMenu={(event) => {
+              // A nested row's event bubbles through its folder's item.
+              event.stopPropagation();
+              if (!hasPopover) {
+                return;
+              }
+              event.preventDefault();
+              // Shift+F10 and the context-menu key target the focused row;
+              // a right-click focuses it too, so the tree's tab stop follows.
+              const row = event.currentTarget;
+              row.focus({ preventScroll: true });
+              void menuFor(node.id).open({
+                focus: "first",
+                payload: row,
+                event: event.nativeEvent,
+              });
+            }}
           >
             <TreeItemLabel
               draggable={draggable || undefined}
@@ -734,14 +764,6 @@ function Nodes({ nodes, parentId }: { nodes: DriveNode[]; parentId: string }) {
                     }
                   : undefined
               }
-              onContextMenu={(event) => {
-                if (!hasPopover) {
-                  return;
-                }
-                event.preventDefault();
-                event.stopPropagation();
-                setOpenMenuId(node.id);
-              }}
               className="group flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-1.5 text-neutral-700 select-none hover:bg-neutral-200/60 [[role=treeitem]:focus-visible>&]:outline-2 [[role=treeitem]:focus-visible>&]:outline-blue-600 data-[selected]:bg-neutral-200/90 data-[selected]:font-medium data-[selected]:text-neutral-950 data-[disabled]:cursor-not-allowed data-[disabled]:text-neutral-400 data-[disabled]:hover:bg-transparent data-[dragging]:opacity-50 data-[drop-target]:bg-blue-100 data-[drop-target]:outline-2 data-[drop-target]:outline-blue-500 data-[reveal-flash]:motion-safe:animate-reveal-flash dark:text-neutral-300 dark:data-[drop-target]:bg-blue-950/60 dark:hover:bg-neutral-800/70 dark:data-[selected]:bg-neutral-800 dark:data-[selected]:text-neutral-50 dark:data-[disabled]:text-neutral-600"
             >
               {isFolder ? (
@@ -766,6 +788,8 @@ function Nodes({ nodes, parentId }: { nodes: DriveNode[]; parentId: string }) {
                 {isFolder && (
                   <FolderActionsPopover
                     folder={node}
+                    controller={menuFor(node.id)}
+                    finalFocus={() => menuFor(node.id).getPayload() ?? null}
                     open={menuOpen}
                     onOpenChange={(next) => setOpenMenuId(next ? node.id : null)}
                     onCreateNote={onCreateInFolder}
@@ -779,6 +803,8 @@ function Nodes({ nodes, parentId }: { nodes: DriveNode[]; parentId: string }) {
                 {node.kind === "markdown" && (
                   <FileActionsPopover
                     file={node}
+                    controller={menuFor(node.id)}
+                    finalFocus={() => menuFor(node.id).getPayload() ?? null}
                     open={menuOpen}
                     onOpenChange={(next) => setOpenMenuId(next ? node.id : null)}
                     onMove={onMove}

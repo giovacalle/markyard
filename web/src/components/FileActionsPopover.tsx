@@ -1,4 +1,12 @@
-import { Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger } from "@ui-sdk/react/menu";
+import {
+  Menu,
+  MenuContent,
+  type MenuController,
+  type MenuFinalFocus,
+  MenuItem,
+  MenuSeparator,
+  MenuTrigger,
+} from "@ui-sdk/react/menu";
 import { useState } from "react";
 import type { DriveNode } from "../api";
 import { CopyPathItem } from "./CopyPathItem";
@@ -13,6 +21,8 @@ import {
 
 export function FileActionsPopover({
   file,
+  controller,
+  finalFocus,
   open: controlledOpen,
   onOpenChange,
   onMove,
@@ -20,6 +30,10 @@ export function FileActionsPopover({
   getPath,
 }: {
   file: DriveNode;
+  /** Lets the tree open this menu from a right-click with focus on its first item. */
+  controller?: MenuController<HTMLElement>;
+  /** Where focus goes on close; the ⋯ button by default. */
+  finalFocus?: MenuFinalFocus;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
   onMove?: (file: DriveNode) => void;
@@ -32,7 +46,7 @@ export function FileActionsPopover({
   const setOpen = onOpenChange ?? setUncontrolledOpen;
 
   return (
-    <Menu open={open} onOpenChange={(next) => setOpen(next)}>
+    <Menu controller={controller} open={open} onOpenChange={(next) => setOpen(next)}>
       <MenuTrigger
         aria-label={`Actions for ${file.name}`}
         title="More actions"
@@ -47,6 +61,7 @@ export function FileActionsPopover({
         side="right"
         align="start"
         sideOffset={6}
+        finalFocus={finalFocus}
         onKeyDown={(event) => event.stopPropagation()}
         onClick={(event) => event.stopPropagation()}
         className={ACTIONS_MENU_CONTENT_CLASS}

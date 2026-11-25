@@ -1,4 +1,12 @@
-import { Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger } from "@ui-sdk/react/menu";
+import {
+  Menu,
+  MenuContent,
+  type MenuController,
+  type MenuFinalFocus,
+  MenuItem,
+  MenuSeparator,
+  MenuTrigger,
+} from "@ui-sdk/react/menu";
 import { useState } from "react";
 import type { DriveNode } from "../api";
 import { CopyPathItem } from "./CopyPathItem";
@@ -22,6 +30,8 @@ const ICON_CLASS = "size-3.5 text-neutral-500 dark:text-neutral-400";
 
 export function FolderActionsPopover({
   folder,
+  controller,
+  finalFocus,
   open: controlledOpen,
   onOpenChange,
   onCreateNote,
@@ -32,6 +42,10 @@ export function FolderActionsPopover({
   getPath,
 }: {
   folder: DriveNode;
+  /** Lets the tree open this menu from a right-click with focus on its first item. */
+  controller?: MenuController<HTMLElement>;
+  /** Where focus goes on close; the ⋯ button by default. */
+  finalFocus?: MenuFinalFocus;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
   onCreateNote?: (folder: DriveNode) => void;
@@ -47,7 +61,7 @@ export function FolderActionsPopover({
   const setOpen = onOpenChange ?? setUncontrolledOpen;
 
   return (
-    <Menu open={open} onOpenChange={(next) => setOpen(next)}>
+    <Menu controller={controller} open={open} onOpenChange={(next) => setOpen(next)}>
       <MenuTrigger
         aria-label={`Actions for ${folder.name}`}
         title="Folder actions"
@@ -62,6 +76,7 @@ export function FolderActionsPopover({
         side="right"
         align="start"
         sideOffset={6}
+        finalFocus={finalFocus}
         onKeyDown={(event) => event.stopPropagation()}
         onClick={(event) => event.stopPropagation()}
         className={ACTIONS_MENU_CONTENT_CLASS}

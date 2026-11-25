@@ -243,4 +243,56 @@ describe("folder actions popover and dialogs", () => {
     expect(await screen.findByRole("menuitem", { name: "Delete" })).toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: "New subfolder" })).not.toBeInTheDocument();
   });
+
+  it.each([
+    { name: "Projects", first: "New note", second: "New subfolder" },
+    { name: "readme.md", first: "Move to…", second: "Copy path" },
+  ])(
+    "moves focus into the $name right-click menu and returns it to the row on Escape",
+    async ({ name, first, second }) => {
+      signedInWithRoot([
+        node("dir-1", "Projects", "folder"),
+        node("file-1", "readme.md", "markdown"),
+      ]);
+
+      render(<App />);
+      const label = await screen.findByText(name);
+      const row = screen.getByRole("treeitem", { name: new RegExp(name) });
+
+      fireEvent.contextMenu(label);
+      const menu = await screen.findByRole("menu");
+      const firstItem = within(menu).getByRole("menuitem", { name: first });
+      await vi.waitFor(() => expect(document.activeElement).toBe(firstItem));
+      expect(firstItem).toHaveAttribute("data-highlighted");
+
+      fireEvent.keyDown(document.activeElement ?? menu, { key: "ArrowDown" });
+      const secondItem = within(menu).getByRole("menuitem", { name: second });
+      await vi.waitFor(() => expect(secondItem).toHaveAttribute("data-highlighted"));
+      expect(document.activeElement).toBe(secondItem);
+
+      fireEvent.keyDown(document.activeElement ?? menu, { key: "Escape" });
+      await vi.waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+      expect(document.activeElement).toBe(row);
+    },
+  );
+
+  it("opens the row menu from the keyboard (Shift+F10 or the context-menu key)", async () => {
+    signedInWithRoot([node("file-1", "readme.md", "markdown")]);
+
+    render(<App />);
+    await screen.findByText("readme.md");
+    const row = screen.getByRole("treeitem", { name: /readme\.md/ });
+    row.focus();
+
+    // Browsers turn Shift+F10 and the context-menu key into a `contextmenu`
+    // event on the focused element.
+    fireEvent.contextMenu(row);
+    const menu = await screen.findByRole("menu");
+    const firstItem = within(menu).getByRole("menuitem", { name: "Move to…" });
+    await vi.waitFor(() => expect(document.activeElement).toBe(firstItem));
+
+    fireEvent.keyDown(firstItem, { key: "Escape" });
+    await vi.waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+    expect(document.activeElement).toBe(row);
+  });
 });
