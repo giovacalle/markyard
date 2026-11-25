@@ -36,7 +36,7 @@ const NAV_CLASS =
   "inline-flex size-7 items-center justify-center rounded-md text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-neutral-900 data-[disabled]:pointer-events-none data-[disabled]:opacity-30 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100";
 
 const DAY_CLASS = [
-  "relative inline-flex size-8 cursor-pointer items-center justify-center rounded-md text-[13px] tabular-nums text-neutral-800 transition-colors outline-none hover:bg-neutral-100 focus-visible:ring-2 focus-visible:ring-blue-600 dark:text-neutral-200 dark:hover:bg-neutral-800",
+  "size-8 cursor-pointer rounded-md p-0 text-center align-middle text-[13px] tabular-nums text-neutral-800 transition-colors outline-none hover:bg-neutral-100 focus-visible:ring-2 focus-visible:ring-blue-600 dark:text-neutral-200 dark:hover:bg-neutral-800",
   "data-[today]:font-semibold data-[today]:text-blue-600 dark:data-[today]:text-blue-400",
   "data-[outside]:text-neutral-300 dark:data-[outside]:text-neutral-600",
   "data-[preview]:rounded-none data-[preview]:bg-blue-50 dark:data-[preview]:bg-blue-950/60",
@@ -46,7 +46,7 @@ const DAY_CLASS = [
 ].join(" ");
 
 const PRESET_CLASS =
-  "rounded-md px-2 py-1 text-left text-xs font-medium text-neutral-600 transition-colors hover:bg-neutral-100 hover:text-neutral-900 data-[selected]:bg-blue-50 data-[selected]:text-blue-700 dark:text-neutral-300 dark:hover:bg-neutral-800 dark:hover:text-neutral-100 dark:data-[selected]:bg-blue-950/60 dark:data-[selected]:text-blue-300";
+  "rounded-md px-2 py-1 text-left text-xs font-medium whitespace-nowrap text-neutral-600 transition-colors hover:bg-neutral-100 hover:text-neutral-900 data-[selected]:bg-blue-50 data-[selected]:text-blue-700 dark:text-neutral-300 dark:hover:bg-neutral-800 dark:hover:text-neutral-100 dark:data-[selected]:bg-blue-950/60 dark:data-[selected]:text-blue-300";
 
 /**
  * One field that opens a range calendar with presets for the upload-date filter. Days after today
@@ -140,7 +140,7 @@ export function UploadDateFilter({
               <ChevronIcon className="size-4" />
             </CalendarNext>
           </div>
-          <CalendarGrid className="border-collapse">
+          <CalendarGrid className="border-separate border-spacing-0">
             <CalendarWeekdays>
               {(index) => (
                 <CalendarWeekday

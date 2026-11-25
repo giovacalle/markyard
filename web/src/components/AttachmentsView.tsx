@@ -112,7 +112,7 @@ function CopyMenu({
         type="button"
         aria-label={`Copy ${attachment.name}`}
         title="Copy"
-        className={`${OVERLAY_ACTION_CLASS} hover:bg-white hover:text-neutral-900 data-[open]:bg-white data-[open]:text-neutral-900 dark:hover:bg-neutral-800 dark:hover:text-neutral-100 dark:data-[open]:bg-neutral-800`}
+        className={`${OVERLAY_ACTION_CLASS} hover:bg-white hover:text-neutral-900 data-[open]:bg-white data-[open]:text-neutral-900 dark:hover:bg-neutral-800 dark:hover:text-neutral-100 dark:data-[open]:bg-neutral-800 dark:data-[open]:text-neutral-100`}
       >
         <CopyIcon className="size-4" />
       </PopoverTrigger>
