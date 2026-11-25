@@ -771,6 +771,8 @@ function DocumentSession({
   const sessionEpochRef = useRef(syncQueue.sessionEpoch);
   const prevDiscardVersionRef = useRef(discardVersion);
   const canvasRef = useRef<HTMLDivElement>(null);
+  // Set when a margin mousedown ended editing, so the click that follows does not reopen it.
+  const swallowCanvasClickRef = useRef(false);
   const editorHandleRef = useRef<EditorHandle | null>(null);
   const startRenameRef = useRef<(() => void) | null>(null);
   const drawerRef = useRef<HTMLElement | null>(null);
@@ -1360,10 +1362,17 @@ function DocumentSession({
   }, [isPreview, onModeChange]);
 
   const handleCanvasMouseDown = (event: MouseEvent<HTMLDivElement>) => {
+    swallowCanvasClickRef.current = false;
     if (isPreview || event.button !== 0) {
       return;
     }
     if (isInteractiveTarget(event.target) || clickedInsideEditorContent(event)) {
+      return;
+    }
+    // The canvas itself, not the note column inside it: the margins around the note end editing.
+    if (event.target === event.currentTarget) {
+      swallowCanvasClickRef.current = true;
+      onModeChange("preview");
       return;
     }
     event.preventDefault();
@@ -1377,6 +1386,10 @@ function DocumentSession({
   };
 
   const handleCanvasClick = (event: MouseEvent<HTMLDivElement>) => {
+    if (swallowCanvasClickRef.current) {
+      swallowCanvasClickRef.current = false;
+      return;
+    }
     if (!isPreview || readOnly || event.button !== 0) {
       return;
     }
@@ -1490,7 +1503,10 @@ function DocumentSession({
             readOnly ? "" : "cursor-text"
           }`}
         >
-          <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col space-y-4">
+          <div
+            data-testid="editor-column"
+            className="mx-auto flex w-full max-w-3xl flex-1 flex-col space-y-4"
+          >
             {updatedToast && (
               <p
                 role="status"

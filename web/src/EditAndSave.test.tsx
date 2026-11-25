@@ -1064,11 +1064,32 @@ describe("edit and save", () => {
     });
 
     const focusSpy = vi.spyOn(view, "focus");
-    const canvas = within(editor).getByTestId("editor-canvas");
-    fireEvent.mouseDown(canvas, { button: 0 });
+    const column = within(editor).getByTestId("editor-column");
+    fireEvent.mouseDown(column, { button: 0 });
 
     expect(focusSpy).toHaveBeenCalledTimes(1);
     expect(view.state.selection.main.head).toBe("Hello world".length);
+  });
+
+  it("returns to Preview when clicking the margins beside the editor column", async () => {
+    history.replaceState(null, "", "/?file=doc-id");
+    signedInWithRoot();
+    server.use(
+      http.get("/api/files/:id/content", () => contentResponse("Hello world", '"etag-1"')),
+    );
+
+    render(<App />);
+    const editor = await enterEditor();
+    const canvas = within(editor).getByTestId("editor-canvas");
+    fireEvent.mouseDown(canvas, { button: 0 });
+    fireEvent.click(canvas, { button: 0 });
+
+    const preview = await screen.findByRole("region", { name: "Preview" });
+    expect(screen.queryByRole("region", { name: "Editor" })).toBeNull();
+
+    // A plain click on the margins of the rendered note still starts editing.
+    fireEvent.click(within(preview).getByTestId("editor-canvas"));
+    expect(await screen.findByRole("region", { name: "Editor" })).toBeInTheDocument();
   });
 
   it("keeps the editor mounted on 401 save while dirty, then switches to Sign in once reverted", async () => {
