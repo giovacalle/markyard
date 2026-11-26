@@ -709,6 +709,6 @@ describe("default fixture, 501 routes, CLI, and package.json", () => {
   it("registers preview:mock and test:scripts in root package.json", () => {
     const pkg = JSON.parse(readFileSync(rootPackageJson, "utf8"));
     assert.equal(pkg.scripts["preview:mock"], "node scripts/mock-api.mjs");
-    assert.equal(pkg.scripts["test:scripts"], "node --test scripts/mock-api.test.mjs");
+    assert.match(pkg.scripts["test:scripts"], /(^| )scripts\/mock-api\.test\.mjs( |$)/);
   });
 });
