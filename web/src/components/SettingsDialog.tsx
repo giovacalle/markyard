@@ -10,6 +10,7 @@ import { SegmentedControl, SegmentedControlItem } from "@ui-sdk/react/segmented-
 import { Switch, SwitchThumb } from "@ui-sdk/react/switch";
 import { Tabs, TabsList, TabsPanel, TabsTab, TabsTabIcon } from "@ui-sdk/react/tabs";
 import { type ReactNode, useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
+import { useCustomCssStatus } from "../customCss";
 import {
   type AppSettings,
   DEFAULT_SETTINGS,
@@ -22,7 +23,7 @@ import type { ThemePreference } from "../theme";
 import { setViewPref, useViewPrefs, type ViewPrefKey } from "../viewPrefs";
 import { ChevronIcon, CloseIcon } from "./icons";
 
-type FolderKey = "attachmentsFolder" | "dailyNotesFolder" | "templatesFolder";
+type FolderKey = "attachmentsFolder" | "dailyNotesFolder" | "templatesFolder" | "stylesFolder";
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   const id = useId();
@@ -349,6 +350,7 @@ function SettingsBody({
   onClearCache,
 }: Omit<Parameters<typeof SettingsDialog>[0], "open" | "onClose">) {
   const settings = useSettings();
+  const customCssStatus = useCustomCssStatus();
   const viewPrefs = useViewPrefs();
   const [confirmingClear, setConfirmingClear] = useState(false);
   const [clearing, setClearing] = useState(false);
@@ -561,8 +563,32 @@ function SettingsBody({
     </>
   );
 
+  const appearanceControls = (
+    <>
+      <Segmented label="Theme" value={theme} options={THEMES} onChange={onThemeChange} />
+      <SwitchRow
+        label="Custom CSS"
+        description="Apply css code blocks from notes in the styles folder."
+        checked={settings.customCss}
+        onChange={(customCss) => updateSettings({ customCss })}
+      />
+      <FolderField
+        settingKey="stylesFolder"
+        label="Styles folder"
+        placeholder={DEFAULT_SETTINGS.stylesFolder}
+        help="Root folder whose .md notes provide custom CSS (device-local)."
+      />
+      <p
+        data-testid="settings-custom-css-status"
+        className="text-xs text-neutral-500 dark:text-neutral-400"
+      >
+        {customCssStatus}
+      </p>
+    </>
+  );
+
   const content: Record<SectionValue, ReactNode> = {
-    appearance: <Segmented label="Theme" value={theme} options={THEMES} onChange={onThemeChange} />,
+    appearance: appearanceControls,
     editor: editorControls,
     vault: vaultControls,
     sync: syncControls,

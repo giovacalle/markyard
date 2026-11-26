@@ -7,7 +7,8 @@ import { App } from "./App";
 import { todayNoteName } from "./commandSearch";
 import { Preview } from "./components/Preview";
 import { SettingsDialog } from "./components/SettingsDialog";
-import { getSettings, updateSettings } from "./settings";
+import { getCustomCssSheet, resetCustomCssForTests } from "./customCss";
+import { getSettings, resetSettings, updateSettings } from "./settings";
 import { getViewPrefs } from "./viewPrefs";
 
 const server = setupServer();
@@ -104,7 +105,12 @@ const SECTIONS = ["Appearance", "Editor", "Vault", "Sync & Storage"];
 
 /** Every control, by the section it must live in. */
 const SECTION_CONTROLS: Record<string, ((dialog: HTMLElement) => HTMLElement | null)[]> = {
-  Appearance: [(d) => within(d).queryByRole("radiogroup", { name: "Theme" })],
+  Appearance: [
+    (d) => within(d).queryByRole("radiogroup", { name: "Theme" }),
+    (d) => within(d).queryByRole("switch", { name: "Custom CSS" }),
+    (d) => within(d).queryByLabelText("Styles folder"),
+    (d) => within(d).queryByTestId("settings-custom-css-status"),
+  ],
   Editor: [
     (d) => within(d).queryByRole("radiogroup", { name: "Default mode" }),
     (d) => within(d).queryByRole("switch", { name: "URL link previews" }),
@@ -441,6 +447,89 @@ describe("Settings dialog", () => {
     expect(await within(dialog).findByText("Local cache cleared.")).toBeInTheDocument();
     await vi.waitFor(() => expect(listings).toBe(2));
     expect(await screen.findByRole("treeitem", { name: /a\.md/ })).toBeInTheDocument();
+  });
+
+  it("controls custom CSS via the Appearance switch and Styles folder and shows all four status states", async () => {
+    vault({}, [node("a-id", "a.md", "markdown"), node("styles-dir", "_styles", "folder")]);
+    server.use(
+      http.get("/api/folders/styles-dir/children", () =>
+        HttpResponse.json({ nodes: [node("look-id", "look.md", "markdown")] }),
+      ),
+      http.get("/api/files/look-id/content", () =>
+        markdown("```css\n.markdown-preview h1 { color: rgb(255, 0, 0); }\n```", "e1"),
+      ),
+    );
+
+    const { unmount } = render(<App />);
+    await vi.waitFor(() => {
+      expect(getCustomCssSheet()!.cssRules.length).toBeGreaterThan(0);
+    });
+
+    let dialog = await openSettingsFromAccount();
+    expect(within(dialog).getByTestId("settings-custom-css-status")).toHaveTextContent(
+      "Loaded: look.md",
+    );
+
+    // Edit Styles folder and turn Custom CSS off: sheet empties and both persist across reload.
+    const stylesInput = within(dialog).getByLabelText("Styles folder");
+    expect(stylesInput).toHaveValue("_styles");
+    fireEvent.change(stylesInput, { target: { value: "MyStyles" } });
+    fireEvent.blur(stylesInput);
+    expect(getSettings().stylesFolder).toBe("MyStyles");
+    await vi.waitFor(() => {
+      expect(within(dialog).getByTestId("settings-custom-css-status")).toHaveTextContent(
+        "No style notes in MyStyles",
+      );
+    });
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Reset styles folder" }));
+    await vi.waitFor(() => {
+      expect(within(dialog).getByTestId("settings-custom-css-status")).toHaveTextContent(
+        "Loaded: look.md",
+      );
+    });
+
+    const toggle = within(dialog).getByRole("switch", { name: "Custom CSS" });
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+    expect(getSettings().customCss).toBe(false);
+    expect(within(dialog).getByTestId("settings-custom-css-status")).toHaveTextContent(
+      "Custom CSS is off",
+    );
+    await vi.waitFor(() => {
+      expect(getCustomCssSheet()!.cssRules.length).toBe(0);
+    });
+
+    fireEvent.change(stylesInput, { target: { value: "theme" } });
+    fireEvent.blur(stylesInput);
+    resetSettings({ keepStorage: true });
+    expect(getSettings()).toMatchObject({ customCss: false, stylesFolder: "theme" });
+    unmount();
+
+    // No style notes when _styles is absent in a listed root.
+    resetSettings();
+    server.resetHandlers();
+    vault();
+    const { unmount: unmountEmpty } = render(<App />);
+    await screen.findByRole("treeitem", { name: /a\.md/ });
+    dialog = await openSettingsFromAccount();
+    await vi.waitFor(() => {
+      expect(within(dialog).getByTestId("settings-custom-css-status")).toHaveTextContent(
+        "No style notes in _styles",
+      );
+    });
+    unmountEmpty();
+
+    // Disabled by ?nocss=1.
+    history.replaceState(null, "", "/?nocss=1");
+    resetCustomCssForTests();
+    render(<App />);
+    await screen.findByRole("treeitem", { name: /a\.md/ });
+    dialog = await openSettingsFromAccount();
+    expect(within(dialog).getByTestId("settings-custom-css-status")).toHaveTextContent(
+      "Disabled for this load by ?nocss=1",
+    );
   });
 });
 
