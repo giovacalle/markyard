@@ -540,7 +540,11 @@ export function AttachmentsPanel({
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
-      <section aria-label="Attachments" className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <section
+        data-region="attachments"
+        aria-label="Attachments"
+        className="flex min-h-0 min-w-0 flex-1 flex-col"
+      >
         <header className="flex min-h-14 shrink-0 flex-wrap items-center gap-2 border-b border-neutral-200 px-4 py-2 sm:px-6 dark:border-neutral-800">
           {header}
           <h2 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">

@@ -1355,6 +1355,7 @@ function SessionContent({
           )}
 
           <aside
+            data-region="sidebar"
             aria-label="Sidebar"
             hidden={sidebarCollapsed}
             className={`fixed inset-y-0 left-0 z-30 flex w-72 shrink-0 flex-col border-r border-neutral-200 bg-neutral-50 transition-transform dark:border-neutral-800 dark:bg-neutral-900 ${

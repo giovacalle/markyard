@@ -273,14 +273,19 @@ const MARKDOWN_HIGHLIGHT = HighlightStyle.define([
   { tag: t.strikethrough, textDecoration: "line-through", color: "var(--cm-muted, #737373)" },
   {
     tag: t.monospace,
-    fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+    fontFamily:
+      "var(--markyard-font-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace)",
     fontSize: "0.9em",
     backgroundColor: "var(--cm-code-bg, #f5f5f5)",
     color: "var(--cm-code-fg, #171717)",
     borderRadius: "4px",
     padding: "0.1em 0.3em",
   },
-  { tag: [t.link, t.url], color: "var(--cm-link, #2563eb)", textDecoration: "underline" },
+  {
+    tag: [t.link, t.url],
+    color: "var(--markyard-accent, var(--cm-link, #2563eb))",
+    textDecoration: "underline",
+  },
   { tag: t.quote, color: "var(--cm-quote, #525252)", fontStyle: "italic" },
   { tag: t.processingInstruction, color: "var(--cm-muted, #737373)" },
   { tag: t.propertyName, color: "var(--cm-yaml-key, #0369a1)" },
@@ -309,9 +314,9 @@ const EDITOR_THEME = EditorView.theme({
     backgroundColor: "var(--cm-bg, transparent)",
     color: "var(--cm-fg, #171717)",
     fontFamily:
-      'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-    fontSize: "0.9375rem",
-    lineHeight: "1.7",
+      'var(--markyard-font-text, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif)',
+    fontSize: "var(--markyard-text-size, 0.9375rem)",
+    lineHeight: "var(--markyard-line-height, 1.7)",
   },
   "&.cm-focused": {
     outline: "none",

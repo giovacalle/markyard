@@ -128,7 +128,7 @@ export function TasksPanel({
     "rounded-md border border-neutral-200 bg-white px-2 py-1 text-sm text-neutral-800 focus-visible:outline-2 focus-visible:outline-blue-600 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200";
 
   return (
-    <section aria-label="Tasks" className="flex min-h-0 flex-1 flex-col">
+    <section data-region="tasks" aria-label="Tasks" className="flex min-h-0 flex-1 flex-col">
       <header className="flex min-h-14 shrink-0 flex-wrap items-center gap-2 border-b border-neutral-200 px-4 py-2 sm:px-6 dark:border-neutral-800">
         {header}
         <h2 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Tasks</h2>

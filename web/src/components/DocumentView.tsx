@@ -527,9 +527,13 @@ function DocumentContent({
           onRetry={onRetry}
         />
       ) : (
-        <>
+        <div
+          data-region={mode === "preview" ? "preview" : "editor"}
+          className="flex min-h-0 min-w-0 flex-1 flex-col"
+        >
           {(leadingControl || trailingControl || offline) && (
             <header
+              data-region="note-header"
               data-offline={offline ? "true" : undefined}
               className={`flex min-h-14 shrink-0 items-center justify-between gap-3 border-b px-4 py-2 transition-colors sm:px-6 ${
                 offline
@@ -560,7 +564,7 @@ function DocumentContent({
               )}
             </header>
           )}
-          <div className="mx-auto w-full max-w-3xl px-4 py-8 sm:px-8">
+          <div className="mx-auto w-full max-w-[var(--markyard-text-width,48rem)] px-4 py-8 sm:px-8">
             {error ? (
               <DocumentError error={error} onRetry={() => onRetry(refetch)} />
             ) : (
@@ -569,7 +573,7 @@ function DocumentContent({
               </p>
             )}
           </div>
-        </>
+        </div>
       )}
     </section>
   );
@@ -1479,9 +1483,11 @@ function DocumentSession({
       <div
         ref={columnRef}
         data-slot="document-column"
+        data-region={isPreview ? "preview" : "editor"}
         className="flex min-h-0 min-w-0 flex-1 flex-col"
       >
         <header
+          data-region="note-header"
           data-offline={offline ? "true" : undefined}
           className={`flex min-h-14 shrink-0 flex-wrap items-center justify-between gap-3 border-b px-4 py-2 transition-colors sm:px-6 ${
             offline
@@ -1579,7 +1585,7 @@ function DocumentSession({
         >
           <div
             data-testid="editor-column"
-            className="mx-auto flex w-full max-w-3xl flex-1 flex-col space-y-4"
+            className="mx-auto flex w-full max-w-[var(--markyard-text-width,48rem)] flex-1 flex-col space-y-4"
           >
             {externalBanner && !isConflict(saveError) && (
               <div

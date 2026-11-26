@@ -306,7 +306,10 @@ export function SettingsDialog({
       }}
     >
       <DialogBackdrop className="fixed inset-0 z-40 bg-neutral-950/50 backdrop-blur-[1px]" />
-      <DialogContent className="fixed top-1/2 left-1/2 z-40 flex h-[min(36rem,calc(100dvh-2rem))] w-[min(48rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 flex-col rounded-xl border border-neutral-200 bg-white text-neutral-900 shadow-xl outline-none dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-100">
+      <DialogContent
+        data-region="settings"
+        className="fixed top-1/2 left-1/2 z-40 flex h-[min(36rem,calc(100dvh-2rem))] w-[min(48rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 flex-col rounded-xl border border-neutral-200 bg-white text-neutral-900 shadow-xl outline-none dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-100"
+      >
         <div className="flex items-start justify-between gap-3 border-b border-neutral-200 px-5 py-4 dark:border-neutral-800">
           <div className="space-y-0.5">
             <DialogTitle className="text-base font-semibold">Settings</DialogTitle>

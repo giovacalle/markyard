@@ -1316,6 +1316,7 @@ export function CommandPalette({
       {/* initialFocus="none": the layout effect above focuses the input inside the opening tap. */}
       <DialogContent
         initialFocus="none"
+        data-region="palette"
         aria-label="Command palette"
         className="fixed top-[12vh] left-1/2 z-50 flex w-[calc(100vw-1.5rem)] max-w-xl -translate-x-1/2 flex-col overflow-hidden rounded-xl border border-neutral-200 bg-white shadow-2xl outline-none sm:w-[calc(100vw-2rem)] dark:border-neutral-800 dark:bg-neutral-900"
       >
