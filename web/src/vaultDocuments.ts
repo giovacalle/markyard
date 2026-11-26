@@ -99,56 +99,113 @@ export function saveVaultDocument(syncQueue: SyncQueue, doc: VaultDocument, text
   syncQueue.enqueueSave(doc.id, text, doc.revision, doc.baseText);
 }
 
-/** Lists the root templates folder into the tree cache when it was never expanded. */
-async function loadTemplatesFolder(
-  queryClient: QueryClient,
-  folderName: string,
-  signal?: AbortSignal,
-): Promise<void> {
-  const root = queryClient.getQueryData<DriveNode>(["root"]);
-  const rootList = root && queryClient.getQueryData<DriveNode[]>(childrenKey(root.id));
-  const folder = rootList?.find(
-    (node) => node.kind === "folder" && isTemplatesFolder([node.name], folderName),
-  );
-  if (
-    folder === undefined ||
-    isLocalId(folder.id) ||
-    queryClient.getQueryData(childrenKey(folder.id)) !== undefined ||
-    (typeof navigator !== "undefined" && navigator.onLine === false)
-  ) {
-    return;
-  }
-  try {
-    const children = await fetchChildren(folder.id, signal);
-    queryClient.setQueryData(childrenKey(folder.id), children);
-    void writeCachedFolder(folder.id, children);
-  } catch {
-    // Offline or failing: answer the templates already known.
-  }
+export interface RootFolderNotesResult {
+  state: "known" | "unknown";
+  notes: TemplateNote[];
+}
+
+export interface ReadRootFolderNotesOptions {
+  signal?: AbortSignal;
+  /** File ids to fetch fresh from Drive even when a local copy exists (unless a write is pending). */
+  forceIds?: ReadonlySet<string>;
 }
 
 /**
- * The `.md` notes in the root templates folder (`folderName`, `Templates` by default), with their
- * text: the local copy when there is one, otherwise read from Drive (skipped offline or on failure).
+ * Reads every `.md` note in the root subfolder `folderName` (case-insensitive).
+ *
+ * `state` is `"known"` only when either (a) the root listing is loaded and the folder does not
+ * exist, or (b) the folder is listed and every `.md` note's text was obtained. Any unlisted root
+ * or folder, offline uncached note, or failed content fetch answers `"unknown"` so callers like
+ * custom CSS keep their cached output instead of wiping it.
  */
-export async function readTemplates(
+export async function readRootFolderNotes(
   queryClient: QueryClient,
-  signal?: AbortSignal,
-  folderName = "Templates",
-): Promise<TemplateNote[]> {
-  await loadTemplatesFolder(queryClient, folderName, signal);
-  const notes = vaultNotes(queryClient).filter((note) => isTemplatesFolder(note.path, folderName));
-  if (notes.length === 0) {
-    return [];
+  folderName: string,
+  options?: ReadRootFolderNotesOptions,
+): Promise<RootFolderNotesResult> {
+  const signal = options?.signal;
+  const forceIds = options?.forceIds;
+  const root = queryClient.getQueryData<DriveNode>(["root"]);
+  if (root === undefined) {
+    return { state: "unknown", notes: [] };
   }
-  const docs = new Map((await readVaultDocuments(queryClient)).map((doc) => [doc.id, doc]));
+  const rootList = queryClient.getQueryData<DriveNode[]>(childrenKey(root.id));
+  if (rootList === undefined) {
+    return { state: "unknown", notes: [] };
+  }
+  const folder = rootList.find(
+    (node) => node.kind === "folder" && isTemplatesFolder([node.name], folderName),
+  );
+  if (folder === undefined) {
+    return { state: "known", notes: [] };
+  }
+
+  const online = typeof navigator === "undefined" || navigator.onLine !== false;
+  let folderChildren = queryClient.getQueryData<DriveNode[]>(childrenKey(folder.id));
+  const needsForceListing =
+    forceIds !== undefined &&
+    forceIds.size > 0 &&
+    folderChildren !== undefined &&
+    Array.from(forceIds).some((id) => !folderChildren!.some((child) => child.id === id));
+
+  if ((folderChildren === undefined || needsForceListing) && !isLocalId(folder.id) && online) {
+    try {
+      const children = await fetchChildren(folder.id, signal);
+      queryClient.setQueryData(childrenKey(folder.id), children);
+      void writeCachedFolder(folder.id, children);
+      folderChildren = children;
+    } catch {
+      if (folderChildren === undefined) {
+        return { state: "unknown", notes: [] };
+      }
+    }
+  }
+
+  if (folderChildren === undefined) {
+    return { state: "unknown", notes: [] };
+  }
+
+  const notes = folderChildren.filter((node) => node.kind === "markdown");
+  if (notes.length === 0) {
+    return { state: "known", notes: [] };
+  }
+
+  const [files, pending] = await Promise.all([readAllCachedFiles(), readAllPendingWrites()]);
+  const cachedById = new Map(files.map((file) => [file.fileId, file]));
+  const pendingById = new Map(pending.map((write) => [write.fileId, write]));
+
   const results = await Promise.all(
     notes.map(async (note): Promise<TemplateNote | null> => {
-      const local = docs.get(note.id);
-      if (local !== undefined) {
-        return { id: note.id, name: note.name, text: local.text };
+      const live = queryClient.getQueryData<ContentData>(["files", note.id, "content"]);
+      const write = pendingById.get(note.id);
+      const cached = cachedById.get(note.id);
+      const localText = live?.text ?? write?.text ?? cached?.text;
+      const shouldForce =
+        forceIds?.has(note.id) === true && write === undefined && !isLocalId(note.id);
+
+      if (shouldForce) {
+        if (!online) {
+          return localText !== undefined ? { id: note.id, name: note.name, text: localText } : null;
+        }
+        try {
+          const remote = await fetchContent(note.id, signal);
+          if (live !== undefined) {
+            queryClient.setQueryData(["files", note.id, "content"], {
+              text: remote.text,
+              revision: remote.revision,
+            });
+          }
+          void writeCachedRemoteFile(note.id, remote.text, remote.revision);
+          return { id: note.id, name: note.name, text: remote.text };
+        } catch {
+          return localText !== undefined ? { id: note.id, name: note.name, text: localText } : null;
+        }
       }
-      if (isLocalId(note.id) || (typeof navigator !== "undefined" && navigator.onLine === false)) {
+
+      if (localText !== undefined) {
+        return { id: note.id, name: note.name, text: localText };
+      }
+      if (isLocalId(note.id) || !online) {
         return null;
       }
       try {
@@ -160,7 +217,23 @@ export async function readTemplates(
       }
     }),
   );
-  return results
-    .filter((template): template is TemplateNote => template !== null)
+
+  const missing = results.some((entry) => entry === null);
+  const resolved = results
+    .filter((entry): entry is TemplateNote => entry !== null)
     .sort((a, b) => a.name.localeCompare(b.name));
+  return { state: missing ? "unknown" : "known", notes: resolved };
+}
+
+/**
+ * The `.md` notes in the root templates folder (`folderName`, `Templates` by default), with their
+ * text: the local copy when there is one, otherwise read from Drive (skipped offline or on failure).
+ */
+export async function readTemplates(
+  queryClient: QueryClient,
+  signal?: AbortSignal,
+  folderName = "Templates",
+): Promise<TemplateNote[]> {
+  const result = await readRootFolderNotes(queryClient, folderName, { signal });
+  return result.notes;
 }

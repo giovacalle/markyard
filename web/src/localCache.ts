@@ -49,9 +49,24 @@ export interface CachedVaultState {
   updatedAt: number;
 }
 
-type MetaRow = CachedAccount | CachedChangesState | CachedVaultState;
+/** Compiled custom CSS cached across reloads for instant boot without unstyled flash. */
+export interface CachedCustomCss {
+  key: "customCss";
+  css: string;
+  notes: string[];
+  updatedAt: number;
+}
 
-const ACCOUNT_SCOPED_META_KEYS = ["changes", "vault"] as const;
+type MetaRow = CachedAccount | CachedChangesState | CachedVaultState | CachedCustomCss;
+
+const ACCOUNT_SCOPED_META_KEYS = ["changes", "vault", "customCss"] as const;
+
+let customCssCacheGeneration = 0;
+
+/** Monotonic generation token bumped on local/vault cache clears and account switches. */
+export function customCssCacheToken(): number {
+  return customCssCacheGeneration;
+}
 
 export interface CachedFolder {
   folderId: string;
@@ -223,6 +238,35 @@ export function readVaultState(): Promise<CachedVaultState | undefined> {
   );
 }
 
+export function readCachedCustomCss(): Promise<CachedCustomCss | undefined> {
+  return safe(
+    async (db) => (await db.meta.get("customCss")) as CachedCustomCss | undefined,
+    undefined,
+  );
+}
+
+export function writeCachedCustomCss(
+  row: { css: string; notes: readonly string[]; updatedAt?: number },
+  token: number,
+): Promise<void> {
+  if (token !== customCssCacheGeneration) {
+    return Promise.resolve();
+  }
+  return safe(async (db) => {
+    await db.transaction("rw", db.meta, async () => {
+      if (token !== customCssCacheGeneration) {
+        return;
+      }
+      await db.meta.put({
+        key: "customCss",
+        css: row.css,
+        notes: [...row.notes],
+        updatedAt: row.updatedAt ?? Date.now(),
+      });
+    });
+  }, undefined);
+}
+
 export function writeVaultState(state: Omit<CachedVaultState, "key" | "updatedAt">): Promise<void> {
   return safe(async (db) => {
     await db.transaction("rw", db.meta, async () => {
@@ -283,6 +327,7 @@ export function writeCachedSession(
     return db.transaction("rw", [db.meta, db.folders, db.files, db.outbox, db.ops], async () => {
       const existing = (await db.meta.get("account")) as CachedAccount | undefined;
       if (existing !== undefined && existing.email !== email) {
+        customCssCacheGeneration += 1;
         clearCloudStateStamp();
         resetSettings();
         await db.folders.clear();
@@ -698,6 +743,7 @@ export function discardPendingWrite(
  * cloud's state.
  */
 export function clearVaultCache(): Promise<void> {
+  customCssCacheGeneration += 1;
   clearCloudStateStamp();
   return safe(async (db) => {
     await db.transaction("rw", [db.meta, db.folders, db.files, db.outbox, db.ops], async () => {
@@ -716,6 +762,7 @@ export function clearVaultCache(): Promise<void> {
 
 /** Empties the local note cache, and deletes the attachment images cached on this device. */
 export function clearLocalCache(): Promise<void> {
+  customCssCacheGeneration += 1;
   clearCloudStateStamp();
   void clearCachedImages();
   return safe(async (db) => {

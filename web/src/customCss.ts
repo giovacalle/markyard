@@ -1,5 +1,12 @@
-import { useSyncExternalStore } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import type { DriveNode } from "./api";
+import { useOptionalDriveChanges } from "./driveChanges";
+import { customCssCacheToken, writeCachedCustomCss } from "./localCache";
 import { type AppSettings, getSettings, useSettings } from "./settings";
+import { isTemplatesFolder } from "./templates";
+import { childrenKey } from "./treeCache";
+import { readRootFolderNotes } from "./vaultDocuments";
 
 // Applies user-authored CSS from vault notes under the strict CSP (default-src 'self'):
 // one shared constructable CSSStyleSheet updated via replaceSync() and appended last to
@@ -229,4 +236,340 @@ export function resetCustomCssForTests(): void {
   loadedNotes = [];
   cachedNoCss = null;
   emitStatus();
+}
+
+/**
+ * Keeps the shared custom CSS stylesheet synchronized with the vault's styles folder, live edits,
+ * Drive change polls, folder setting changes, vault switches, and account sign-out/unmount.
+ */
+export function useCustomCss({
+  accountEmail,
+  signedOut,
+}: {
+  accountEmail: string | undefined;
+  signedOut: boolean;
+}): void {
+  const queryClient = useQueryClient();
+  const driveChanges = useOptionalDriveChanges();
+  const settings = useSettings();
+  const disabledByQuery = customCssDisabledByQuery();
+  const enabled = !disabledByQuery && settings.customCss && !signedOut;
+
+  const lastAccountRef = useRef<string | null>(null);
+  const [accountEpoch, setAccountEpoch] = useState(0);
+  const lastRootIdRef = useRef<string | null>(null);
+  const rootEpochRef = useRef(0);
+  const stylesFolderIdRef = useRef<string | null>(null);
+  const stylesNoteIdsRef = useRef<Set<string>>(new Set());
+  const lastModifiedByIdRef = useRef<Map<string, string>>(new Map());
+  const lastForcedTimeByIdRef = useRef<Map<string, string>>(new Map());
+  const seenChangesRef = useRef<Set<string>>(new Set());
+  const seenHydratedRef = useRef(false);
+
+  // Clear the shared sheet when the session tree unmounts.
+  useEffect(() => {
+    return () => {
+      setCustomCss("");
+      setCustomCssLoadedNotes([]);
+    };
+  }, []);
+
+  // Re-key on account switch without clearing during initial undefined -> email resolution.
+  useEffect(() => {
+    if (accountEmail === undefined) {
+      return;
+    }
+    if (lastAccountRef.current !== null && lastAccountRef.current !== accountEmail) {
+      rootEpochRef.current += 1;
+      lastRootIdRef.current = null;
+      stylesFolderIdRef.current = null;
+      stylesNoteIdsRef.current = new Set();
+      lastModifiedByIdRef.current = new Map();
+      lastForcedTimeByIdRef.current = new Map();
+      seenChangesRef.current = new Set();
+      seenHydratedRef.current = false;
+      setCustomCss("");
+      setCustomCssLoadedNotes([]);
+      setAccountEpoch((value) => value + 1);
+    }
+    lastAccountRef.current = accountEmail;
+  }, [accountEmail]);
+
+  useEffect(() => {
+    if (!enabled) {
+      setCustomCss("");
+      setCustomCssLoadedNotes([]);
+      if (signedOut) {
+        rootEpochRef.current += 1;
+        lastRootIdRef.current = null;
+        stylesFolderIdRef.current = null;
+        stylesNoteIdsRef.current = new Set();
+        lastModifiedByIdRef.current = new Map();
+        lastForcedTimeByIdRef.current = new Map();
+        seenChangesRef.current = new Set();
+        seenHydratedRef.current = false;
+      }
+      return;
+    }
+
+    let cancelled = false;
+    let activeController: AbortController | null = null;
+    let inFlight = false;
+    let needsFollowUp = false;
+    let scheduled = false;
+    let ignoreSelfQueryUpdates = false;
+    const pendingForceIds = new Set<string>();
+    const folderName = settings.stylesFolder;
+
+    stylesFolderIdRef.current = null;
+    stylesNoteIdsRef.current = new Set();
+    lastModifiedByIdRef.current = new Map();
+    lastForcedTimeByIdRef.current = new Map();
+
+    const seedSeenChanges = () => {
+      if (driveChanges === null) {
+        return;
+      }
+      seenHydratedRef.current = false;
+      seenChangesRef.current = new Set();
+      const seedEpoch = rootEpochRef.current;
+      void driveChanges.hydrate().then(() => {
+        if (cancelled || seedEpoch !== rootEpochRef.current) {
+          return;
+        }
+        for (const entry of driveChanges.getSnapshot().recent) {
+          seenChangesRef.current.add(`${entry.id}:${entry.time}`);
+        }
+        seenHydratedRef.current = true;
+      });
+    };
+
+    const syncFolderRefs = (detectModifiedChanges: boolean): void => {
+      const root = queryClient.getQueryData<DriveNode>(["root"]);
+      if (root === undefined) {
+        return;
+      }
+      const rootList = queryClient.getQueryData<DriveNode[]>(childrenKey(root.id));
+      if (rootList === undefined) {
+        return;
+      }
+      const folder = rootList.find(
+        (node) => node.kind === "folder" && isTemplatesFolder([node.name], folderName),
+      );
+      if (folder === undefined) {
+        stylesFolderIdRef.current = null;
+        stylesNoteIdsRef.current = new Set();
+        lastModifiedByIdRef.current = new Map();
+        return;
+      }
+      if (stylesFolderIdRef.current !== folder.id) {
+        stylesFolderIdRef.current = folder.id;
+        stylesNoteIdsRef.current = new Set();
+        lastModifiedByIdRef.current = new Map();
+      }
+      const children = queryClient.getQueryData<DriveNode[]>(childrenKey(folder.id));
+      if (children === undefined) {
+        return;
+      }
+      const nextIds = new Set<string>();
+      const nextModified = new Map<string, string>();
+      for (const child of children) {
+        if (child.kind !== "markdown") {
+          continue;
+        }
+        nextIds.add(child.id);
+        nextModified.set(child.id, child.modifiedTime);
+        if (detectModifiedChanges) {
+          const prevModified = lastModifiedByIdRef.current.get(child.id);
+          const lastForcedTime = lastForcedTimeByIdRef.current.get(child.id);
+          if (
+            prevModified !== undefined &&
+            prevModified !== child.modifiedTime &&
+            (lastForcedTime === undefined || child.modifiedTime > lastForcedTime)
+          ) {
+            pendingForceIds.add(child.id);
+          }
+        }
+      }
+      stylesNoteIdsRef.current = nextIds;
+      lastModifiedByIdRef.current = nextModified;
+    };
+
+    const handleRootCheck = (): boolean => {
+      const root = queryClient.getQueryData<DriveNode>(["root"]);
+      if (root === undefined) {
+        return false;
+      }
+      if (lastRootIdRef.current !== null && lastRootIdRef.current !== root.id) {
+        lastRootIdRef.current = root.id;
+        rootEpochRef.current += 1;
+        activeController?.abort();
+        activeController = null;
+        stylesFolderIdRef.current = null;
+        stylesNoteIdsRef.current = new Set();
+        lastModifiedByIdRef.current = new Map();
+        lastForcedTimeByIdRef.current = new Map();
+        pendingForceIds.clear();
+        setCustomCss("");
+        setCustomCssLoadedNotes([]);
+        seedSeenChanges();
+        return true;
+      }
+      lastRootIdRef.current = root.id;
+      return true;
+    };
+
+    const runRecompute = async () => {
+      if (cancelled) {
+        return;
+      }
+      if (inFlight) {
+        needsFollowUp = true;
+        return;
+      }
+      inFlight = true;
+      needsFollowUp = false;
+
+      const forceIds = pendingForceIds.size > 0 ? new Set(pendingForceIds) : undefined;
+      pendingForceIds.clear();
+
+      const controller = new AbortController();
+      activeController = controller;
+      const epoch = rootEpochRef.current;
+      const token = customCssCacheToken();
+
+      try {
+        ignoreSelfQueryUpdates = true;
+        const result = await readRootFolderNotes(queryClient, folderName, {
+          signal: controller.signal,
+          forceIds,
+        });
+        ignoreSelfQueryUpdates = false;
+        if (cancelled || epoch !== rootEpochRef.current) {
+          return;
+        }
+        syncFolderRefs(false);
+        if (result.state === "unknown") {
+          return;
+        }
+        if (token !== customCssCacheToken()) {
+          needsFollowUp = false;
+          return;
+        }
+        const { css, noteNames } = compileCustomCssWithNotes(result.notes);
+        setCustomCss(css);
+        setCustomCssLoadedNotes(noteNames);
+        await writeCachedCustomCss({ css, notes: noteNames }, token);
+      } finally {
+        ignoreSelfQueryUpdates = false;
+        if (activeController === controller) {
+          activeController = null;
+        }
+        inFlight = false;
+        if (
+          !cancelled &&
+          token === customCssCacheToken() &&
+          (needsFollowUp || pendingForceIds.size > 0)
+        ) {
+          needsFollowUp = false;
+          scheduleRecompute();
+        } else {
+          needsFollowUp = false;
+        }
+      }
+    };
+
+    const scheduleRecompute = () => {
+      if (cancelled || scheduled) {
+        return;
+      }
+      scheduled = true;
+      queueMicrotask(() => {
+        scheduled = false;
+        void runRecompute();
+      });
+    };
+
+    seedSeenChanges();
+    if (handleRootCheck()) {
+      syncFolderRefs(false);
+      scheduleRecompute();
+    }
+
+    const unsubscribeQuery = queryClient.getQueryCache().subscribe((event) => {
+      if (cancelled || event.type !== "updated") {
+        return;
+      }
+      const key = event.query.queryKey;
+      if (key[0] === "root") {
+        if (handleRootCheck()) {
+          syncFolderRefs(false);
+          scheduleRecompute();
+        }
+        return;
+      }
+      if (key[0] === "folders" && key[2] === "children") {
+        const folderId = key[1];
+        const root = queryClient.getQueryData<DriveNode>(["root"]);
+        if (root !== undefined && folderId === root.id) {
+          handleRootCheck();
+          syncFolderRefs(false);
+          scheduleRecompute();
+          return;
+        }
+        if (stylesFolderIdRef.current !== null && folderId === stylesFolderIdRef.current) {
+          if (ignoreSelfQueryUpdates) {
+            return;
+          }
+          syncFolderRefs(true);
+          scheduleRecompute();
+        }
+        return;
+      }
+      if (
+        key[0] === "files" &&
+        key[2] === "content" &&
+        typeof key[1] === "string" &&
+        stylesNoteIdsRef.current.has(key[1])
+      ) {
+        if (ignoreSelfQueryUpdates) {
+          return;
+        }
+        scheduleRecompute();
+      }
+    });
+
+    const unsubscribeChanges =
+      driveChanges?.subscribe(() => {
+        if (cancelled || !seenHydratedRef.current) {
+          return;
+        }
+        let relevant = false;
+        for (const entry of driveChanges.getSnapshot().recent) {
+          const seenKey = `${entry.id}:${entry.time}`;
+          if (seenChangesRef.current.has(seenKey)) {
+            continue;
+          }
+          seenChangesRef.current.add(seenKey);
+          const inStylesFolder =
+            stylesNoteIdsRef.current.has(entry.id) ||
+            (stylesFolderIdRef.current !== null && entry.parentId === stylesFolderIdRef.current);
+          if (inStylesFolder) {
+            pendingForceIds.add(entry.id);
+            lastForcedTimeByIdRef.current.set(entry.id, entry.time);
+            relevant = true;
+          }
+        }
+        if (relevant) {
+          scheduleRecompute();
+        }
+      }) ?? null;
+
+    return () => {
+      cancelled = true;
+      activeController?.abort();
+      unsubscribeQuery();
+      unsubscribeChanges?.();
+    };
+  }, [queryClient, driveChanges, enabled, signedOut, settings.stylesFolder, accountEpoch]);
 }

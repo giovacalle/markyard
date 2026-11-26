@@ -41,6 +41,7 @@ import {
   todayNoteName,
 } from "./commandSearch";
 import { useCloudStateSync } from "./cloudState";
+import { setCustomCss, setCustomCssLoadedNotes, useCustomCss } from "./customCss";
 import { AccountPopover } from "./components/AccountPopover";
 import { CommandPalette, type FolderTarget } from "./components/CommandPalette";
 import { DeleteFileDialog } from "./components/DeleteFileDialog";
@@ -822,6 +823,8 @@ function SessionContent({
     forgetLastOpenFile();
     clearExpandedFolders();
     resetSettings();
+    setCustomCss("");
+    setCustomCssLoadedNotes([]);
     setPaletteOpen(false);
     setPaletteInitialQuery("");
     setHydrateState({ ready: true, cachedSession: null });
@@ -879,6 +882,11 @@ function SessionContent({
     enabled: data?.cloudSync === true && !isSignedOut && !isUnauthenticated(error),
     rootFolderId: rootQuery.data?.id,
     setTheme: onThemeChange,
+  });
+
+  useCustomCss({
+    accountEmail: session?.email,
+    signedOut: isSignedOut,
   });
 
   useEffect(() => {
