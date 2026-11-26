@@ -5,6 +5,7 @@ import { unifiedMergeView } from "@codemirror/merge";
 import { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { useEffect, useRef } from "react";
+import { adoptUserSheet } from "../customCss";
 
 const DIFF_THEME = EditorView.theme({
   "&": {
@@ -47,6 +48,7 @@ export function RevisionDiff({ current, revision }: { current: string; revision:
       parent: shadow,
       root: shadow,
     });
+    adoptUserSheet(shadow);
     return () => view.destroy();
   }, [current, revision]);
 

@@ -24,6 +24,7 @@ import { Toggle } from "@ui-sdk/react/toggle";
 import { Toolbar, ToolbarButton, ToolbarSeparator } from "@ui-sdk/react/toolbar";
 import { type ReactNode, type RefObject, useEffect, useRef, useState } from "react";
 import { ATTACHMENT_TYPES, uploadAttachment } from "../api";
+import { adoptUserSheet } from "../customCss";
 import { getSettings } from "../settings";
 import { type CompletionSources, pkmCompletions } from "../editorCompletion";
 import { focusMode, typewriterMode } from "../editorModes";
@@ -594,6 +595,7 @@ export function Editor({
     });
     const shadow = host.shadowRoot ?? host.attachShadow({ mode: "open" });
     const view = new EditorView({ state, parent: shadow, root: shadow });
+    adoptUserSheet(shadow);
     viewRef.current = view;
     if (editorRef) {
       editorRef.current = {

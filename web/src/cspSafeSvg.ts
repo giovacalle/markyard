@@ -2,6 +2,8 @@
 // `public/_headers`: inline `style` attributes and `<style>` elements are refused there, while
 // CSSOM writes and constructable stylesheets (`adoptedStyleSheets`) are allowed.
 
+import { adoptUserSheet } from "./customCss";
+
 let running: Promise<unknown> = Promise.resolve();
 
 function sheetFrom(css: string): CSSStyleSheet {
@@ -133,5 +135,6 @@ export function mountSvgInShadow(host: HTMLElement, svg: string, css: string): v
     sheetFrom(":host { display: block; overflow-x: auto; } svg { max-width: 100%; height: auto; }"),
     sheetFrom(styleText.join("\n")),
   ];
+  adoptUserSheet(shadow);
   shadow.replaceChildren(live);
 }

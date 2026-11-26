@@ -2,6 +2,7 @@ import "fake-indexeddb/auto";
 import "@testing-library/jest-dom/vitest";
 import { cleanup, configure } from "@testing-library/react";
 import { afterEach, beforeEach } from "vite-plus/test";
+import { resetCustomCssForTests } from "./customCss";
 import { clearLocalCache } from "./localCache";
 import { resetSettings } from "./settings";
 import { resetViewPrefs } from "./viewPrefs";
@@ -111,6 +112,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   cleanup();
+  resetCustomCssForTests();
   localStorage.clear();
   resetViewPrefs();
   resetSettings();

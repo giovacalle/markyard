@@ -5,6 +5,7 @@ import { unifiedMergeView } from "@codemirror/merge";
 import { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { useEffect, useRef } from "react";
+import { adoptUserSheet } from "../customCss";
 
 const MERGE_THEME = EditorView.theme({
   "&": {
@@ -61,6 +62,7 @@ export function ConflictMerge({
       parent: shadow,
       root: shadow,
     });
+    adoptUserSheet(shadow);
     viewRef.current = view;
     return () => {
       viewRef.current = null;
