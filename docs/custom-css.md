@@ -11,7 +11,7 @@ Markyard lets you restyle the app using plain Markdown notes in your vault—wit
 - **Load order**: notes in the styles folder are sorted alphabetically by filename (`localeCompare`), and blocks within each note are applied in document order. To disable a style note without deleting it, move it out of the styles folder.
 - **Live updates**: saving a style note in Markyard or receiving a Drive sync change updates the active stylesheet in place.
 - **No flash on reload**: the compiled CSS is cached in IndexedDB on the device and applied before first paint at boot.
-- **Per-device settings**: the **Styles folder** path and the **Custom CSS** switch are per-device settings and are not synced via Cloud State. The `_styles` notes themselves live in Google Drive and sync with your vault like any other note.
+- **Synced settings**: the **Styles folder** path and the **Custom CSS** switch sync across your devices via Cloud State, like the other settings. Turning the switch off turns custom CSS off on every device. The `_styles` notes themselves live in Google Drive and sync with your vault like any other note.
 - **Errors**: there is no CSS validator; browsers ignore invalid rules. **Settings → Appearance** displays a status line listing which style notes are currently loaded (or why custom CSS is off).
 
 ## Stable styling surface
@@ -80,8 +80,8 @@ Markyard preserves its strict `default-src 'self'` Content Security Policy and n
 
 If custom CSS hides controls or breaks the layout:
 
-- **One-load bypass**: open Markyard with `?nocss=1` in the URL (for example, `https://notes.example.com/?nocss=1`). Custom CSS stays disabled for that entire page load so you can edit or move your style notes.
-- **Persistent toggle**: open **Settings → Appearance** and turn off **Custom CSS**.
+- **One-load bypass**: open Markyard with `?nocss=1` in the URL (for example, `https://notes.example.com/?nocss=1`). Custom CSS stays disabled for that entire page load, on that device only, so you can edit or move your style notes.
+- **Persistent toggle**: open **Settings → Appearance** and turn off **Custom CSS**. The switch syncs via Cloud State, so this turns custom CSS off on every device.
 
 ## Examples
 

@@ -21,6 +21,8 @@ export const UserStateSchema = Schema.Struct({
   showAttachmentsFolder: Schema.optionalKey(Schema.Boolean),
   dailyNotesFolder: Schema.optionalKey(Schema.String),
   templatesFolder: Schema.optionalKey(Schema.String),
+  stylesFolder: Schema.optionalKey(Schema.String),
+  customCss: Schema.optionalKey(Schema.Boolean),
   defaultMode: Schema.optionalKey(Schema.Literals(["preview", "edit"])),
   linkPreviewsEnabled: Schema.optionalKey(Schema.Boolean),
 });

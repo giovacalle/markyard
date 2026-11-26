@@ -357,7 +357,7 @@ describe("Custom CSS contract — rendered regions & nesting (C1b, C1c, C2)", ()
 });
 
 describe("Custom CSS contract — documentation (C3, C5, C8, C9)", () => {
-  it("documents every variable, region, .dark mode, per-device scope and README link", () => {
+  it("documents every variable, region, .dark mode, synced settings, ?nocss=1 recovery and README link", () => {
     const doc = readRepoDoc("docs/custom-css.md");
     const readme = readRepoDoc("README.md");
 
@@ -370,7 +370,9 @@ describe("Custom CSS contract — documentation (C3, C5, C8, C9)", () => {
       expect(doc).toContain(region);
     }
     expect(doc).toContain(".dark");
-    expect(doc).toMatch(/per-device/i);
+    expect(doc).toMatch(/Cloud State/);
+    expect(doc).toMatch(/off on every device/);
+    expect(doc).toContain("?nocss=1");
   });
 
   it("documents CodeMirror and KaTeX specificity limits without unqualified any-specificity claims", () => {

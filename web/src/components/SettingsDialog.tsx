@@ -584,7 +584,7 @@ function SettingsBody({
         settingKey="stylesFolder"
         label="Styles folder"
         placeholder={DEFAULT_SETTINGS.stylesFolder}
-        help="Root folder whose .md notes provide custom CSS (device-local)."
+        help="Root folder whose .md notes provide custom CSS."
       />
       <p
         role="status"

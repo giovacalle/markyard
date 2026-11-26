@@ -116,6 +116,8 @@ describe("state with STATE_DB", () => {
       showAttachmentsFolder: false,
       dailyNotesFolder: "",
       templatesFolder: "Templates",
+      stylesFolder: " theme  ",
+      customCss: false,
       defaultMode: "edit",
       linkPreviewsEnabled: false,
     };
@@ -123,7 +125,7 @@ describe("state with STATE_DB", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
       enabled: true,
-      state: { ...settings, attachmentsFolder: "assets" },
+      state: { ...settings, attachmentsFolder: "assets", stylesFolder: "theme" },
       updatedAt: 7,
     });
 
@@ -221,6 +223,12 @@ describe("state with STATE_DB", () => {
       ["daily slash", { state: { dailyNotesFolder: "x/y" }, updatedAt: 1 }],
       ["templates empty", { state: { templatesFolder: "" }, updatedAt: 1 }],
       ["templates number", { state: { templatesFolder: 3 }, updatedAt: 1 }],
+      ["styles empty", { state: { stylesFolder: "" }, updatedAt: 1 }],
+      ["styles blank", { state: { stylesFolder: "  " }, updatedAt: 1 }],
+      ["styles slash", { state: { stylesFolder: "a/b" }, updatedAt: 1 }],
+      ["styles dot", { state: { stylesFolder: "." }, updatedAt: 1 }],
+      ["styles number", { state: { stylesFolder: 1 }, updatedAt: 1 }],
+      ["bad custom css", { state: { customCss: "off" }, updatedAt: 1 }],
       ["bad mode", { state: { defaultMode: "split" }, updatedAt: 1 }],
       ["bad show attachments", { state: { showAttachmentsFolder: "yes" }, updatedAt: 1 }],
       ["bad link previews", { state: { linkPreviewsEnabled: "on" }, updatedAt: 1 }],

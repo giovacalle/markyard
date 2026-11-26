@@ -17,9 +17,9 @@ export interface AppSettings {
   dailyNotesFolder: string;
   /** Root subfolder whose notes are templates. */
   templatesFolder: string;
-  /** Root subfolder whose notes provide custom CSS (device-local, not synced to the cloud). */
+  /** Root subfolder whose notes provide custom CSS. */
   stylesFolder: string;
-  /** Whether custom CSS from `stylesFolder` is applied (device-local, not synced to the cloud). */
+  /** Whether custom CSS from `stylesFolder` is applied. */
   customCss: boolean;
   /** How a note opens when read-only mode is off. */
   defaultMode: DefaultMode;
@@ -47,6 +47,8 @@ export const SYNCED_SETTINGS_KEYS = [
   "showAttachmentsFolder",
   "dailyNotesFolder",
   "templatesFolder",
+  "stylesFolder",
+  "customCss",
   "defaultMode",
   "linkPreviewsEnabled",
 ] as const satisfies readonly (keyof AppSettings)[];

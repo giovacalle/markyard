@@ -81,7 +81,7 @@ describe("settings store", () => {
     expect(getSettings().stylesFolder).toBe("theme");
   });
 
-  it("persists and sanitizes device-local stylesFolder and customCss across reloads", () => {
+  it("persists and sanitizes stylesFolder and customCss across reloads", () => {
     updateSettings({ stylesFolder: "CustomTheme", customCss: false });
     expect(getSettings()).toMatchObject({ stylesFolder: "CustomTheme", customCss: false });
 
@@ -102,6 +102,8 @@ describe("settings store", () => {
       "showAttachmentsFolder",
       "dailyNotesFolder",
       "templatesFolder",
+      "stylesFolder",
+      "customCss",
       "defaultMode",
       "linkPreviewsEnabled",
     ]);
@@ -111,20 +113,18 @@ describe("settings store", () => {
       showAttachmentsFolder: true,
       dailyNotesFolder: "",
       templatesFolder: "Templates",
+      stylesFolder: "_styles",
+      customCss: true,
       defaultMode: "preview",
       linkPreviewsEnabled: true,
     });
-    expect("stylesFolder" in full).toBe(false);
-    expect("customCss" in full).toBe(false);
 
     const partial = pickSyncedSettings({
       stylesFolder: "theme",
       customCss: false,
       templatesFolder: "Tpl",
     });
-    expect(partial).toEqual({ templatesFolder: "Tpl" });
-    expect("stylesFolder" in partial).toBe(false);
-    expect("customCss" in partial).toBe(false);
+    expect(partial).toEqual({ stylesFolder: "theme", customCss: false, templatesFolder: "Tpl" });
   });
 });
 

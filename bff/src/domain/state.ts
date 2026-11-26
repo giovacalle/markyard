@@ -30,6 +30,10 @@ export interface UserState {
   /** Where daily notes go: `""` is the vault root, otherwise a folder directly under it. */
   readonly dailyNotesFolder?: string;
   readonly templatesFolder?: string;
+  /** The folder directly under the vault root whose notes provide custom CSS. */
+  readonly stylesFolder?: string;
+  /** Whether custom CSS from `stylesFolder` is applied. */
+  readonly customCss?: boolean;
   readonly defaultMode?: EditorMode;
   readonly linkPreviewsEnabled?: boolean;
 }
@@ -54,12 +58,14 @@ const FLAGS = [
   "infoDrawerOpen",
   "showAttachmentsFolder",
   "linkPreviewsEnabled",
+  "customCss",
 ] as const;
 /** Folder-name settings; only `dailyNotesFolder` may be `""` (the vault root). */
 const FOLDER_SETTINGS = [
   ["attachmentsFolder", false],
   ["dailyNotesFolder", true],
   ["templatesFolder", false],
+  ["stylesFolder", false],
 ] as const;
 
 const isDriveId = (u: unknown): u is string => typeof u === "string" && isValidId(u);

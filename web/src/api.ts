@@ -25,6 +25,8 @@ export interface CloudUserState {
   showAttachmentsFolder?: boolean;
   dailyNotesFolder?: string;
   templatesFolder?: string;
+  stylesFolder?: string;
+  customCss?: boolean;
   defaultMode?: "preview" | "edit";
   linkPreviewsEnabled?: boolean;
 }

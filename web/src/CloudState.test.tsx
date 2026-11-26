@@ -302,58 +302,78 @@ describe("cloud state sync", () => {
     });
   });
 
-  it("excludes device-local stylesFolder and customCss from readLocalCloudState", () => {
+  it("includes stylesFolder and customCss in readLocalCloudState", () => {
     updateSettings({ stylesFolder: "theme", customCss: false });
-    const state = readLocalCloudState("root-id");
-    expect(state).toMatchObject({
+    expect(readLocalCloudState("root-id")).toMatchObject({
       attachmentsFolder: "_attachments",
-      showAttachmentsFolder: true,
-      dailyNotesFolder: "",
       templatesFolder: "Templates",
-      defaultMode: "preview",
-      linkPreviewsEnabled: true,
+      stylesFolder: "theme",
+      customCss: false,
     });
-    expect("stylesFolder" in state).toBe(false);
-    expect("customCss" in state).toBe(false);
   });
 
-  it("never pushes or adopts device-local stylesFolder and customCss over /api/state", async () => {
-    updateSettings({ stylesFolder: "theme", customCss: false });
+  it("adopts stylesFolder and customCss from /api/state", async () => {
+    vault({ cloudSync: true });
+    cloud({
+      state: { theme: "light", rootFolderId: "root-id", stylesFolder: "theme", customCss: false },
+      updatedAt: 5000,
+    });
+    render(<App />);
+    await screen.findByRole("treeitem", { name: /a\.md/ });
+    await vi.waitFor(() =>
+      expect(getSettings()).toMatchObject({ stylesFolder: "theme", customCss: false }),
+    );
+    await settle(1300);
+    expect(stateRequests).toEqual(["GET"]);
+  });
+
+  it("ignores an empty or invalid remote stylesFolder and a non-boolean customCss", async () => {
+    updateSettings({ stylesFolder: "mine", customCss: false });
+    localStorage.setItem(CLOUD_STATE_STAMP_KEY, "1");
     vault({ cloudSync: true });
     cloud({
       state: {
         theme: "light",
         rootFolderId: "root-id",
-        ...({ stylesFolder: "evil", customCss: true } as Partial<CloudUserState>),
+        templatesFolder: "Tpl",
+        ...({ stylesFolder: "a/b", customCss: "nope" } as unknown as Partial<CloudUserState>),
       },
       updatedAt: 5000,
     });
     render(<App />);
     await screen.findByRole("treeitem", { name: /a\.md/ });
-    await vi.waitFor(() => expect(localStorage.getItem(CLOUD_STATE_STAMP_KEY)).toBe("5000"));
-    expect(getSettings()).toMatchObject({ stylesFolder: "theme", customCss: false });
+    await vi.waitFor(() => expect(getSettings().templatesFolder).toBe("Tpl"));
+    expect(getSettings()).toMatchObject({ stylesFolder: "mine", customCss: false });
 
-    act(() =>
-      updateSettings({
-        stylesFolder: "custom",
-        customCss: false,
-        templatesFolder: "Tpl",
-      }),
-    );
-    await vi.waitFor(() => expect(puts.length).toBe(1), PUSH_WAIT);
-    expect(puts[0].state.templatesFolder).toBe("Tpl");
-    expect("stylesFolder" in puts[0].state).toBe(false);
-    expect("customCss" in puts[0].state).toBe(false);
+    act(() => updateSettings({ stylesFolder: "   " }));
+    expect(getSettings().stylesFolder).toBe("mine");
   });
 
-  it("does not bump the cloud stamp or send a PUT on device-local-only settings edits", async () => {
+  it("pushes stylesFolder and customCss changes over /api/state", async () => {
     vault({ cloudSync: true });
     cloud({ state: { theme: "light", rootFolderId: "root-id" }, updatedAt: 5000 });
     render(<App />);
     await screen.findByRole("treeitem", { name: /a\.md/ });
     await vi.waitFor(() => expect(localStorage.getItem(CLOUD_STATE_STAMP_KEY)).toBe("5000"));
 
-    act(() => updateSettings({ stylesFolder: "theme", customCss: false }));
+    act(() => updateSettings({ customCss: false }));
+    expect(Number(localStorage.getItem(CLOUD_STATE_STAMP_KEY))).toBeGreaterThan(5000);
+    await vi.waitFor(() => expect(puts.length).toBe(1), PUSH_WAIT);
+    expect(puts[0].state).toMatchObject({ customCss: false, stylesFolder: "_styles" });
+
+    act(() => updateSettings({ stylesFolder: "theme" }));
+    await vi.waitFor(() => expect(puts.length).toBe(2), PUSH_WAIT);
+    expect(puts[1].state).toMatchObject({ customCss: false, stylesFolder: "theme" });
+  });
+
+  it("does not bump the cloud stamp or send a PUT on a settings edit that changes nothing", async () => {
+    vault({ cloudSync: true });
+    cloud({ state: { theme: "light", rootFolderId: "root-id" }, updatedAt: 5000 });
+    render(<App />);
+    await screen.findByRole("treeitem", { name: /a\.md/ });
+    await vi.waitFor(() => expect(localStorage.getItem(CLOUD_STATE_STAMP_KEY)).toBe("5000"));
+
+    act(() => updateSettings({ stylesFolder: " _styles ", customCss: true }));
     await settle(1300);
 
     expect(localStorage.getItem(CLOUD_STATE_STAMP_KEY)).toBe("5000");
