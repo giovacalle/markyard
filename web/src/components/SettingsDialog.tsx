@@ -587,6 +587,7 @@ function SettingsBody({
         help="Root folder whose .md notes provide custom CSS (device-local)."
       />
       <p
+        role="status"
         data-testid="settings-custom-css-status"
         className="text-xs text-neutral-500 dark:text-neutral-400"
       >

@@ -499,6 +499,11 @@ describe("Settings dialog", () => {
     expect(within(dialog).getByTestId("settings-custom-css-status")).toHaveTextContent(
       "Loaded: look.md",
     );
+    // Announced to assistive tech when it changes (WCAG 4.1.3).
+    expect(within(dialog).getByTestId("settings-custom-css-status")).toHaveAttribute(
+      "role",
+      "status",
+    );
 
     // Edit Styles folder and turn Custom CSS off: sheet empties and both persist across reload.
     const stylesInput = within(dialog).getByLabelText("Styles folder");
