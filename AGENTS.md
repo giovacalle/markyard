@@ -31,6 +31,7 @@ Prerequisites: Node 24, `pnpm`.
 - Script tests: `pnpm test:scripts`
 - Local-only Worker run (no Cloudflare state writes, port 8788):
   `ALCHEMY_LOCAL_STATE=1 BFF_DEV_PORT=8788 pnpm exec alchemy dev --stage local`
+- Signed-in UI checks without OAuth: `pnpm build && pnpm preview:mock` (serves `web/dist` with the production CSP and a fixture `/api`).
 
 ## Deploy
 

@@ -11,6 +11,8 @@
   "type": "module",
   "scripts": {
     "dev": "node scripts/dev.mjs",
+    "preview:mock": "node scripts/mock-api.mjs",
+    "test:scripts": "node --test scripts/mock-api.test.mjs",
     "build": "pnpm --dir web build && pnpm --dir bff check",
     "check:web": "node scripts/check-csp-source.mjs && pnpm --dir web check",
     "test:web": "pnpm --dir web test",

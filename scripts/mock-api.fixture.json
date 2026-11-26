@@ -1,0 +1,10 @@
+{
+  "session": {
+    "email": "fixture@example.com",
+    "name": "Fixture User"
+  },
+  "files": {
+    "Welcome.md": "# Welcome to Markyard\n\nThis note is served by the local `mock-api` fixture server under the production Content Security Policy.\n\n- Edit this note and save to exercise `PUT /api/files/:id/content` with `If-Match` ETags.\n- Open **Settings → Appearance** to confirm custom CSS from [[look]] is loaded.\n",
+    "_styles/look.md": "# Fixture Theme\n\nApplies a warm amber accent so custom CSS loading is easy to verify under strict CSP.\n\n```css\n:root {\n  --markyard-accent: #b45309;\n}\n\n:root.dark {\n  --markyard-accent: #f59e0b;\n}\n```\n"
+  }
+}
