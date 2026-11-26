@@ -31,6 +31,8 @@ Markyard leaves every `--markyard-*` variable unset by default so each region ke
 | `--markyard-line-height` | Preview body and Editor body | `1.625` (Preview), `1.7` (Editor) |
 | `--markyard-text-width` | Note column max width (loaded and loading states) | `48rem` |
 | `--markyard-accent` | Preview links, Preview `.wikilink`, and Editor links | Blue accent (`blue-600` / `blue-400` links, `blue-700` / `blue-300` wikilinks, `--cm-link` in Editor) |
+| `--markyard-stage-inset` | Outer margin around the inset stage in the **Borderless** layout (`>= 768px`) | `0.5rem` |
+| `--markyard-stage-radius` | Corner radius of the inset stage in the **Borderless** layout (`>= 768px`) | `0.75rem` |
 
 ### CodeMirror variables (`--cm-*`)
 
@@ -44,6 +46,10 @@ The CodeMirror editor shadow root reads these variables from `:root` and `:root.
 ### Dark mode
 
 Dark mode toggles the `.dark` class on `<html>`. Scope dark-only overrides with `:root.dark { … }` or `.dark [data-region="…"] { … }`.
+
+### Layout
+
+**Settings → Appearance → Layout** switches between **Default** and **Borderless** (synced via Cloud State). When **Borderless** is active, Markyard sets `data-layout="borderless"` on `<html>`; scope borderless-only overrides with `:root[data-layout="borderless"] …`, or tune its spacing and corners with `--markyard-stage-inset` and `--markyard-stage-radius`.
 
 ### Region hooks (`data-region`)
 

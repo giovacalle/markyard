@@ -15,6 +15,7 @@ import {
   type AppSettings,
   DEFAULT_SETTINGS,
   type DefaultMode,
+  type LayoutPreference,
   updateSettings,
   useSettings,
   validateFolderSetting,
@@ -238,6 +239,11 @@ const THEMES: readonly { value: ThemePreference; label: string }[] = [
   { value: "light", label: "Light" },
   { value: "dark", label: "Dark" },
   { value: "system", label: "System" },
+];
+
+const LAYOUTS: readonly { value: LayoutPreference; label: string }[] = [
+  { value: "default", label: "Default" },
+  { value: "borderless", label: "Borderless" },
 ];
 
 const MODES: readonly { value: DefaultMode; label: string }[] = [
@@ -574,6 +580,12 @@ function SettingsBody({
   const appearanceControls = (
     <>
       <Segmented label="Theme" value={theme} options={THEMES} onChange={onThemeChange} />
+      <Segmented
+        label="Layout"
+        value={settings.layout}
+        options={LAYOUTS}
+        onChange={(layout) => updateSettings({ layout })}
+      />
       <SwitchRow
         label="Custom CSS"
         description="Apply css code blocks from notes in the styles folder."

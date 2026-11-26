@@ -107,6 +107,7 @@ const SECTIONS = ["Appearance", "Editor", "Vault", "Sync & Storage"];
 const SECTION_CONTROLS: Record<string, ((dialog: HTMLElement) => HTMLElement | null)[]> = {
   Appearance: [
     (d) => within(d).queryByRole("radiogroup", { name: "Theme" }),
+    (d) => within(d).queryByRole("radiogroup", { name: "Layout" }),
     (d) => within(d).queryByRole("switch", { name: "Custom CSS" }),
     (d) => within(d).queryByLabelText("Styles folder"),
     (d) => within(d).queryByTestId("settings-custom-css-status"),
@@ -381,6 +382,18 @@ describe("Settings dialog", () => {
     const theme = within(dialog).getByRole("radiogroup", { name: "Theme" });
     fireEvent.click(within(theme).getByRole("radio", { name: "Dark" }));
     expect(document.documentElement.classList.contains("dark")).toBe(true);
+
+    const layout = within(dialog).getByRole("radiogroup", { name: "Layout" });
+    expect(within(layout).getByRole("radio", { name: "Default" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    fireEvent.click(within(layout).getByRole("radio", { name: "Borderless" }));
+    expect(getSettings().layout).toBe("borderless");
+    expect(document.documentElement.dataset.layout).toBe("borderless");
+    fireEvent.click(within(layout).getByRole("radio", { name: "Default" }));
+    expect(getSettings().layout).toBe("default");
+    expect(document.documentElement.dataset.layout).toBeUndefined();
 
     showSection(dialog, "Editor");
     const mode = within(dialog).getByRole("radiogroup", { name: "Default mode" });

@@ -23,6 +23,7 @@ export const UserStateSchema = Schema.Struct({
   templatesFolder: Schema.optionalKey(Schema.String),
   stylesFolder: Schema.optionalKey(Schema.String),
   customCss: Schema.optionalKey(Schema.Boolean),
+  layout: Schema.optionalKey(Schema.Literals(["default", "borderless"])),
   defaultMode: Schema.optionalKey(Schema.Literals(["preview", "edit"])),
   linkPreviewsEnabled: Schema.optionalKey(Schema.Boolean),
 });

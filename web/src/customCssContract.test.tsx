@@ -20,6 +20,8 @@ const DOCUMENTED_VARIABLES = [
   "--markyard-line-height",
   "--markyard-text-width",
   "--markyard-accent",
+  "--markyard-stage-inset",
+  "--markyard-stage-radius",
 ] as const;
 
 const DOCUMENTED_REGIONS = [
@@ -210,6 +212,22 @@ describe("Custom CSS contract — source surface (C1a, C6, C7, C10)", () => {
 
     expect(css).toContain("var(--markyard-font-ui, var(--default-font-family, ui-sans-serif");
   });
+
+  it("layers borderless layout rules after Tailwind utilities without !important and reads stage variables", () => {
+    const css = sourceOf("./index.css");
+    const tailwindImport = css.indexOf('@import "tailwindcss";');
+    const layoutLayerDecl = css.indexOf("@layer markyard-layout;");
+    const layoutLayerBlock = css.indexOf("@layer markyard-layout {");
+    expect(tailwindImport).toBeGreaterThanOrEqual(0);
+    expect(layoutLayerDecl).toBeGreaterThan(tailwindImport);
+    expect(layoutLayerBlock).toBeGreaterThan(layoutLayerDecl);
+
+    const layoutCss = css.slice(layoutLayerBlock);
+    expect(layoutCss).toContain(':root[data-layout="borderless"]');
+    expect(layoutCss).toContain("var(--markyard-stage-inset");
+    expect(layoutCss).toContain("var(--markyard-stage-radius");
+    expect(layoutCss).not.toContain("!important");
+  });
 });
 
 describe("Custom CSS contract — rendered regions & nesting (C1b, C1c, C2)", () => {
@@ -370,6 +388,7 @@ describe("Custom CSS contract — documentation (C3, C5, C8, C9)", () => {
       expect(doc).toContain(region);
     }
     expect(doc).toContain(".dark");
+    expect(doc).toContain('data-layout="borderless"');
     expect(doc).toMatch(/Cloud State/);
     expect(doc).toMatch(/off on every device/);
     expect(doc).toContain("?nocss=1");

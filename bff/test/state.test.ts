@@ -118,6 +118,7 @@ describe("state with STATE_DB", () => {
       templatesFolder: "Templates",
       stylesFolder: " theme  ",
       customCss: false,
+      layout: "borderless",
       defaultMode: "edit",
       linkPreviewsEnabled: false,
     };
@@ -229,6 +230,8 @@ describe("state with STATE_DB", () => {
       ["styles dot", { state: { stylesFolder: "." }, updatedAt: 1 }],
       ["styles number", { state: { stylesFolder: 1 }, updatedAt: 1 }],
       ["bad custom css", { state: { customCss: "off" }, updatedAt: 1 }],
+      ["bad layout", { state: { layout: "floating" }, updatedAt: 1 }],
+      ["layout number", { state: { layout: 1 }, updatedAt: 1 }],
       ["bad mode", { state: { defaultMode: "split" }, updatedAt: 1 }],
       ["bad show attachments", { state: { showAttachmentsFolder: "yes" }, updatedAt: 1 }],
       ["bad link previews", { state: { linkPreviewsEnabled: "on" }, updatedAt: 1 }],

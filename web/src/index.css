@@ -2,6 +2,7 @@
 
 @import "tailwindcss";
 @custom-variant dark (&:where(.dark, .dark *));
+@layer markyard-layout;
 
 @theme {
   /* A file-tree row revealed on demand; duration matches REVEAL_FLASH_MS in FileTree.tsx. */
@@ -261,4 +262,74 @@
 }
 .markdown-preview .hljs-strong {
   @apply font-bold;
+}
+
+/* Native "Borderless" layout preset (Settings → Appearance → Layout).
+   Layered after Tailwind utilities so it overrides utility borders and surfaces without !important,
+   while unlayered user Custom CSS still wins at any specificity. */
+@layer markyard-layout {
+  @media (width >= 48rem) {
+    :root[data-layout="borderless"] [data-slot="app-shell"] {
+      background-color: var(--color-neutral-100);
+    }
+
+    :root.dark[data-layout="borderless"] [data-slot="app-shell"] {
+      background-color: var(--color-neutral-900);
+    }
+
+    :root[data-layout="borderless"] [data-region="sidebar"] {
+      background-color: transparent;
+      border-right-width: 0;
+    }
+
+    :root[data-layout="borderless"] [data-slot="sidebar-header"],
+    :root[data-layout="borderless"] [data-slot="sidebar-search"] {
+      border-bottom-width: 0;
+    }
+
+    :root[data-layout="borderless"] [data-slot="sidebar-account"] {
+      background-color: transparent;
+      border-top-width: 0;
+    }
+
+    :root[data-layout="borderless"] [data-slot="main-stage"] {
+      margin: var(--markyard-stage-inset, 0.5rem);
+      border-radius: var(--markyard-stage-radius, 0.75rem);
+      background-color: var(--color-white);
+      box-shadow:
+        0 0 0 1px rgb(0 0 0 / 0.06),
+        0 1px 2px rgb(0 0 0 / 0.04);
+    }
+
+    :root[data-layout="borderless"]
+      [data-region="sidebar"]:not([hidden])
+      ~ [data-slot="main-stage"] {
+      margin-left: 0;
+    }
+
+    :root.dark[data-layout="borderless"] [data-slot="main-stage"] {
+      background-color: var(--color-neutral-950);
+      box-shadow: 0 0 0 1px rgb(255 255 255 / 0.08);
+    }
+
+    :root[data-layout="borderless"] [data-region="note-header"]:not([data-offline="true"]),
+    :root[data-layout="borderless"] [data-slot="panel-header"]:not([data-offline="true"]) {
+      border-bottom-color: transparent;
+    }
+
+    :root[data-layout="borderless"] [data-region="info-drawer"],
+    :root[data-layout="borderless"] [data-slot="attachment-info"] {
+      background-color: transparent;
+      border-left-color: rgb(0 0 0 / 0.06);
+    }
+
+    :root.dark[data-layout="borderless"] [data-region="info-drawer"],
+    :root.dark[data-layout="borderless"] [data-slot="attachment-info"] {
+      border-left-color: rgb(255 255 255 / 0.08);
+    }
+
+    :root[data-layout="borderless"] [data-slot="drawer-header"] {
+      border-bottom-color: transparent;
+    }
+  }
 }

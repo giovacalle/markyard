@@ -1344,7 +1344,10 @@ function SessionContent({
 
     return (
       <PkmContext.Provider value={pkmApi}>
-        <div className="flex h-dvh overflow-hidden bg-white text-neutral-900 dark:bg-neutral-950 dark:text-neutral-100">
+        <div
+          data-slot="app-shell"
+          className="flex h-dvh overflow-hidden bg-white text-neutral-900 dark:bg-neutral-950 dark:text-neutral-100"
+        >
           {mobileSidebarOpen && (
             <button
               type="button"
@@ -1362,7 +1365,10 @@ function SessionContent({
               sidebarCollapsed ? "md:hidden" : "md:static md:translate-x-0"
             } ${mobileSidebarOpen ? "translate-x-0" : "-translate-x-full"}`}
           >
-            <div className="flex min-h-14 shrink-0 items-center justify-between gap-2 border-b border-neutral-200 px-3.5 py-2 dark:border-neutral-800">
+            <div
+              data-slot="sidebar-header"
+              className="flex min-h-14 shrink-0 items-center justify-between gap-2 border-b border-neutral-200 px-3.5 py-2 dark:border-neutral-800"
+            >
               <div className="flex min-w-0 items-center gap-1">
                 <h1
                   className="truncate text-sm font-semibold tracking-tight text-neutral-900 dark:text-neutral-100"
@@ -1387,7 +1393,10 @@ function SessionContent({
               </button>
             </div>
 
-            <div className="shrink-0 border-b border-neutral-200 px-2.5 py-2 dark:border-neutral-800">
+            <div
+              data-slot="sidebar-search"
+              className="shrink-0 border-b border-neutral-200 px-2.5 py-2 dark:border-neutral-800"
+            >
               <button
                 type="button"
                 {...paletteTriggerProps}
@@ -1459,6 +1468,7 @@ function SessionContent({
             </nav>
 
             <section
+              data-slot="sidebar-account"
               aria-label="Account"
               className="mt-auto shrink-0 border-t border-neutral-200 bg-white p-2 dark:border-neutral-800 dark:bg-neutral-900"
             >
@@ -1511,7 +1521,10 @@ function SessionContent({
             </section>
           </aside>
 
-          <main className="flex min-w-0 flex-1 flex-col overflow-hidden bg-white dark:bg-neutral-950">
+          <main
+            data-slot="main-stage"
+            className="flex min-w-0 flex-1 flex-col overflow-hidden bg-white dark:bg-neutral-950"
+          >
             {createNoteMutation.isError && (
               <div
                 role="alert"
@@ -1590,6 +1603,7 @@ function SessionContent({
             ) : (
               <>
                 <header
+                  data-slot="panel-header"
                   data-offline={isOffline ? "true" : undefined}
                   className={`min-h-14 shrink-0 items-center justify-between gap-3 border-b px-4 py-2 transition-colors sm:px-6 ${
                     isOffline

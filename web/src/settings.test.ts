@@ -1,8 +1,10 @@
+import { renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vite-plus/test";
 import {
   DEFAULT_SETTINGS,
   SETTINGS_STORAGE_KEY,
   SYNCED_SETTINGS_KEYS,
+  applyLayout,
   getSettings,
   pickSyncedSettings,
   resetSettings,
@@ -10,6 +12,7 @@ import {
   updateSettings,
   validateFolderSetting,
 } from "./settings";
+import { useTheme } from "./theme";
 
 describe("settings store", () => {
   it("starts from the defaults", () => {
@@ -21,6 +24,7 @@ describe("settings store", () => {
       templatesFolder: "Templates",
       stylesFolder: "_styles",
       customCss: true,
+      layout: "default",
       defaultMode: "preview",
       linkPreviewsEnabled: true,
     });
@@ -96,6 +100,109 @@ describe("settings store", () => {
     expect(getSettings()).toMatchObject({ stylesFolder: "_styles", customCss: true });
   });
 
+  it("persists, sanitizes and applies layout on documentElement and theme-color", () => {
+    const meta = document.createElement("meta");
+    meta.name = "theme-color";
+    meta.content = "#ffffff";
+    document.head.appendChild(meta);
+    try {
+      updateSettings({ layout: "borderless" });
+      expect(getSettings().layout).toBe("borderless");
+      expect(document.documentElement.dataset.layout).toBe("borderless");
+      expect(meta.content).toBe("#f5f5f5");
+
+      document.documentElement.classList.add("dark");
+      applyLayout("borderless");
+      expect(meta.content).toBe("#171717");
+
+      resetSettings({ keepStorage: true });
+      expect(getSettings().layout).toBe("borderless");
+
+      updateSettings({ layout: "default" });
+      expect(document.documentElement.dataset.layout).toBeUndefined();
+      expect(meta.content).toBe("#0a0a0a");
+
+      localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify({ layout: "floating" }));
+      resetSettings({ keepStorage: true });
+      expect(getSettings().layout).toBe("default");
+
+      updateSettings({ layout: "borderless" });
+      resetSettings();
+      expect(document.documentElement.dataset.layout).toBeUndefined();
+    } finally {
+      meta.remove();
+    }
+  });
+
+  it("keeps full-bleed theme-color on narrow viewports even when borderless is active", () => {
+    const originalMatchMedia = Object.getOwnPropertyDescriptor(window, "matchMedia");
+    let narrow = true;
+    const narrowListeners = new Set<() => void>();
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      writable: true,
+      value: (query: string) => ({
+        matches: query === "(max-width: 47.99rem)" ? narrow : false,
+        media: query,
+        onchange: null,
+        addEventListener: (_event: string, listener: () => void) => {
+          if (query === "(max-width: 47.99rem)") {
+            narrowListeners.add(listener);
+          }
+        },
+        removeEventListener: (_event: string, listener: () => void) => {
+          if (query === "(max-width: 47.99rem)") {
+            narrowListeners.delete(listener);
+          }
+        },
+        addListener: () => {},
+        removeListener: () => {},
+        dispatchEvent: () => false,
+      }),
+    });
+
+    const meta = document.createElement("meta");
+    meta.name = "theme-color";
+    meta.content = "#ffffff";
+    document.head.appendChild(meta);
+
+    try {
+      const { unmount } = renderHook(() => useTheme());
+      updateSettings({ layout: "borderless" });
+      expect(document.documentElement.dataset.layout).toBe("borderless");
+      expect(meta.content).toBe("#ffffff");
+
+      document.documentElement.classList.add("dark");
+      applyLayout("borderless");
+      expect(meta.content).toBe("#0a0a0a");
+
+      // Crossing to a desktop viewport switches theme-color to the borderless canvas.
+      narrow = false;
+      for (const listener of narrowListeners) {
+        listener();
+      }
+      expect(meta.content).toBe("#171717");
+
+      document.documentElement.classList.remove("dark");
+      applyLayout("borderless");
+      expect(meta.content).toBe("#f5f5f5");
+
+      // Crossing back to a narrow viewport restores the full-bleed light color.
+      narrow = true;
+      for (const listener of narrowListeners) {
+        listener();
+      }
+      expect(meta.content).toBe("#ffffff");
+
+      unmount();
+    } finally {
+      meta.remove();
+      if (originalMatchMedia) {
+        Object.defineProperty(window, "matchMedia", originalMatchMedia);
+      }
+    }
+  });
+
   it("picks only the cloud-synced settings keys", () => {
     expect(SYNCED_SETTINGS_KEYS).toEqual([
       "attachmentsFolder",
@@ -104,6 +211,7 @@ describe("settings store", () => {
       "templatesFolder",
       "stylesFolder",
       "customCss",
+      "layout",
       "defaultMode",
       "linkPreviewsEnabled",
     ]);
@@ -115,6 +223,7 @@ describe("settings store", () => {
       templatesFolder: "Templates",
       stylesFolder: "_styles",
       customCss: true,
+      layout: "default",
       defaultMode: "preview",
       linkPreviewsEnabled: true,
     });

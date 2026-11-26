@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import { syncThemeColor } from "./theme";
 
 // App-wide settings edited in the Settings dialog: vault folder names and editor defaults.
 // Persisted per device in localStorage and, when the BFF has cloud sync, synced through
@@ -7,6 +8,7 @@ import { useSyncExternalStore } from "react";
 export const SETTINGS_STORAGE_KEY = "markyard:settings";
 
 export type DefaultMode = "preview" | "edit";
+export type LayoutPreference = "default" | "borderless";
 
 export interface AppSettings {
   /** Root subfolder that receives uploaded images. */
@@ -21,6 +23,8 @@ export interface AppSettings {
   stylesFolder: string;
   /** Whether custom CSS from `stylesFolder` is applied. */
   customCss: boolean;
+  /** Chrome framing preset: edge-to-edge (`default`) or inset stage (`borderless`). */
+  layout: LayoutPreference;
   /** How a note opens when read-only mode is off. */
   defaultMode: DefaultMode;
   /** Hover cards and bookmark cards for external links in Preview. */
@@ -34,6 +38,7 @@ export const DEFAULT_SETTINGS: Readonly<AppSettings> = Object.freeze({
   templatesFolder: "Templates",
   stylesFolder: "_styles",
   customCss: true,
+  layout: "default",
   defaultMode: "preview",
   linkPreviewsEnabled: true,
 });
@@ -49,6 +54,7 @@ export const SYNCED_SETTINGS_KEYS = [
   "templatesFolder",
   "stylesFolder",
   "customCss",
+  "layout",
   "defaultMode",
   "linkPreviewsEnabled",
 ] as const satisfies readonly (keyof AppSettings)[];
@@ -103,6 +109,23 @@ function isDefaultMode(value: unknown): value is DefaultMode {
   return value === "preview" || value === "edit";
 }
 
+function isLayoutPreference(value: unknown): value is LayoutPreference {
+  return value === "default" || value === "borderless";
+}
+
+/** Applies the active layout attribute to `<html>` and keeps `theme-color` aligned. */
+export function applyLayout(layout: LayoutPreference): void {
+  if (typeof document === "undefined") {
+    return;
+  }
+  if (layout === "borderless") {
+    document.documentElement.dataset.layout = "borderless";
+  } else {
+    document.documentElement.removeAttribute("data-layout");
+  }
+  syncThemeColor();
+}
+
 /** The valid fields of `raw`, normalized; anything else is dropped. */
 export function sanitizeSettings(raw: unknown): Partial<AppSettings> {
   if (typeof raw !== "object" || raw === null) {
@@ -127,6 +150,9 @@ export function sanitizeSettings(raw: unknown): Partial<AppSettings> {
   folder("stylesFolder");
   if (typeof input.customCss === "boolean") {
     out.customCss = input.customCss;
+  }
+  if (isLayoutPreference(input.layout)) {
+    out.layout = input.layout;
   }
   if (isDefaultMode(input.defaultMode)) {
     out.defaultMode = input.defaultMode;
@@ -182,6 +208,9 @@ export function updateSettings(
     return;
   }
   current = next;
+  if (prev.layout !== next.layout) {
+    applyLayout(next.layout);
+  }
   try {
     window.localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(next));
   } catch {
@@ -202,6 +231,7 @@ export function resetSettings({ keepStorage = false }: { keepStorage?: boolean }
     } catch {
       // Ignore storage errors.
     }
+    applyLayout(DEFAULT_SETTINGS.layout);
   }
   emit({ silent: true });
 }

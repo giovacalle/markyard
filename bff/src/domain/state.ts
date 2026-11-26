@@ -11,6 +11,7 @@ export const MAX_STATE_BYTES = 16_384;
 export const MAX_EXPANDED_FOLDERS = 500;
 
 export type ThemePreference = "light" | "dark" | "system";
+export type LayoutPreference = "default" | "borderless";
 export type EditorMode = "preview" | "edit";
 
 export interface UserState {
@@ -34,6 +35,8 @@ export interface UserState {
   readonly stylesFolder?: string;
   /** Whether custom CSS from `stylesFolder` is applied. */
   readonly customCss?: boolean;
+  /** Chrome framing preset: edge-to-edge (`default`) or inset card (`borderless`). */
+  readonly layout?: LayoutPreference;
   readonly defaultMode?: EditorMode;
   readonly linkPreviewsEnabled?: boolean;
 }
@@ -50,6 +53,7 @@ const isObject = (u: unknown): u is Json =>
   typeof u === "object" && u !== null && !Array.isArray(u);
 
 const THEMES: ReadonlyArray<unknown> = ["light", "dark", "system"];
+const LAYOUTS: ReadonlyArray<unknown> = ["default", "borderless"];
 const MODES: ReadonlyArray<unknown> = ["preview", "edit"];
 const FLAGS = [
   "readOnly",
@@ -118,6 +122,12 @@ export const decodeUserState = (value: unknown): UserState | undefined => {
     const name = folderSetting(v, allowEmpty);
     if (name === undefined) return undefined;
     out[key] = name;
+  }
+
+  const layout = value["layout"];
+  if (layout !== undefined) {
+    if (!LAYOUTS.includes(layout)) return undefined;
+    out.layout = layout as LayoutPreference;
   }
 
   const mode = value["defaultMode"];

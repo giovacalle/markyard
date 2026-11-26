@@ -27,6 +27,7 @@ export interface CloudUserState {
   templatesFolder?: string;
   stylesFolder?: string;
   customCss?: boolean;
+  layout?: "default" | "borderless";
   defaultMode?: "preview" | "edit";
   linkPreviewsEnabled?: boolean;
 }

@@ -6,6 +6,17 @@ export type ResolvedTheme = "light" | "dark";
 const STORAGE_KEY = "markyard-theme";
 const LIGHT_THEME_COLOR = "#ffffff";
 const DARK_THEME_COLOR = "#0a0a0a";
+const BORDERLESS_LIGHT_THEME_COLOR = "#f5f5f5";
+const BORDERLESS_DARK_THEME_COLOR = "#171717";
+const NARROW_QUERY = "(max-width: 47.99rem)";
+
+function isNarrowViewport(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia(NARROW_QUERY).matches
+  );
+}
 
 const listeners = new Set<() => void>();
 
@@ -56,14 +67,32 @@ export function resolveTheme(preference: ThemePreference): ResolvedTheme {
   return preference === "system" ? getSystemTheme() : preference;
 }
 
+/** Keeps `meta[name="theme-color"]` aligned with the active dark class, layout, and viewport. */
+export function syncThemeColor(): void {
+  if (typeof document === "undefined") {
+    return;
+  }
+  const meta = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
+  if (!meta) {
+    return;
+  }
+  const dark = document.documentElement.classList.contains("dark");
+  const borderless =
+    document.documentElement.dataset.layout === "borderless" && !isNarrowViewport();
+  meta.content = borderless
+    ? dark
+      ? BORDERLESS_DARK_THEME_COLOR
+      : BORDERLESS_LIGHT_THEME_COLOR
+    : dark
+      ? DARK_THEME_COLOR
+      : LIGHT_THEME_COLOR;
+}
+
 export function applyTheme(preference: ThemePreference): ResolvedTheme {
   const resolved = resolveTheme(preference);
   if (typeof document !== "undefined") {
     document.documentElement.classList.toggle("dark", resolved === "dark");
-    const meta = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
-    if (meta) {
-      meta.content = resolved === "dark" ? DARK_THEME_COLOR : LIGHT_THEME_COLOR;
-    }
+    syncThemeColor();
   }
   return resolved;
 }
@@ -88,6 +117,15 @@ export function useTheme() {
     media.addEventListener?.("change", onChange);
     return () => media.removeEventListener?.("change", onChange);
   }, [preference]);
+
+  useEffect(() => {
+    if (typeof window.matchMedia !== "function") {
+      return;
+    }
+    const media = window.matchMedia(NARROW_QUERY);
+    media.addEventListener?.("change", syncThemeColor);
+    return () => media.removeEventListener?.("change", syncThemeColor);
+  }, []);
 
   return { preference, resolved, setPreference };
 }

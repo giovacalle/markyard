@@ -3,8 +3,10 @@ import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { renderAfterCustomCss } from "./customCss";
 import "./index.css";
+import { applyLayout, getSettings } from "./settings";
 import { applyTheme, getStoredTheme } from "./theme";
 
+applyLayout(getSettings().layout);
 applyTheme(getStoredTheme());
 
 const root = document.getElementById("root");

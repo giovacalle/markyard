@@ -117,5 +117,6 @@ afterEach(async () => {
   resetViewPrefs();
   resetSettings();
   document.documentElement.classList.remove("dark");
+  document.documentElement.removeAttribute("data-layout");
   await clearLocalCache();
 });
