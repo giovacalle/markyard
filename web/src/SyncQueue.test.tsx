@@ -323,6 +323,7 @@ describe("local-first writes and background sync queue", () => {
 
     // Wait just past AUTOSAVE_DELAY_MS without pressing Cmd+S.
     expect(
+      // test-timeout-allowed: waits out the real 1.5 s AUTOSAVE_DELAY_MS, longer than the default timeout.
       await within(editor).findByText("Saved", {}, { timeout: AUTOSAVE_DELAY_MS + 1_500 }),
     ).toBeInTheDocument();
     expect(puts).toEqual([{ ifMatch: '"etag-1"', text: "hello autosave" }]);

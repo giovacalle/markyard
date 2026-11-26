@@ -36,7 +36,7 @@ afterAll(() => {
 });
 
 const MODIFIED = "2026-11-20T12:00:00.000Z";
-// Longer than the 1 s push debounce.
+// test-timeout-allowed: waits out the real 1 s CLOUD_STATE_PUSH_DELAY_MS, as long as the default timeout.
 const PUSH_WAIT = { timeout: 3000 };
 
 function node(id: string, name: string, kind: "folder" | "markdown") {

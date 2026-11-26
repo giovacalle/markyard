@@ -152,6 +152,7 @@ describe("file tree of the root folder", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(screen.getByText("Loading folder…")).toBeInTheDocument();
 
+    // test-timeout-allowed: waits out the real 1 s Retry-After delay the next assertion measures.
     await screen.findByRole("tree", { name: "Notes" }, { timeout: 3000 });
     expect(calledAt).toHaveLength(2);
     expect(calledAt[1] - calledAt[0]).toBeGreaterThanOrEqual(900);

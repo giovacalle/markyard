@@ -18,4 +18,4 @@ A web test that passes alone but fails on a busy machine (CI, a shared host) dep
 
 Reference numbers from #13 on a 4-core machine: 3 loops failed 2 of 5 runs, 6 loops failed 5 of 5.
 
-The fix belongs in the test: fake timers, or awaiting the state the assertion needs. Production code and timeouts stay as they are (`CODING_STANDARDS.md`).
+The fix belongs in the test: fake timers, or awaiting the state the assertion needs. Production code and timeouts stay as they are (`CODING_STANDARDS.md`). `pnpm check:web` enforces the timeout half with `scripts/check-test-timeouts.mjs`: an explicit `timeout` option in a web test passes only with a `// test-timeout-allowed: <reason>` comment on the line above, for a wait on a real production delay at least as long as the 1 s default.

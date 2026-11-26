@@ -126,6 +126,7 @@ describe("sync reliability", () => {
     expect(alert).toHaveTextContent("Retrying automatically (attempt 1 of 4)…");
 
     // No click on Retry: the scheduled retry lands the edit.
+    // test-timeout-allowed: waits out the real 1-1.25 s retry backoff (RETRY_BASE_DELAY_MS plus jitter).
     expect(await within(editor).findByText("Saved", {}, { timeout: 3_000 })).toBeInTheDocument();
     expect(within(editor).queryByRole("alert")).not.toBeInTheDocument();
     expect(puts).toEqual(["edited", "edited"]);
@@ -643,6 +644,7 @@ describe("sync reliability", () => {
       ),
     );
     expect(
+      // test-timeout-allowed: waits out the real 1.5 s AUTOSAVE_DELAY_MS, longer than the default timeout.
       await within(editor).findByText("Saved", {}, { timeout: AUTOSAVE_DELAY_MS + 1_500 }),
     ).toBeInTheDocument();
     expect(puts).toEqual(["Intro\n![shot](/api/files/img-1/blob)"]);
