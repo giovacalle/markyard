@@ -166,6 +166,110 @@ describe("static serving and CSP headers", () => {
   });
 });
 
+describe("CSP violation reports", () => {
+  const { parent, dir: distDir } = makeTempDist();
+  const logs = [];
+  let running;
+
+  after(async () => {
+    if (running) await running.close();
+    rmSync(parent, { recursive: true, force: true });
+  });
+
+  it("sends Content-Security-Policy-Report-Only on static responses and omits it on /api/*", async () => {
+    running = await startServer({
+      distDir,
+      headersFile: realHeadersFile,
+      log: (line) => logs.push(line),
+    });
+    const expectedCsp = expectedCspFromHeadersFile();
+    const expectedReportOnly = `${expectedCsp}; report-uri /__mock/csp-reports`;
+
+    for (const path of ["/", "/some/deep/route", "/assets/app.js"]) {
+      const res = await fetch(`${running.baseUrl}${path}`);
+      assert.equal(res.status, 200, `expected 200 for ${path}`);
+      assert.equal(res.headers.get("content-security-policy"), expectedCsp);
+      assert.equal(res.headers.get("content-security-policy-report-only"), expectedReportOnly);
+    }
+
+    const sessionRes = await fetch(`${running.baseUrl}/api/session`);
+    assert.equal(sessionRes.status, 200);
+    assert.equal(sessionRes.headers.get("content-security-policy"), null);
+    assert.equal(sessionRes.headers.get("content-security-policy-report-only"), null);
+  });
+
+  it("records application/csp-report and application/reports+json reports, logs each, and rejects invalid requests", async () => {
+    logs.length = 0;
+
+    const initialRes = await fetch(`${running.baseUrl}/__mock/csp-reports`);
+    assert.equal(initialRes.status, 200);
+    assert.deepEqual(await initialRes.json(), []);
+
+    const legacyReport = {
+      "csp-report": {
+        "document-uri": "http://127.0.0.1:4173/",
+        "violated-directive": "img-src 'self'",
+        "blocked-uri": "https://example.com/x.png",
+      },
+    };
+    const legacyRes = await fetch(`${running.baseUrl}/__mock/csp-reports`, {
+      method: "POST",
+      headers: { "Content-Type": "application/csp-report" },
+      body: JSON.stringify(legacyReport),
+    });
+    assert.equal(legacyRes.status, 204);
+
+    const reportingApiEntry = {
+      type: "csp-violation",
+      url: "http://127.0.0.1:4173/",
+      body: {
+        blockedURL: "https://example.com/y.png",
+        effectiveDirective: "img-src",
+      },
+    };
+    const reportingApiRes = await fetch(`${running.baseUrl}/__mock/csp-reports`, {
+      method: "POST",
+      headers: { "Content-Type": "application/reports+json; charset=utf-8" },
+      body: JSON.stringify([reportingApiEntry]),
+    });
+    assert.equal(reportingApiRes.status, 204);
+
+    const listRes = await fetch(`${running.baseUrl}/__mock/csp-reports`);
+    assert.equal(listRes.status, 200);
+    assert.deepEqual(await listRes.json(), [legacyReport, reportingApiEntry]);
+
+    assert.deepEqual(logs, [
+      `csp-report ${JSON.stringify(legacyReport)}`,
+      `csp-report ${JSON.stringify(reportingApiEntry)}`,
+    ]);
+
+    const wrongTypeRes = await fetch(`${running.baseUrl}/__mock/csp-reports`, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain" },
+      body: JSON.stringify(legacyReport),
+    });
+    assert.equal(wrongTypeRes.status, 415);
+
+    const badJsonRes = await fetch(`${running.baseUrl}/__mock/csp-reports`, {
+      method: "POST",
+      headers: { "Content-Type": "application/csp-report" },
+      body: "{",
+    });
+    assert.equal(badJsonRes.status, 400);
+
+    const badMethodRes = await fetch(`${running.baseUrl}/__mock/csp-reports`, {
+      method: "DELETE",
+    });
+    assert.equal(badMethodRes.status, 405);
+    assert.equal(badMethodRes.headers.get("allow"), "GET, POST");
+
+    const afterInvalidRes = await fetch(`${running.baseUrl}/__mock/csp-reports`);
+    assert.equal(afterInvalidRes.status, 200);
+    assert.deepEqual(await afterInvalidRes.json(), [legacyReport, reportingApiEntry]);
+    assert.equal(logs.length, 2);
+  });
+});
+
 describe("loadFixture validation", () => {
   it("rejects cloudSync, needsVaultSetup, and unknown session keys", () => {
     assert.throws(

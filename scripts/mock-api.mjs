@@ -11,6 +11,7 @@ const DEFAULT_PORT = 4173;
 const DEFAULT_DIST_DIR = resolve(repoRoot, "web/dist");
 const DEFAULT_HEADERS_FILE = resolve(repoRoot, "web/public/_headers");
 const DEFAULT_FIXTURE_FILE = resolve(scriptDir, "mock-api.fixture.json");
+const CSP_REPORT_PATH = "/__mock/csp-reports";
 
 const MIME_TYPES = new Map([
   [".html", "text/html; charset=utf-8"],
@@ -141,6 +142,12 @@ function serveStatic(req, res, pathname, distDir, headerRules) {
   const body = readFileSync(filePath);
   for (const [name, value] of headersFor(headerRules, pathname)) {
     res.setHeader(name, value);
+    if (name.toLowerCase() === "content-security-policy") {
+      res.setHeader(
+        "Content-Security-Policy-Report-Only",
+        `${value}; report-uri ${CSP_REPORT_PATH}`,
+      );
+    }
   }
   res.setHeader("Content-Type", contentTypeFor(filePath));
   res.setHeader("Content-Length", String(body.byteLength));
@@ -487,6 +494,50 @@ async function handleApi(req, res, pathname, searchParams, vault) {
   sendError(res, 501, "not_implemented", "Not served by the mock-api fixture");
 }
 
+async function handleCspReports(req, res, reports, log) {
+  const method = req.method ?? "GET";
+  if (method === "GET") {
+    sendJson(res, 200, reports);
+    return;
+  }
+  if (method !== "POST") {
+    res.writeHead(405, {
+      Allow: "GET, POST",
+      "Content-Type": "text/plain; charset=utf-8",
+    });
+    res.end("Method Not Allowed");
+    return;
+  }
+  const contentType =
+    typeof req.headers["content-type"] === "string" ? req.headers["content-type"] : "";
+  const mediaType = contentType.split(";")[0].trim().toLowerCase();
+  if (mediaType !== "application/csp-report" && mediaType !== "application/reports+json") {
+    sendError(
+      res,
+      415,
+      "unsupported_media_type",
+      "Expected application/csp-report or application/reports+json",
+    );
+    return;
+  }
+  const rawBody = (await readRequestBody(req)).toString("utf8");
+  let parsed;
+  try {
+    parsed = JSON.parse(rawBody);
+  } catch {
+    sendError(res, 400, "invalid_json", "Request body must be valid JSON");
+    return;
+  }
+  const entries =
+    mediaType === "application/reports+json" && Array.isArray(parsed) ? parsed : [parsed];
+  for (const entry of entries) {
+    reports.push(entry);
+    log(`csp-report ${JSON.stringify(entry)}`);
+  }
+  res.writeHead(204);
+  res.end();
+}
+
 export function createMockServer({
   distDir = DEFAULT_DIST_DIR,
   headersFile = DEFAULT_HEADERS_FILE,
@@ -495,10 +546,19 @@ export function createMockServer({
 } = {}) {
   const headerRules = parseHeaders(readFileSync(headersFile, "utf8"));
   const vault = fixture ?? loadFixture({ files: {} });
+  const cspReports = [];
   return createServer((req, res) => {
     const rawUrl = req.url ?? "/";
     const queryIndex = rawUrl.indexOf("?");
     const rawPathname = queryIndex === -1 ? rawUrl : rawUrl.slice(0, queryIndex);
+    if (rawPathname === CSP_REPORT_PATH) {
+      void handleCspReports(req, res, cspReports, log).catch(() => {
+        if (!res.headersSent) {
+          sendError(res, 500, "internal_error", "Mock CSP report handler error");
+        }
+      });
+      return;
+    }
     if (rawPathname === "/api" || rawPathname.startsWith("/api/")) {
       const method = req.method ?? "GET";
       res.on("finish", () => {
