@@ -12,6 +12,7 @@ Self-hosted Markdown notes PWA backed by Google Drive, served by a TypeScript + 
 - **Web (`web/`)**:
   - **ui-sdk first** (ADR 0004): build every interactive widget (select, menu, toggle, switch, list, popup, toast, ...) on the matching `@ui-sdk/react` component, starting from `web/node_modules/@ui-sdk/react/docs/llms.txt`. Plain buttons and standalone text inputs stay native; anything else off ui-sdk states why in the commit body.
   - Strict Content Security Policy (`web/public/_headers`): `default-src 'self'`. Zero JSX `style={...}`, zero `setAttribute("style", ...)`, zero inline `<style>` tags (use CSSOM `element.style.setProperty(...)` or `adoptedStyleSheets` when dynamic positioning/styles are required).
+    - Enforced by `scripts/check-csp-source.mjs` during `pnpm check:web` (checks `style={`, `<style`, `setAttribute("style"`, `createElement("style")`; skips comment lines and test files).
   - Keep `skipHtml` enabled in `Preview.tsx` and keep `web/public/sw.js` precaching lean.
 
 ## Review
@@ -27,6 +28,7 @@ Prerequisites: Node 24, `pnpm`.
 - Production build (web bundle + BFF check): `pnpm build`
 - Web check / test: `pnpm check:web`, `pnpm test:web`
 - BFF check / test: `pnpm check:bff`, `pnpm test:bff`
+- Script tests: `pnpm test:scripts`
 - Local-only Worker run (no Cloudflare state writes, port 8788):
   `ALCHEMY_LOCAL_STATE=1 BFF_DEV_PORT=8788 pnpm exec alchemy dev --stage local`
 
