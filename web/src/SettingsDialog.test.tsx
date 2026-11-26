@@ -6,6 +6,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vite-p
 import { App } from "./App";
 import { todayNoteName } from "./commandSearch";
 import { Preview } from "./components/Preview";
+import { SettingsDialog } from "./components/SettingsDialog";
 import { getSettings, updateSettings } from "./settings";
 import { getViewPrefs } from "./viewPrefs";
 
@@ -69,6 +70,168 @@ async function openSettingsFromAccount() {
   return screen.findByRole("dialog", { name: "Settings" });
 }
 
+function showSection(dialog: HTMLElement, name: string) {
+  fireEvent.click(within(dialog).getByRole("tab", { name }));
+}
+
+function renderSettings() {
+  render(
+    <SettingsDialog
+      open
+      onClose={vi.fn()}
+      vaultName="Notes"
+      onChangeVault={vi.fn()}
+      theme="system"
+      onThemeChange={vi.fn()}
+      cloudSync={false}
+      vaultPinned={false}
+      onPinVaultChange={vi.fn()}
+      pendingSyncCount={0}
+      onClearCache={vi.fn(async () => {})}
+    />,
+  );
+  return screen.getByRole("dialog", { name: "Settings" });
+}
+
+/** The dialog moves focus into itself after opening; wait for that before steering focus. */
+async function renderSettledSettings() {
+  const dialog = renderSettings();
+  await vi.waitFor(() => expect(document.activeElement).not.toBe(document.body));
+  return dialog;
+}
+
+const SECTIONS = ["Appearance", "Editor", "Vault", "Sync & Storage"];
+
+/** Every control, by the section it must live in. */
+const SECTION_CONTROLS: Record<string, ((dialog: HTMLElement) => HTMLElement | null)[]> = {
+  Appearance: [(d) => within(d).queryByRole("radiogroup", { name: "Theme" })],
+  Editor: [
+    (d) => within(d).queryByRole("radiogroup", { name: "Default mode" }),
+    (d) => within(d).queryByRole("switch", { name: "URL link previews" }),
+    (d) => within(d).queryByRole("switch", { name: "Read-only mode" }),
+    (d) => within(d).queryByRole("switch", { name: "Focus mode" }),
+    (d) => within(d).queryByRole("switch", { name: "Typewriter mode" }),
+  ],
+  Vault: [
+    (d) => within(d).queryByTestId("settings-vault-name"),
+    (d) => within(d).queryByRole("button", { name: "Change vault…" }),
+    (d) => within(d).queryByLabelText("Attachments folder"),
+    (d) => within(d).queryByRole("switch", { name: "Show attachments folder" }),
+    (d) => within(d).queryByLabelText("Daily notes folder"),
+    (d) => within(d).queryByLabelText("Templates folder"),
+  ],
+  "Sync & Storage": [
+    (d) => within(d).queryByTestId("settings-cloud-sync"),
+    (d) => within(d).queryByRole("switch", { name: "Offline vault" }),
+    (d) => within(d).queryByRole("button", { name: "Clear local cache" }),
+  ],
+};
+
+describe("Settings sections", () => {
+  const originalMatchMedia = Object.getOwnPropertyDescriptor(window, "matchMedia");
+
+  afterEach(() => {
+    if (originalMatchMedia) {
+      Object.defineProperty(window, "matchMedia", originalMatchMedia);
+    }
+  });
+
+  function mockNarrowViewport(narrow: boolean) {
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      writable: true,
+      value: (query: string) => ({
+        matches: narrow && query === "(max-width: 47.99rem)",
+        media: query,
+        addEventListener: () => undefined,
+        removeEventListener: () => undefined,
+      }),
+    });
+  }
+
+  it("lists the four sections in order with Appearance selected", () => {
+    const dialog = renderSettings();
+    const list = within(dialog).getByRole("tablist", { name: "Settings sections" });
+    const tabs = within(list).getAllByRole("tab");
+    expect(tabs.map((tab) => tab.textContent)).toEqual(SECTIONS);
+    expect(within(list).getByRole("tab", { name: "Appearance" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    const panel = within(dialog).getByRole("tabpanel");
+    expect(within(panel).getByRole("heading", { name: "Appearance" })).toBeInTheDocument();
+  });
+
+  it("moves between sections with the Up and Down arrows", async () => {
+    const dialog = await renderSettledSettings();
+    const appearance = within(dialog).getByRole("tab", { name: "Appearance" });
+    appearance.focus();
+    fireEvent.keyDown(appearance, { key: "ArrowDown" });
+    const editor = within(dialog).getByRole("tab", { name: "Editor" });
+    await vi.waitFor(() => expect(editor).toHaveAttribute("aria-selected", "true"));
+    expect(document.activeElement).toBe(editor);
+    expect(within(dialog).getByRole("tabpanel", { name: "Editor" })).toBeInTheDocument();
+
+    fireEvent.keyDown(editor, { key: "ArrowUp" });
+    await vi.waitFor(() => expect(appearance).toHaveAttribute("aria-selected", "true"));
+    expect(document.activeElement).toBe(appearance);
+  });
+
+  it("shows each control only in its own section", () => {
+    const dialog = renderSettings();
+    for (const section of SECTIONS) {
+      showSection(dialog, section);
+      const panel = within(dialog).getByRole("tabpanel", { name: section });
+      expect(within(panel).getByRole("heading", { name: section })).toBeInTheDocument();
+      for (const [owner, controls] of Object.entries(SECTION_CONTROLS)) {
+        for (const control of controls) {
+          if (owner === section) {
+            expect(control(panel)).toBeInTheDocument();
+          } else {
+            expect(control(dialog)).toBeNull();
+          }
+        }
+      }
+    }
+  });
+
+  it("drills into one section on narrow screens and goes back to the list", async () => {
+    mockNarrowViewport(true);
+    const dialog = await renderSettledSettings();
+    const list = within(dialog).getByRole("tablist", { name: "Settings sections" });
+    expect(within(list).getAllByRole("tab")).toHaveLength(4);
+    expect(within(dialog).queryByRole("tabpanel")).toBeNull();
+
+    const vaultTab = within(list).getByRole("tab", { name: "Vault" });
+    fireEvent.click(vaultTab);
+    const panel = within(dialog).getByRole("tabpanel", { name: "Vault" });
+    expect(within(panel).getByTestId("settings-vault-name")).toHaveTextContent("Notes");
+    expect(within(dialog).queryByRole("tablist")).toBeNull();
+    const back = within(dialog).getByRole("button", { name: "Back to settings sections" });
+    expect(document.activeElement).toBe(back);
+
+    fireEvent.click(back);
+    expect(within(dialog).getByRole("tablist", { name: "Settings sections" })).toBeVisible();
+    expect(within(dialog).queryByRole("tabpanel")).toBeNull();
+    expect(within(dialog).queryByRole("button", { name: "Back to settings sections" })).toBeNull();
+    expect(document.activeElement).toBe(within(dialog).getByRole("tab", { name: "Vault" }));
+  });
+
+  it("keeps exactly one section tab in the Tab order of the narrow list view", () => {
+    mockNarrowViewport(true);
+    const dialog = renderSettings();
+    const tabs = within(dialog).getAllByRole("tab");
+    expect(tabs.map((tab) => tab.getAttribute("tabindex"))).toEqual(["0", "-1", "-1", "-1"]);
+  });
+
+  it("falls back to the desktop layout without matchMedia", () => {
+    Reflect.deleteProperty(window, "matchMedia");
+    const dialog = renderSettings();
+    expect(within(dialog).getByRole("tabpanel", { name: "Appearance" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("radiogroup", { name: "Theme" })).toBeInTheDocument();
+  });
+});
+
 describe("Settings dialog", () => {
   it("opens from the account popover and from Cmd+K, and closes on Escape", async () => {
     vault();
@@ -76,6 +239,7 @@ describe("Settings dialog", () => {
     await screen.findByRole("treeitem", { name: /a\.md/ });
 
     let dialog = await openSettingsFromAccount();
+    showSection(dialog, "Vault");
     expect(within(dialog).getByTestId("settings-vault-name")).toHaveTextContent("Notes");
     fireEvent.keyDown(dialog, { key: "Escape" });
     await vi.waitFor(() => expect(screen.queryByRole("dialog", { name: "Settings" })).toBeNull());
@@ -85,7 +249,11 @@ describe("Settings dialog", () => {
     fireEvent.change(within(palette).getByRole("combobox"), { target: { value: ">settings" } });
     fireEvent.click(within(palette).getByRole("option", { name: /Open Settings/ }));
     dialog = await screen.findByRole("dialog", { name: "Settings" });
-    expect(within(dialog).getByRole("heading", { name: "Vault & Folders" })).toBeInTheDocument();
+    const sections = within(dialog).getByRole("tablist", { name: "Settings sections" });
+    expect(within(sections).getByRole("tab", { name: "Appearance" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
   });
 
   it("edits folder settings, rejects invalid names and resets a customized folder", async () => {
@@ -93,6 +261,7 @@ describe("Settings dialog", () => {
     render(<App />);
     await screen.findByRole("treeitem", { name: /a\.md/ });
     const dialog = await openSettingsFromAccount();
+    showSection(dialog, "Vault");
 
     const attachments = within(dialog).getByLabelText("Attachments folder");
     expect(attachments).toHaveValue("_attachments");
@@ -144,6 +313,7 @@ describe("Settings dialog", () => {
     fireEvent.click(within(theme).getByRole("radio", { name: "Dark" }));
     expect(document.documentElement.classList.contains("dark")).toBe(true);
 
+    showSection(dialog, "Editor");
     const mode = within(dialog).getByRole("radiogroup", { name: "Default mode" });
     expect(within(mode).getByRole("radio", { name: "Preview" })).toHaveAttribute(
       "aria-checked",
@@ -152,6 +322,7 @@ describe("Settings dialog", () => {
     fireEvent.click(within(mode).getByRole("radio", { name: "Edit" }));
     expect(getSettings().defaultMode).toBe("edit");
 
+    showSection(dialog, "Vault");
     const showAttachments = within(dialog).getByRole("switch", {
       name: "Show attachments folder",
     });
@@ -166,6 +337,7 @@ describe("Settings dialog", () => {
     expect(showAttachments).not.toHaveAttribute("data-checked");
     expect(getSettings().showAttachmentsFolder).toBe(false);
 
+    showSection(dialog, "Editor");
     const previews = within(dialog).getByRole("switch", { name: "URL link previews" });
     expect(previews).toHaveAttribute("aria-checked", "true");
     fireEvent.click(previews);
@@ -192,6 +364,7 @@ describe("Settings dialog", () => {
     const { unmount } = render(<App />);
     await screen.findByRole("treeitem", { name: /a\.md/ });
     let dialog = await openSettingsFromAccount();
+    showSection(dialog, "Sync & Storage");
     expect(within(dialog).getByTestId("settings-cloud-sync")).toHaveTextContent("Local only");
     unmount();
 
@@ -208,6 +381,7 @@ describe("Settings dialog", () => {
     render(<App />);
     await screen.findByRole("treeitem", { name: /a\.md/ });
     dialog = await openSettingsFromAccount();
+    showSection(dialog, "Sync & Storage");
     expect(within(dialog).getByTestId("settings-cloud-sync")).toHaveTextContent(
       "Active (Cloudflare D1)",
     );
@@ -226,6 +400,7 @@ describe("Settings dialog", () => {
     await screen.findByRole("treeitem", { name: /a\.md/ });
     expect(listings).toBe(1);
     const dialog = await openSettingsFromAccount();
+    showSection(dialog, "Sync & Storage");
 
     fireEvent.click(within(dialog).getByRole("button", { name: "Clear local cache" }));
     const confirm = within(dialog).getByRole("group", { name: "Confirm clearing the local cache" });

@@ -8,7 +8,8 @@ import {
 } from "@ui-sdk/react/dialog";
 import { SegmentedControl, SegmentedControlItem } from "@ui-sdk/react/segmented-control";
 import { Switch, SwitchThumb } from "@ui-sdk/react/switch";
-import { type ReactNode, useId, useState } from "react";
+import { Tabs, TabsList, TabsPanel, TabsTab, TabsTabIcon } from "@ui-sdk/react/tabs";
+import { type ReactNode, useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
 import {
   type AppSettings,
   DEFAULT_SETTINGS,
@@ -19,7 +20,7 @@ import {
 } from "../settings";
 import type { ThemePreference } from "../theme";
 import { setViewPref, useViewPrefs, type ViewPrefKey } from "../viewPrefs";
-import { CloseIcon } from "./icons";
+import { ChevronIcon, CloseIcon } from "./icons";
 
 type FolderKey = "attachmentsFolder" | "dailyNotesFolder" | "templatesFolder";
 
@@ -203,6 +204,35 @@ function SwitchRow({
   );
 }
 
+const SECTIONS = [
+  { value: "appearance", label: "Appearance" },
+  { value: "editor", label: "Editor" },
+  { value: "vault", label: "Vault" },
+  { value: "sync", label: "Sync & Storage" },
+] as const;
+
+type SectionValue = (typeof SECTIONS)[number]["value"];
+
+/** Below the `md` breakpoint: the same query the rest of the app uses for narrow screens. */
+const NARROW_QUERY = "(max-width: 47.99rem)";
+
+function subscribeNarrow(onChange: () => void) {
+  if (typeof window.matchMedia !== "function") {
+    return () => {};
+  }
+  const media = window.matchMedia(NARROW_QUERY);
+  media.addEventListener("change", onChange);
+  return () => media.removeEventListener("change", onChange);
+}
+
+function isNarrow() {
+  return typeof window.matchMedia === "function" && window.matchMedia(NARROW_QUERY).matches;
+}
+
+function useNarrowScreen() {
+  return useSyncExternalStore(subscribeNarrow, isNarrow, () => false);
+}
+
 const THEMES: readonly { value: ThemePreference; label: string }[] = [
   { value: "light", label: "Light" },
   { value: "dark", label: "Dark" },
@@ -275,7 +305,7 @@ export function SettingsDialog({
       }}
     >
       <DialogBackdrop className="fixed inset-0 z-40 bg-neutral-950/50 backdrop-blur-[1px]" />
-      <DialogContent className="fixed top-1/2 left-1/2 z-40 flex max-h-[min(44rem,calc(100dvh-2rem))] w-[min(32rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 flex-col rounded-xl border border-neutral-200 bg-white text-neutral-900 shadow-xl outline-none dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-100">
+      <DialogContent className="fixed top-1/2 left-1/2 z-40 flex h-[min(36rem,calc(100dvh-2rem))] w-[min(48rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 flex-col rounded-xl border border-neutral-200 bg-white text-neutral-900 shadow-xl outline-none dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-100">
         <div className="flex items-start justify-between gap-3 border-b border-neutral-200 px-5 py-4 dark:border-neutral-800">
           <div className="space-y-0.5">
             <DialogTitle className="text-base font-semibold">Settings</DialogTitle>
@@ -323,6 +353,24 @@ function SettingsBody({
   const [confirmingClear, setConfirmingClear] = useState(false);
   const [clearing, setClearing] = useState(false);
   const [cleared, setCleared] = useState(false);
+  const narrow = useNarrowScreen();
+  // Narrow screens start on the section list (nothing selected); wide screens always show one.
+  const [section, setSection] = useState<SectionValue | null>(null);
+  const selected = narrow ? section : (section ?? "appearance");
+  const drilledIn = narrow && selected !== null;
+  const backRef = useRef<HTMLButtonElement>(null);
+  const tabRefs = useRef<Partial<Record<SectionValue, HTMLButtonElement | null>>>({});
+  // The section a narrow drill-in came from, so Back returns focus to its tab.
+  const returnTo = useRef<SectionValue | null>(null);
+
+  useEffect(() => {
+    if (drilledIn) {
+      backRef.current?.focus();
+    } else if (narrow && returnTo.current !== null) {
+      tabRefs.current[returnTo.current]?.focus();
+      returnTo.current = null;
+    }
+  }, [drilledIn, narrow]);
 
   const clearCache = async () => {
     setClearing(true);
@@ -335,180 +383,250 @@ function SettingsBody({
     }
   };
 
-  return (
-    <div className="min-h-0 space-y-6 overflow-y-auto px-5 py-4">
-      <Section title="Vault & Folders">
+  const vaultControls = (
+    <>
+      <div className="flex items-center justify-between gap-3">
+        <span className="min-w-0">
+          <span className="block text-sm font-medium text-neutral-800 dark:text-neutral-200">
+            Vault folder
+          </span>
+          <span
+            data-testid="settings-vault-name"
+            className="block truncate text-xs text-neutral-500 dark:text-neutral-400"
+            title={vaultName}
+          >
+            {vaultName ?? "Not configured"}
+          </span>
+        </span>
+        <button
+          type="button"
+          disabled={pendingSyncCount > 0}
+          title={
+            pendingSyncCount > 0
+              ? "Wait until every note is saved to Drive before changing vault."
+              : undefined
+          }
+          onClick={onChangeVault}
+          className="shrink-0 rounded-lg disabled:opacity-50 border border-neutral-300 px-2.5 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
+        >
+          Change vault…
+        </button>
+      </div>
+      <FolderField
+        settingKey="attachmentsFolder"
+        label="Attachments folder"
+        placeholder={DEFAULT_SETTINGS.attachmentsFolder}
+        help="Uploaded images go here, directly under the vault folder."
+      />
+      <SwitchRow
+        label="Show attachments folder"
+        description="Show the attachments folder in the file tree, move picker and command palette."
+        checked={settings.showAttachmentsFolder}
+        onChange={(showAttachmentsFolder) => updateSettings({ showAttachmentsFolder })}
+      />
+      <FolderField
+        settingKey="dailyNotesFolder"
+        label="Daily notes folder"
+        placeholder="Vault root (leave empty)"
+        help="e.g. Daily — created automatically if missing"
+        allowEmpty
+      />
+      <FolderField
+        settingKey="templatesFolder"
+        label="Templates folder"
+        placeholder={DEFAULT_SETTINGS.templatesFolder}
+        help="Notes here become / templates; Daily.md shapes new daily notes."
+      />
+    </>
+  );
+
+  const editorControls = (
+    <>
+      <Segmented
+        label="Default mode"
+        value={settings.defaultMode}
+        options={MODES}
+        onChange={(defaultMode) => updateSettings({ defaultMode })}
+      />
+      <SwitchRow
+        label="URL link previews"
+        description="Hover cards and bookmark cards for web links."
+        checked={settings.linkPreviewsEnabled}
+        onChange={(linkPreviewsEnabled) => updateSettings({ linkPreviewsEnabled })}
+      />
+      {VIEW_TOGGLES.map(({ key, label, description }) => (
+        <SwitchRow
+          key={key}
+          label={label}
+          description={description}
+          checked={viewPrefs[key]}
+          onChange={(next) => setViewPref(key, next)}
+        />
+      ))}
+    </>
+  );
+
+  const syncControls = (
+    <>
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-sm font-medium text-neutral-800 dark:text-neutral-200">
+          Cloud sync
+        </span>
+        <span
+          data-testid="settings-cloud-sync"
+          className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium ${
+            cloudSync === true
+              ? "bg-emerald-50 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-200"
+              : "bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300"
+          }`}
+        >
+          <span
+            aria-hidden="true"
+            className={`size-1.5 rounded-full ${cloudSync === true ? "bg-emerald-500" : "bg-neutral-400"}`}
+          />
+          {cloudSync === true ? "Active (Cloudflare D1)" : "Local only"}
+        </span>
+      </div>
+      {onPinVaultChange && (
+        <SwitchRow
+          label="Offline vault"
+          description={
+            vaultPinned
+              ? "Every note is kept on this device."
+              : "Only notes you open are kept on this device."
+          }
+          checked={vaultPinned}
+          onChange={onPinVaultChange}
+        />
+      )}
+      <div className="space-y-2">
         <div className="flex items-center justify-between gap-3">
           <span className="min-w-0">
             <span className="block text-sm font-medium text-neutral-800 dark:text-neutral-200">
-              Vault folder
+              Local cache
             </span>
-            <span
-              data-testid="settings-vault-name"
-              className="block truncate text-xs text-neutral-500 dark:text-neutral-400"
-              title={vaultName}
+            <span className="block text-xs text-neutral-500 dark:text-neutral-400">
+              {pendingSyncCount > 0
+                ? "Wait until every note is saved to Drive before clearing."
+                : "Cached folders and notes on this device; reloaded from Drive."}
+            </span>
+          </span>
+          {!confirmingClear && (
+            <button
+              type="button"
+              disabled={pendingSyncCount > 0 || clearing}
+              onClick={() => {
+                setCleared(false);
+                setConfirmingClear(true);
+              }}
+              className="shrink-0 rounded-lg border border-neutral-300 px-2.5 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
             >
-              {vaultName ?? "Not configured"}
-            </span>
-          </span>
-          <button
-            type="button"
-            disabled={pendingSyncCount > 0}
-            title={
-              pendingSyncCount > 0
-                ? "Wait until every note is saved to Drive before changing vault."
-                : undefined
-            }
-            onClick={onChangeVault}
-            className="shrink-0 rounded-lg disabled:opacity-50 border border-neutral-300 px-2.5 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
-          >
-            Change vault…
-          </button>
+              Clear local cache
+            </button>
+          )}
         </div>
-        <FolderField
-          settingKey="attachmentsFolder"
-          label="Attachments folder"
-          placeholder={DEFAULT_SETTINGS.attachmentsFolder}
-          help="Uploaded images go here, directly under the vault folder."
-        />
-        <SwitchRow
-          label="Show attachments folder"
-          description="Show the attachments folder in the file tree, move picker and command palette."
-          checked={settings.showAttachmentsFolder}
-          onChange={(showAttachmentsFolder) => updateSettings({ showAttachmentsFolder })}
-        />
-        <FolderField
-          settingKey="dailyNotesFolder"
-          label="Daily notes folder"
-          placeholder="Vault root (leave empty)"
-          help="e.g. Daily — created automatically if missing"
-          allowEmpty
-        />
-        <FolderField
-          settingKey="templatesFolder"
-          label="Templates folder"
-          placeholder={DEFAULT_SETTINGS.templatesFolder}
-          help="Notes here become / templates; Daily.md shapes new daily notes."
-        />
-      </Section>
-
-      <Section title="Editor & Preview">
-        <Segmented label="Theme" value={theme} options={THEMES} onChange={onThemeChange} />
-        <Segmented
-          label="Default mode"
-          value={settings.defaultMode}
-          options={MODES}
-          onChange={(defaultMode) => updateSettings({ defaultMode })}
-        />
-        <SwitchRow
-          label="URL link previews"
-          description="Hover cards and bookmark cards for web links."
-          checked={settings.linkPreviewsEnabled}
-          onChange={(linkPreviewsEnabled) => updateSettings({ linkPreviewsEnabled })}
-        />
-        {VIEW_TOGGLES.map(({ key, label, description }) => (
-          <SwitchRow
-            key={key}
-            label={label}
-            description={description}
-            checked={viewPrefs[key]}
-            onChange={(next) => setViewPref(key, next)}
-          />
-        ))}
-      </Section>
-
-      <Section title="Sync & Storage">
-        <div className="flex items-center justify-between gap-3">
-          <span className="text-sm font-medium text-neutral-800 dark:text-neutral-200">
-            Cloud sync
-          </span>
-          <span
-            data-testid="settings-cloud-sync"
-            className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium ${
-              cloudSync === true
-                ? "bg-emerald-50 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-200"
-                : "bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300"
-            }`}
+        {confirmingClear && (
+          <div
+            role="group"
+            aria-label="Confirm clearing the local cache"
+            className="flex items-center justify-between gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800 dark:border-red-900/60 dark:bg-red-950/50 dark:text-red-200"
           >
-            <span
-              aria-hidden="true"
-              className={`size-1.5 rounded-full ${cloudSync === true ? "bg-emerald-500" : "bg-neutral-400"}`}
-            />
-            {cloudSync === true ? "Active (Cloudflare D1)" : "Local only"}
-          </span>
-        </div>
-        {onPinVaultChange && (
-          <SwitchRow
-            label="Offline vault"
-            description={
-              vaultPinned
-                ? "Every note is kept on this device."
-                : "Only notes you open are kept on this device."
-            }
-            checked={vaultPinned}
-            onChange={onPinVaultChange}
-          />
-        )}
-        <div className="space-y-2">
-          <div className="flex items-center justify-between gap-3">
-            <span className="min-w-0">
-              <span className="block text-sm font-medium text-neutral-800 dark:text-neutral-200">
-                Local cache
-              </span>
-              <span className="block text-xs text-neutral-500 dark:text-neutral-400">
-                {pendingSyncCount > 0
-                  ? "Wait until every note is saved to Drive before clearing."
-                  : "Cached folders and notes on this device; reloaded from Drive."}
-              </span>
-            </span>
-            {!confirmingClear && (
+            <span>Clear the cache and reload the vault from Drive?</span>
+            <span className="flex shrink-0 gap-1.5">
               <button
                 type="button"
-                disabled={pendingSyncCount > 0 || clearing}
-                onClick={() => {
-                  setCleared(false);
-                  setConfirmingClear(true);
-                }}
-                className="shrink-0 rounded-lg border border-neutral-300 px-2.5 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
+                disabled={clearing}
+                onClick={() => setConfirmingClear(false)}
+                className="rounded-md px-2 py-1 font-medium hover:bg-red-100 disabled:opacity-50 dark:hover:bg-red-900/50"
               >
-                Clear local cache
+                Cancel
               </button>
-            )}
+              <button
+                type="button"
+                disabled={clearing}
+                onClick={() => void clearCache()}
+                className="rounded-md bg-red-600 px-2 py-1 font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+              >
+                {clearing ? "Clearing…" : "Clear cache"}
+              </button>
+            </span>
           </div>
-          {confirmingClear && (
-            <div
-              role="group"
-              aria-label="Confirm clearing the local cache"
-              className="flex items-center justify-between gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800 dark:border-red-900/60 dark:bg-red-950/50 dark:text-red-200"
+        )}
+        {cleared && (
+          <p role="status" className="text-xs text-neutral-500 dark:text-neutral-400">
+            Local cache cleared.
+          </p>
+        )}
+      </div>
+    </>
+  );
+
+  const content: Record<SectionValue, ReactNode> = {
+    appearance: <Segmented label="Theme" value={theme} options={THEMES} onChange={onThemeChange} />,
+    editor: editorControls,
+    vault: vaultControls,
+    sync: syncControls,
+  };
+
+  return (
+    <Tabs
+      orientation="vertical"
+      activation={narrow ? "manual" : "automatic"}
+      value={selected}
+      onValueChange={(next) => {
+        if (next !== null) {
+          returnTo.current = narrow ? next : null;
+          setSection(next as SectionValue);
+        }
+      }}
+      className="flex min-h-0 flex-1"
+    >
+      <TabsList
+        aria-label="Settings sections"
+        hidden={drilledIn}
+        className="flex w-full shrink-0 flex-col gap-0.5 overflow-y-auto p-2 md:w-48 md:border-r md:border-neutral-200 md:dark:border-neutral-800"
+      >
+        {SECTIONS.map(({ value, label }) => (
+          <TabsTab
+            key={value}
+            value={value}
+            ref={(element: HTMLButtonElement | null) => {
+              tabRefs.current[value] = element;
+            }}
+            className="flex items-center justify-between gap-2 rounded-lg px-3 py-2 text-left text-sm font-medium text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900 focus-visible:outline-2 focus-visible:outline-blue-600 data-selected:bg-neutral-100 data-selected:text-neutral-950 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100 dark:data-selected:bg-neutral-800 dark:data-selected:text-neutral-50"
+          >
+            {label}
+            <TabsTabIcon className="text-neutral-400 md:hidden dark:text-neutral-500">
+              <ChevronIcon className="size-4" />
+            </TabsTabIcon>
+          </TabsTab>
+        ))}
+      </TabsList>
+      {selected !== null && (
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          {narrow && (
+            <button
+              ref={backRef}
+              type="button"
+              aria-label="Back to settings sections"
+              onClick={() => setSection(null)}
+              className="mx-2 mt-2 inline-flex items-center gap-1 self-start rounded-lg px-2 py-1.5 text-sm font-medium text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900 focus-visible:outline-2 focus-visible:outline-blue-600 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
             >
-              <span>Clear the cache and reload the vault from Drive?</span>
-              <span className="flex shrink-0 gap-1.5">
-                <button
-                  type="button"
-                  disabled={clearing}
-                  onClick={() => setConfirmingClear(false)}
-                  className="rounded-md px-2 py-1 font-medium hover:bg-red-100 disabled:opacity-50 dark:hover:bg-red-900/50"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  disabled={clearing}
-                  onClick={() => void clearCache()}
-                  className="rounded-md bg-red-600 px-2 py-1 font-semibold text-white hover:bg-red-700 disabled:opacity-50"
-                >
-                  {clearing ? "Clearing…" : "Clear cache"}
-                </button>
-              </span>
-            </div>
+              <ChevronIcon aria-hidden="true" className="size-4 rotate-180" />
+              Sections
+            </button>
           )}
-          {cleared && (
-            <p role="status" className="text-xs text-neutral-500 dark:text-neutral-400">
-              Local cache cleared.
-            </p>
-          )}
+          {SECTIONS.map(({ value, label }) => (
+            <TabsPanel
+              key={value}
+              value={value}
+              className="min-h-0 flex-1 overflow-y-auto px-5 py-4 outline-none"
+            >
+              <Section title={label}>{content[value]}</Section>
+            </TabsPanel>
+          ))}
         </div>
-      </Section>
-    </div>
+      )}
+    </Tabs>
   );
 }

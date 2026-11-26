@@ -432,6 +432,7 @@ describe("local-first structural vault operations (App integration)", () => {
     fireEvent.click(screen.getByRole("button", { name: /owner@example\.com/ }));
     fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
     const settingsDialog = await screen.findByRole("dialog", { name: "Settings" });
+    fireEvent.click(within(settingsDialog).getByRole("tab", { name: "Sync & Storage" }));
     expect(
       within(settingsDialog).getByRole("button", { name: "Clear local cache" }),
     ).toBeDisabled();

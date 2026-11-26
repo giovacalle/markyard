@@ -205,6 +205,7 @@ describe("changing vault from Settings", () => {
     fireEvent.click(screen.getByRole("button", { name: /Account:/ }));
     fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
     const settings = await screen.findByRole("dialog", { name: "Settings" });
+    fireEvent.click(within(settings).getByRole("tab", { name: "Vault" }));
     expect(within(settings).getByTestId("settings-vault-name")).toHaveTextContent("Old vault");
     fireEvent.click(within(settings).getByRole("button", { name: "Change vault…" }));
 
