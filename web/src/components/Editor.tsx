@@ -9,7 +9,13 @@ import {
 } from "@codemirror/commands";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { yamlFrontmatter, yamlLanguage } from "@codemirror/lang-yaml";
-import { foldGutter, foldKeymap, HighlightStyle, syntaxHighlighting } from "@codemirror/language";
+import {
+  foldGutter,
+  foldKeymap,
+  forceParsing,
+  HighlightStyle,
+  syntaxHighlighting,
+} from "@codemirror/language";
 import {
   Annotation,
   Compartment,
@@ -596,6 +602,7 @@ export function Editor({
     const shadow = host.shadowRoot ?? host.attachShadow({ mode: "open" });
     const view = new EditorView({ state, parent: shadow, root: shadow });
     adoptUserSheet(shadow);
+    forceParsing(view, Math.min(view.state.doc.length, 3000), 250);
     viewRef.current = view;
     if (editorRef) {
       editorRef.current = {

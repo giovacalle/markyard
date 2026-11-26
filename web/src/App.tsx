@@ -45,7 +45,7 @@ import { setCustomCss, setCustomCssLoadedNotes, useCustomCss } from "./customCss
 import { AccountPopover } from "./components/AccountPopover";
 import { CommandPalette, type FolderTarget } from "./components/CommandPalette";
 import { DeleteFileDialog } from "./components/DeleteFileDialog";
-import { DocumentView, type DocumentHandle } from "./components/DocumentView";
+import { DocumentView, type DocumentHandle, preloadPreview } from "./components/DocumentView";
 import { FileTree } from "./components/FileTree";
 import { MoveDialog } from "./components/MoveDialog";
 import { SettingsDialog } from "./components/SettingsDialog";
@@ -767,10 +767,19 @@ function SessionContent({
   });
   const hasUnsaved = dirty || pendingSyncCount > 0;
   const session = data ?? (hasUnsaved ? (hydrateState.cachedSession ?? undefined) : undefined);
+  const rootEnabled =
+    session !== undefined && session.needsVaultSetup !== true && !isUnauthenticated(error);
+
+  useEffect(() => {
+    if (rootEnabled) {
+      void preloadPreview().catch(() => undefined);
+    }
+  }, [rootEnabled]);
+
   const rootQuery = useQuery({
     queryKey: ["root"],
     queryFn: ({ signal }) => fetchAndCacheRoot(signal),
-    enabled: session !== undefined && session.needsVaultSetup !== true && !isUnauthenticated(error),
+    enabled: rootEnabled,
   });
 
   /**

@@ -102,11 +102,54 @@ function PreviewLoadFailed() {
   );
 }
 
-const Preview = lazy(() =>
-  import("./Preview")
-    .then((m) => ({ default: m.Preview }))
+type PreviewComponent = typeof import("./Preview").Preview;
+type PreviewProps = Parameters<PreviewComponent>[0];
+
+let previewImport: Promise<PreviewComponent> | null = null;
+let loadedPreview: PreviewComponent | null = null;
+
+/**
+ * Fetches and evaluates the Markdown Preview chunk ahead of the first note open. Safe to call
+ * repeatedly; a failed load is forgotten so the next call tries again.
+ */
+export function preloadPreview(): Promise<PreviewComponent> {
+  previewImport ??= import("./Preview").then(
+    (m) => {
+      loadedPreview = m.Preview;
+      return m.Preview;
+    },
+    (error: unknown) => {
+      previewImport = null;
+      throw error;
+    },
+  );
+  return previewImport;
+}
+
+const LazyPreview = lazy(() =>
+  preloadPreview()
+    .then((Preview) => ({ default: Preview }))
     .catch(() => ({ default: PreviewLoadFailed })),
 );
+
+/** Renders Preview without a Suspense round-trip once its chunk is already loaded. */
+function PreviewSlot(props: PreviewProps) {
+  const [Loaded] = useState(() => loadedPreview);
+  if (Loaded !== null) {
+    return <Loaded {...props} />;
+  }
+  return (
+    <Suspense
+      fallback={
+        <p className="text-sm text-neutral-500 dark:text-neutral-400" role="status">
+          Loading preview…
+        </p>
+      }
+    >
+      <LazyPreview {...props} />
+    </Suspense>
+  );
+}
 
 function EditorLoadFailed() {
   return (
@@ -1843,17 +1886,7 @@ function DocumentBody({
     );
   }
 
-  return (
-    <Suspense
-      fallback={
-        <p className="text-sm text-neutral-500 dark:text-neutral-400" role="status">
-          Loading preview…
-        </p>
-      }
-    >
-      <Preview text={text} onToggleTask={onToggleTask} />
-    </Suspense>
-  );
+  return <PreviewSlot text={text} onToggleTask={onToggleTask} />;
 }
 
 function DocumentError({ error, onRetry }: { error: unknown; onRetry: () => void }) {
