@@ -4,6 +4,7 @@ import { HttpResponse, http } from "msw";
 import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vite-plus/test";
 import { App } from "./App";
+import { preloadEditor, preloadPreview } from "./components/DocumentView";
 import {
   readCachedFile,
   readPendingWrite,
@@ -14,8 +15,9 @@ import { VAULT_PIN_STORAGE_KEY } from "./vaultSync";
 
 const server = setupServer();
 
-beforeAll(() => {
+beforeAll(async () => {
   server.listen({ onUnhandledFrame: "error" });
+  await Promise.all([preloadPreview(), preloadEditor()]);
 });
 
 afterEach(() => {
@@ -119,7 +121,7 @@ describe("live Drive sync", () => {
   it("refreshes the open note quietly when Drive changed it and nothing is unsaved", async () => {
     history.replaceState(null, "", "/?file=doc-1");
     signedIn();
-    await changesFeed([externalChange("doc-1", "a.md")]);
+    const report = await changesFeed();
     let reads = 0;
     server.use(
       http.get("/api/files/doc-1/content", () => {
@@ -129,8 +131,15 @@ describe("live Drive sync", () => {
     );
 
     render(<App />);
-    expect(await screen.findByText("Updated from Drive")).toBeInTheDocument();
     const preview = await screen.findByRole("region", { name: "Preview" });
+    await vi.waitFor(() => expect(preview).toHaveTextContent("mine"));
+
+    report([externalChange("doc-1", "a.md")]);
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
+
+    expect(await screen.findByText("Updated from Drive")).toBeInTheDocument();
     await vi.waitFor(() => expect(preview).toHaveTextContent("theirs"));
     expect(screen.queryByText("This note was updated on Drive")).not.toBeInTheDocument();
   });
@@ -138,7 +147,7 @@ describe("live Drive sync", () => {
   it("shows 'Updated from Drive' as a ui-sdk toast and dismisses it when another note opens", async () => {
     history.replaceState(null, "", "/?file=doc-1");
     signedIn([node("doc-1", "a.md", "markdown"), node("doc-2", "b.md", "markdown")]);
-    await changesFeed([externalChange("doc-1", "a.md")]);
+    const report = await changesFeed();
     let reads = 0;
     server.use(
       http.get("/api/files/doc-1/content", () => {
@@ -149,6 +158,14 @@ describe("live Drive sync", () => {
     );
 
     render(<App />);
+    const preview = await screen.findByRole("region", { name: "Preview" });
+    await vi.waitFor(() => expect(preview).toHaveTextContent("mine"));
+
+    report([externalChange("doc-1", "a.md")]);
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
+
     const message = await screen.findByText("Updated from Drive");
     const region = screen.getByRole("region", { name: "Notifications" });
     expect(region).toContainElement(message);
@@ -164,7 +181,7 @@ describe("live Drive sync", () => {
   it("centers the toast region on the note column, not on the window", async () => {
     history.replaceState(null, "", "/?file=doc-1");
     signedIn([node("doc-1", "a.md", "markdown")]);
-    await changesFeed([externalChange("doc-1", "a.md")]);
+    const report = await changesFeed();
     let reads = 0;
     server.use(
       http.get("/api/files/doc-1/content", () => {
@@ -180,6 +197,14 @@ describe("live Drive sync", () => {
       });
 
     render(<App />);
+    const preview = await screen.findByRole("region", { name: "Preview" });
+    await vi.waitFor(() => expect(preview).toHaveTextContent("mine"));
+
+    report([externalChange("doc-1", "a.md")]);
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
+
     await screen.findByText("Updated from Drive");
     const region = screen.getByRole("region", { name: "Notifications" });
     expect(region.style.getPropertyValue("left")).toBe("784px");

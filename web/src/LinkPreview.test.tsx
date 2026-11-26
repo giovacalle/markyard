@@ -106,17 +106,17 @@ describe("external link hover preview", () => {
     expect(card).toHaveAttribute("data-slot", "hover-card-content");
     expect(card.closest("p")).toBeNull();
 
-    act(() => {
+    await waitFor(() => {
       fireEvent.scroll(window);
+      expect(screen.queryByLabelText("Link preview")).toBeNull();
     });
-    await waitFor(() => expect(screen.queryByLabelText("Link preview")).toBeNull());
 
     hover(link);
     await screen.findByLabelText("Link preview");
-    act(() => {
+    await waitFor(() => {
       fireEvent(window, new Event("resize"));
+      expect(screen.queryByLabelText("Link preview")).toBeNull();
     });
-    await waitFor(() => expect(screen.queryByLabelText("Link preview")).toBeNull());
 
     const nesting = consoleError.mock.calls.filter((call) =>
       call.some((arg) => /cannot be a descendant|validateDOMNesting/.test(String(arg))),

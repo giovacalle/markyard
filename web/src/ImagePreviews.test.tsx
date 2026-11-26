@@ -1,7 +1,7 @@
-import { syntaxTreeAvailable } from "@codemirror/language";
+import { forceParsing, syntaxTreeAvailable } from "@codemirror/language";
 import { EditorSelection } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
-import { act, render, waitFor } from "@testing-library/react";
+import { act, render } from "@testing-library/react";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { Editor } from "./components/Editor";
 import { attachmentIdOfUrl } from "./imagePreviews";
@@ -11,6 +11,14 @@ function mountEditor(initialText: string) {
   const root = result.getByTestId("editor-host").shadowRoot!;
   const view = EditorView.findFromDOM(root.querySelector<HTMLElement>('[role="textbox"]')!)!;
   return { view, root };
+}
+
+function parseAll(view: EditorView) {
+  let done = false;
+  act(() => {
+    done = forceParsing(view, view.state.doc.length, 5_000);
+  });
+  expect(done).toBe(true);
 }
 
 const previews = (root: ShadowRoot) =>
@@ -29,28 +37,25 @@ describe("attachmentIdOfUrl", () => {
 });
 
 describe("editor image previews", () => {
-  it("shows a thumbnail under each attachment image and folds its URL", async () => {
-    const { root } = mountEditor(
+  it("shows a thumbnail under each attachment image and folds its URL", () => {
+    const { view, root } = mountEditor(
       'Intro\n\nSee ![Beach](/api/files/img-1/blob) and ![](/api/files/img-2/blob "t")\n',
     );
-    await waitFor(
-      () => {
-        expect(previews(root)).toEqual([
-          ["/api/files/img-1/thumb?size=800", "Beach"],
-          ["/api/files/img-2/thumb?size=800", ""],
-        ]);
-      },
-      { timeout: 2500 },
-    );
+    parseAll(view);
+    expect(previews(root)).toEqual([
+      ["/api/files/img-1/thumb?size=800", "Beach"],
+      ["/api/files/img-2/thumb?size=800", ""],
+    ]);
     const line = root.querySelectorAll(".cm-line")[2];
     expect(line.textContent).toBe("See ![Beach] and ![]");
     expect(line.querySelectorAll(".cm-image-link")).toHaveLength(2);
   });
 
-  it("unfolds the URL while the cursor touches the image, keeping the preview", async () => {
+  it("unfolds the URL while the cursor touches the image, keeping the preview", () => {
     const text = "Intro\n![Beach](/api/files/img-1/blob)\nAfter";
     const { view, root } = mountEditor(text);
-    await waitFor(() => expect(previews(root)).toHaveLength(1), { timeout: 2500 });
+    parseAll(view);
+    expect(previews(root)).toHaveLength(1);
 
     act(() => view.dispatch({ selection: EditorSelection.cursor(text.indexOf("Beach")) }));
     expect(root.querySelectorAll(".cm-line")[1].textContent).toBe(
@@ -62,20 +67,17 @@ describe("editor image previews", () => {
     expect(root.querySelectorAll(".cm-line")[1].textContent).toBe("![Beach]");
   });
 
-  it("follows edits", async () => {
+  it("follows edits", () => {
     const { view, root } = mountEditor("Intro\n");
     act(() => view.dispatch({ changes: { from: 6, insert: "![Map](/api/files/img-3/blob)" } }));
-    await waitFor(
-      () => {
-        expect(previews(root)).toEqual([["/api/files/img-3/thumb?size=800", "Map"]]);
-      },
-      { timeout: 2500 },
-    );
+    parseAll(view);
+    expect(previews(root)).toEqual([["/api/files/img-3/thumb?size=800", "Map"]]);
     act(() => view.dispatch({ changes: { from: 6, to: view.state.doc.length } }));
-    await waitFor(() => expect(previews(root)).toEqual([]), { timeout: 2500 });
+    parseAll(view);
+    expect(previews(root)).toEqual([]);
   });
 
-  it("leaves external images, code and front matter alone", async () => {
+  it("leaves external images, code and front matter alone", () => {
     const { view, root } = mountEditor(
       [
         "---",
@@ -89,34 +91,25 @@ describe("editor image previews", () => {
         "![Real](/api/files/img-6/blob)",
       ].join("\n"),
     );
-    await waitFor(
-      () => {
-        expect(syntaxTreeAvailable(view.state, view.state.doc.length)).toBe(true);
-        expect(previews(root)).toEqual([["/api/files/img-6/thumb?size=800", "Real"]]);
-      },
-      { timeout: 2500 },
-    );
+    parseAll(view);
+    expect(syntaxTreeAvailable(view.state, view.state.doc.length)).toBe(true);
+    expect(previews(root)).toEqual([["/api/files/img-6/thumb?size=800", "Real"]]);
   });
 
-  it("names a preview that fails to load", async () => {
-    const { root } = mountEditor("Intro\n![Beach](/api/files/img-1/blob)\n");
-    const img = await waitFor(
-      () => {
-        const el = root.querySelector(".cm-image-preview img");
-        expect(el).not.toBeNull();
-        return el!;
-      },
-      { timeout: 2500 },
-    );
+  it("names a preview that fails to load", () => {
+    const { view, root } = mountEditor("Intro\n![Beach](/api/files/img-1/blob)\n");
+    parseAll(view);
+    const img = root.querySelector(".cm-image-preview img");
+    expect(img).not.toBeNull();
     act(() => {
-      img.dispatchEvent(new Event("error"));
+      img!.dispatchEvent(new Event("error"));
     });
     expect(root.querySelector(".cm-image-preview-missing")?.textContent).toBe(
       "Beach (unavailable)",
     );
   });
 
-  it("defers slow initial parsing past CodeMirror's 20ms slice and renders previews when background parsing finishes", async () => {
+  it("defers slow initial parsing past CodeMirror's 20ms slice and renders previews when background parsing finishes", () => {
     // Varied Markdown inside CodeMirror's initial jsdom viewport (~900 chars) with an attachment
     // image at the end so multiple Lezer parser steps are needed to reach it.
     const filler = Array.from(
@@ -125,31 +118,44 @@ describe("editor image previews", () => {
     ).join("\n");
     const doc = `${filler}\n\n![Tail](/api/files/img-tail/blob)\n`;
 
-    let fakeNow = 1_000_000;
-    const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => {
-      fakeNow += 25;
-      return fakeNow;
-    });
-    const start = fakeNow;
-    let mounted: ReturnType<typeof mountEditor>;
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     try {
-      mounted = mountEditor(doc);
+      let fakeNow = 1_000_000;
+      const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => {
+        fakeNow += 25;
+        return fakeNow;
+      });
+      const start = fakeNow;
+      let mounted: ReturnType<typeof mountEditor>;
+      try {
+        mounted = mountEditor(doc);
+      } finally {
+        nowSpy.mockRestore();
+      }
+      const elapsedDuringMount = fakeNow - start;
+
+      // CodeMirror's own LanguageState.init uses a 20ms slice; neither Editor mount nor
+      // imagePreviews should force extra synchronous parsing beyond that slice.
+      expect(elapsedDuringMount).toBeLessThan(150);
+      expect(syntaxTreeAvailable(mounted.view.state, doc.length)).toBe(false);
+      expect(previews(mounted.root)).toEqual([]);
+
+      // Drive CodeMirror's background ParseWorker deterministically until the tree covers the doc.
+      for (
+        let step = 0;
+        step < 20 && !syntaxTreeAvailable(mounted.view.state, doc.length);
+        step += 1
+      ) {
+        act(() => {
+          vi.advanceTimersByTime(500);
+        });
+      }
+
+      // Once background parsing completes, imagePreviews updates its decorations automatically.
+      expect(syntaxTreeAvailable(mounted.view.state, doc.length)).toBe(true);
+      expect(previews(mounted.root)).toEqual([["/api/files/img-tail/thumb?size=800", "Tail"]]);
     } finally {
-      nowSpy.mockRestore();
+      vi.useRealTimers();
     }
-    const elapsedDuringMount = fakeNow - start;
-
-    // CodeMirror's own LanguageState.init uses a 20ms slice; neither Editor mount nor
-    // imagePreviews should force extra synchronous parsing beyond that slice.
-    expect(elapsedDuringMount).toBeLessThan(150);
-    expect(syntaxTreeAvailable(mounted.view.state, doc.length)).toBe(false);
-
-    // Once background parsing completes, imagePreviews updates its decorations automatically.
-    await waitFor(
-      () => {
-        expect(previews(mounted.root)).toEqual([["/api/files/img-tail/thumb?size=800", "Tail"]]);
-      },
-      { timeout: 2500 },
-    );
   });
 });

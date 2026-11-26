@@ -6,6 +6,7 @@ import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vite-plus/test";
 import { App } from "./App";
 import { todayNoteName } from "./commandSearch";
+import { preloadEditor, preloadPreview } from "./components/DocumentView";
 import {
   clearLocalCache,
   enqueueOrCoalesceOp,
@@ -23,8 +24,9 @@ import { updateSettings } from "./settings";
 
 const server = setupServer();
 
-beforeAll(() => {
+beforeAll(async () => {
   server.listen({ onUnhandledFrame: "error" });
+  await Promise.all([preloadPreview(), preloadEditor()]);
 });
 
 afterEach(async () => {
@@ -340,7 +342,9 @@ describe("local-first structural vault operations (App integration)", () => {
     const nameInput = within(editor).getByRole("textbox", { name: "File name" });
     fireEvent.change(nameInput, { target: { value: "temp" } });
     fireEvent.keyDown(nameInput, { key: "Enter" });
-    expect(await within(editor).findByRole("heading", { level: 2 })).toHaveTextContent("temp.md");
+    expect(
+      await within(editor).findByRole("heading", { level: 2, name: "temp.md" }),
+    ).toBeInTheDocument();
 
     // 4. Move the folder "Scratch" into "Archive" via Move dialog.
     fireEvent.click(screen.getByRole("button", { name: "Actions for Scratch" }));
@@ -403,9 +407,9 @@ describe("local-first structural vault operations (App integration)", () => {
     const renameInput = within(preview).getByRole("textbox", { name: "File name" });
     fireEvent.change(renameInput, { target: { value: "renamed" } });
     fireEvent.keyDown(renameInput, { key: "Enter" });
-    expect(await within(preview).findByRole("heading", { level: 2 })).toHaveTextContent(
-      "renamed.md",
-    );
+    expect(
+      await within(preview).findByRole("heading", { level: 2, name: "renamed.md" }),
+    ).toBeInTheDocument();
 
     // Op 2: Move renamed.md into Work.
     fireEvent.click(screen.getByRole("button", { name: "Actions for renamed.md" }));
@@ -577,7 +581,9 @@ describe("local-first structural vault operations (App integration)", () => {
     const input = within(preview).getByRole("textbox", { name: "File name" });
     fireEvent.change(input, { target: { value: "taken" } });
     fireEvent.keyDown(input, { key: "Enter" });
-    expect(await within(preview).findByRole("heading", { level: 2 })).toHaveTextContent("taken.md");
+    expect(
+      await within(preview).findByRole("heading", { level: 2, name: "taken.md" }),
+    ).toBeInTheDocument();
 
     // Reconnect: 409 conflict appears in SyncInspector.
     setOnline(true);
@@ -599,7 +605,9 @@ describe("local-first structural vault operations (App integration)", () => {
       ).not.toBeInTheDocument();
     });
     expect(within(inspector).getByRole("status")).toHaveTextContent("All changes synced");
-    expect(await within(preview).findByRole("heading", { level: 2 })).toHaveTextContent("alpha.md");
+    expect(
+      await within(preview).findByRole("heading", { level: 2, name: "alpha.md" }),
+    ).toBeInTheDocument();
     const sidebar = screen.getByRole("navigation", { name: "Files" });
     expect(await within(sidebar).findByText("alpha.md")).toBeInTheDocument();
     expect(await readAllPendingOps()).toHaveLength(0);
