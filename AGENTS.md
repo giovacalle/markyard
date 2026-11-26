@@ -14,6 +14,10 @@ Self-hosted Markdown notes PWA backed by Google Drive, served by a TypeScript + 
   - Strict Content Security Policy (`web/public/_headers`): `default-src 'self'`. Zero JSX `style={...}`, zero `setAttribute("style", ...)`, zero inline `<style>` tags (use CSSOM `element.style.setProperty(...)` or `adoptedStyleSheets` when dynamic positioning/styles are required).
   - Keep `skipHtml` enabled in `Preview.tsx` and keep `web/public/sw.js` precaching lean.
 
+## Review
+
+Reviewing or writing a change: apply the rules in `CODING_STANDARDS.md`.
+
 ## Commands
 
 Prerequisites: Node 24, `pnpm`.
