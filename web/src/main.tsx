@@ -1,6 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
+import { bootCustomCss } from "./customCss";
 import "./index.css";
 import { applyTheme, getStoredTheme } from "./theme";
 
@@ -11,11 +12,13 @@ if (!root) {
   throw new Error("Root element not found");
 }
 
-createRoot(root).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
-);
+void bootCustomCss().finally(() => {
+  createRoot(root).render(
+    <StrictMode>
+      <App />
+    </StrictMode>,
+  );
+});
 
 if (import.meta.env.PROD && "serviceWorker" in navigator) {
   window.addEventListener("load", () => {

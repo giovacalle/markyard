@@ -11,6 +11,7 @@ import { RevisionDiff } from "./components/RevisionDiff";
 import { mountSvgInShadow } from "./cspSafeSvg";
 import {
   adoptUserSheet,
+  bootCustomCss,
   compileCustomCss,
   customCssDisabledByQuery,
   extractCssBlocks,
@@ -259,6 +260,42 @@ describe("test-setup custom CSS isolation", () => {
     const sheet = getCustomCssSheet()!;
     expect(sheet.cssRules.length).toBe(0);
     expect(document.adoptedStyleSheets).not.toContain(sheet);
+  });
+});
+
+describe("bootCustomCss", () => {
+  it("applies cached CSS and loaded notes at boot with no network", async () => {
+    await writeCachedCustomCss(
+      { css: ".boot-cached { color: rgb(7, 8, 9); }", notes: ["look.md"] },
+      customCssCacheToken(),
+    );
+
+    await bootCustomCss();
+
+    const sheet = getCustomCssSheet()!;
+    expect(document.adoptedStyleSheets.at(-1)).toBe(sheet);
+    expect(sheetCssText()).toContain("rgb(7, 8, 9)");
+    expect(getCustomCssStatusText()).toBe("Loaded: look.md");
+  });
+
+  it("skips applying cached CSS at boot when ?nocss=1 or customCss is off", async () => {
+    await writeCachedCustomCss(
+      { css: ".boot-cached { color: rgb(7, 8, 9); }", notes: ["look.md"] },
+      customCssCacheToken(),
+    );
+
+    history.replaceState(null, "", "/?nocss=1");
+    resetCustomCssForTests();
+    await bootCustomCss();
+    expect(getCustomCssSheet()!.cssRules.length).toBe(0);
+    expect(document.adoptedStyleSheets).not.toContain(getCustomCssSheet());
+
+    history.replaceState(null, "", "/");
+    resetCustomCssForTests();
+    updateSettings({ customCss: false });
+    await bootCustomCss();
+    expect(getCustomCssSheet()!.cssRules.length).toBe(0);
+    expect(document.adoptedStyleSheets).not.toContain(getCustomCssSheet());
   });
 });
 

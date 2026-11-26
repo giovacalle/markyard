@@ -2,7 +2,12 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { DriveNode } from "./api";
 import { useOptionalDriveChanges } from "./driveChanges";
-import { customCssCacheToken, writeCachedCustomCss } from "./localCache";
+import {
+  type CachedCustomCss,
+  customCssCacheToken,
+  readCachedCustomCss,
+  writeCachedCustomCss,
+} from "./localCache";
 import { type AppSettings, getSettings, useSettings } from "./settings";
 import { isTemplatesFolder } from "./templates";
 import { childrenKey } from "./treeCache";
@@ -221,6 +226,45 @@ export function useCustomCssStatus(): string {
   const settings = useSettings();
   useSyncExternalStore(subscribeCustomCssStatus, getLoadedNotes, getLoadedNotes);
   return getCustomCssStatusText(settings);
+}
+
+const BOOT_TIMEOUT_MS = 300;
+
+/**
+ * Loads cached custom CSS from IndexedDB and applies it to `document` before React renders, so
+ * reloads never flash unstyled. Bounded by `timeoutMs` so slow storage never blocks boot.
+ */
+export async function bootCustomCss(timeoutMs = BOOT_TIMEOUT_MS): Promise<void> {
+  if (customCssDisabledByQuery() || !getSettings().customCss) {
+    return;
+  }
+  const token = customCssCacheToken();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let cached: CachedCustomCss | undefined;
+  try {
+    cached = await Promise.race([
+      readCachedCustomCss(),
+      new Promise<undefined>((resolve) => {
+        timer = setTimeout(() => resolve(undefined), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) {
+      clearTimeout(timer);
+    }
+  }
+  if (
+    cached === undefined ||
+    token !== customCssCacheToken() ||
+    customCssDisabledByQuery() ||
+    !getSettings().customCss
+  ) {
+    return;
+  }
+  if (cached.css.length > 0) {
+    setCustomCss(cached.css);
+  }
+  setCustomCssLoadedNotes(cached.notes);
 }
 
 /** Clears the shared sheet, removes it from `document`, and resets cached query/status state. */
