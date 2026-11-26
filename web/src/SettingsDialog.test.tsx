@@ -224,6 +224,39 @@ describe("Settings sections", () => {
     expect(tabs.map((tab) => tab.getAttribute("tabindex"))).toEqual(["0", "-1", "-1", "-1"]);
   });
 
+  it("returns focus to the section tab after Back when the screen narrowed while a section was open", async () => {
+    let narrow = false;
+    const listeners = new Set<() => void>();
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      writable: true,
+      value: (query: string) => ({
+        get matches() {
+          return narrow && query === "(max-width: 47.99rem)";
+        },
+        media: query,
+        addEventListener: (_type: string, listener: () => void) => listeners.add(listener),
+        removeEventListener: (_type: string, listener: () => void) => listeners.delete(listener),
+      }),
+    });
+    const dialog = await renderSettledSettings();
+    showSection(dialog, "Sync & Storage");
+
+    narrow = true;
+    act(() => {
+      for (const listener of listeners) {
+        listener();
+      }
+    });
+    const back = within(dialog).getByRole("button", { name: "Back to settings sections" });
+    expect(document.activeElement).toBe(back);
+
+    fireEvent.click(back);
+    expect(document.activeElement).toBe(
+      within(dialog).getByRole("tab", { name: "Sync & Storage" }),
+    );
+  });
+
   it("falls back to the desktop layout without matchMedia", () => {
     Reflect.deleteProperty(window, "matchMedia");
     const dialog = renderSettings();

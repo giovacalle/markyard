@@ -609,7 +609,10 @@ function SettingsBody({
               ref={backRef}
               type="button"
               aria-label="Back to settings sections"
-              onClick={() => setSection(null)}
+              onClick={() => {
+                returnTo.current = selected;
+                setSection(null);
+              }}
               className="mx-2 mt-2 inline-flex items-center gap-1 self-start rounded-lg px-2 py-1.5 text-sm font-medium text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900 focus-visible:outline-2 focus-visible:outline-blue-600 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
             >
               <ChevronIcon aria-hidden="true" className="size-4 rotate-180" />
