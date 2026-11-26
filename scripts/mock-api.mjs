@@ -161,7 +161,7 @@ function isPlainObject(value) {
 }
 
 function formatEtag(id, rev) {
-  return `"fixture-${id}-${rev}"`;
+  return `"${id}-${rev}"`;
 }
 
 function toDriveNode(node) {
@@ -522,7 +522,6 @@ function parseCliArgs(argv) {
   let port = DEFAULT_PORT;
   let distDir = DEFAULT_DIST_DIR;
   let fixtureFile = DEFAULT_FIXTURE_FILE;
-  let headersFile = DEFAULT_HEADERS_FILE;
 
   const takeValue = (index, flag) => {
     const value = argv[index + 1];
@@ -551,15 +550,12 @@ function parseCliArgs(argv) {
     } else if (arg === "--fixture") {
       fixtureFile = resolve(takeValue(i, arg));
       i += 1;
-    } else if (arg === "--headers") {
-      headersFile = resolve(takeValue(i, arg));
-      i += 1;
     } else {
       throw new Error(`Unknown option: ${arg}`);
     }
   }
 
-  return { port, distDir, fixtureFile, headersFile };
+  return { port, distDir, fixtureFile };
 }
 
 function main() {
@@ -594,7 +590,6 @@ function main() {
   try {
     server = createMockServer({
       distDir: options.distDir,
-      headersFile: options.headersFile,
       fixture,
       log: (line) => process.stderr.write(`${line}\n`),
     });

@@ -309,6 +309,7 @@ describe("file content GET and PUT with ETag and If-Match", () => {
     assert.equal(res.headers.get("content-type"), "application/octet-stream");
     const etag = res.headers.get("etag");
     assert.match(etag ?? "", /^"[A-Za-z0-9+/=_-]{1,200}"$/);
+    assert.equal(etag, `"${welcomeId}-1"`);
     assert.equal(await res.text(), "# Welcome\n\nInitial body.\n");
 
     for (const badId of ["missing-id", notesFolderId, rawTxtId]) {
@@ -362,6 +363,7 @@ describe("file content GET and PUT with ETag and If-Match", () => {
     assert.equal(putRes.status, 204);
     const etag2 = putRes.headers.get("etag");
     assert.match(etag2 ?? "", /^"[A-Za-z0-9+/=_-]{1,200}"$/);
+    assert.equal(etag2, `"${welcomeId}-2"`);
     assert.notEqual(etag2, etag1);
 
     // Subsequent GET sees new body and new ETag
@@ -663,6 +665,12 @@ describe("default fixture, 501 routes, CLI, and package.json", () => {
     } finally {
       await cli.stop();
     }
+  });
+
+  it("CLI rejects unknown --headers option", async () => {
+    const result = await runCliToExit(["--dist", distDir, "--port", "0", "--headers", realHeadersFile]);
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /Unknown option: --headers/);
   });
 
   it("CLI exits 1 mentioning pnpm build when dist/index.html is missing", async () => {
