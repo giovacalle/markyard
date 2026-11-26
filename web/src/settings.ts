@@ -17,6 +17,10 @@ export interface AppSettings {
   dailyNotesFolder: string;
   /** Root subfolder whose notes are templates. */
   templatesFolder: string;
+  /** Root subfolder whose notes provide custom CSS (device-local, not synced to the cloud). */
+  stylesFolder: string;
+  /** Whether custom CSS from `stylesFolder` is applied (device-local, not synced to the cloud). */
+  customCss: boolean;
   /** How a note opens when read-only mode is off. */
   defaultMode: DefaultMode;
   /** Hover cards and bookmark cards for external links in Preview. */
@@ -28,12 +32,47 @@ export const DEFAULT_SETTINGS: Readonly<AppSettings> = Object.freeze({
   showAttachmentsFolder: true,
   dailyNotesFolder: "",
   templatesFolder: "Templates",
+  stylesFolder: "_styles",
+  customCss: true,
   defaultMode: "preview",
   linkPreviewsEnabled: true,
 });
 
-/** Settings fields synced to the cloud, in a stable order. */
+/** Every settings field, in a stable order (used for change detection). */
 export const SETTINGS_KEYS = Object.keys(DEFAULT_SETTINGS) as (keyof AppSettings)[];
+
+/** Settings fields synced to the cloud (`/api/state`), in a stable order. */
+export const SYNCED_SETTINGS_KEYS = [
+  "attachmentsFolder",
+  "showAttachmentsFolder",
+  "dailyNotesFolder",
+  "templatesFolder",
+  "defaultMode",
+  "linkPreviewsEnabled",
+] as const satisfies readonly (keyof AppSettings)[];
+
+export type SyncedSettings = Pick<AppSettings, (typeof SYNCED_SETTINGS_KEYS)[number]>;
+
+function copySyncedKey<K extends keyof SyncedSettings>(
+  target: Partial<SyncedSettings>,
+  source: Partial<AppSettings>,
+  key: K,
+): void {
+  const value = source[key];
+  if (value !== undefined) {
+    target[key] = value;
+  }
+}
+
+export function pickSyncedSettings(settings: AppSettings): SyncedSettings;
+export function pickSyncedSettings(settings: Partial<AppSettings>): Partial<SyncedSettings>;
+export function pickSyncedSettings(settings: Partial<AppSettings>): Partial<SyncedSettings> {
+  const out: Partial<SyncedSettings> = {};
+  for (const key of SYNCED_SETTINGS_KEYS) {
+    copySyncedKey(out, settings, key);
+  }
+  return out;
+}
 
 const MAX_NAME_BYTES = 255;
 
@@ -69,7 +108,9 @@ export function sanitizeSettings(raw: unknown): Partial<AppSettings> {
   }
   const input = raw as Record<string, unknown>;
   const out: Partial<AppSettings> = {};
-  const folder = (key: "attachmentsFolder" | "dailyNotesFolder" | "templatesFolder") => {
+  const folder = (
+    key: "attachmentsFolder" | "dailyNotesFolder" | "templatesFolder" | "stylesFolder",
+  ) => {
     const value = input[key];
     if (
       typeof value === "string" &&
@@ -81,6 +122,10 @@ export function sanitizeSettings(raw: unknown): Partial<AppSettings> {
   folder("attachmentsFolder");
   folder("dailyNotesFolder");
   folder("templatesFolder");
+  folder("stylesFolder");
+  if (typeof input.customCss === "boolean") {
+    out.customCss = input.customCss;
+  }
   if (isDefaultMode(input.defaultMode)) {
     out.defaultMode = input.defaultMode;
   }

@@ -28,9 +28,10 @@ import {
 } from "./treeExpanded";
 import {
   getSettings,
+  pickSyncedSettings,
   sanitizeSettings,
-  SETTINGS_KEYS,
   subscribeSettings,
+  SYNCED_SETTINGS_KEYS,
   updateSettings,
 } from "./settings";
 import { getViewPrefs, setViewPref, subscribeViewPrefs, type ViewPrefKey } from "./viewPrefs";
@@ -66,7 +67,7 @@ export function readLocalCloudState(rootFolderId: string): FullState {
     focusMode: prefs.focusMode,
     typewriterMode: prefs.typewriterMode,
     infoDrawerOpen: prefs.infoDrawerOpen,
-    ...getSettings(),
+    ...pickSyncedSettings(getSettings()),
   };
 }
 
@@ -93,7 +94,7 @@ function mergeRemote(base: FullState, remote: CloudUserState): FullState {
       merged[key] = remote[key];
     }
   }
-  Object.assign(merged, sanitizeSettings(remote));
+  Object.assign(merged, pickSyncedSettings(sanitizeSettings(remote)));
   return merged;
 }
 
@@ -178,7 +179,7 @@ export function startCloudStateSync({
       for (const key of VIEW_PREF_KEYS) {
         setViewPref(key, target[key]);
       }
-      updateSettings(Object.fromEntries(SETTINGS_KEYS.map((key) => [key, target[key]])), {
+      updateSettings(Object.fromEntries(SYNCED_SETTINGS_KEYS.map((key) => [key, target[key]])), {
         silent: true,
       });
       if (stateKey({ ...before, expandedFolders: target.expandedFolders }) !== stateKey(before)) {

@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import {
   DEFAULT_SETTINGS,
   SETTINGS_STORAGE_KEY,
+  SYNCED_SETTINGS_KEYS,
   getSettings,
+  pickSyncedSettings,
   resetSettings,
   subscribeSettings,
   updateSettings,
@@ -17,6 +19,8 @@ describe("settings store", () => {
       showAttachmentsFolder: true,
       dailyNotesFolder: "",
       templatesFolder: "Templates",
+      stylesFolder: "_styles",
+      customCss: true,
       defaultMode: "preview",
       linkPreviewsEnabled: true,
     });
@@ -72,8 +76,55 @@ describe("settings store", () => {
   });
 
   it("trims folder names on update", () => {
-    updateSettings({ attachmentsFolder: "  Media  " });
+    updateSettings({ attachmentsFolder: "  Media  ", stylesFolder: "  theme  " });
     expect(getSettings().attachmentsFolder).toBe("Media");
+    expect(getSettings().stylesFolder).toBe("theme");
+  });
+
+  it("persists and sanitizes device-local stylesFolder and customCss across reloads", () => {
+    updateSettings({ stylesFolder: "CustomTheme", customCss: false });
+    expect(getSettings()).toMatchObject({ stylesFolder: "CustomTheme", customCss: false });
+
+    resetSettings({ keepStorage: true });
+    expect(getSettings()).toMatchObject({ stylesFolder: "CustomTheme", customCss: false });
+
+    localStorage.setItem(
+      SETTINGS_STORAGE_KEY,
+      JSON.stringify({ stylesFolder: "a/b", customCss: "nope" }),
+    );
+    resetSettings({ keepStorage: true });
+    expect(getSettings()).toMatchObject({ stylesFolder: "_styles", customCss: true });
+  });
+
+  it("picks only the cloud-synced settings keys", () => {
+    expect(SYNCED_SETTINGS_KEYS).toEqual([
+      "attachmentsFolder",
+      "showAttachmentsFolder",
+      "dailyNotesFolder",
+      "templatesFolder",
+      "defaultMode",
+      "linkPreviewsEnabled",
+    ]);
+    const full = pickSyncedSettings(DEFAULT_SETTINGS);
+    expect(full).toEqual({
+      attachmentsFolder: "_attachments",
+      showAttachmentsFolder: true,
+      dailyNotesFolder: "",
+      templatesFolder: "Templates",
+      defaultMode: "preview",
+      linkPreviewsEnabled: true,
+    });
+    expect("stylesFolder" in full).toBe(false);
+    expect("customCss" in full).toBe(false);
+
+    const partial = pickSyncedSettings({
+      stylesFolder: "theme",
+      customCss: false,
+      templatesFolder: "Tpl",
+    });
+    expect(partial).toEqual({ templatesFolder: "Tpl" });
+    expect("stylesFolder" in partial).toBe(false);
+    expect("customCss" in partial).toBe(false);
   });
 });
 
