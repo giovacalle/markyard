@@ -1,6 +1,6 @@
-import { foldedRanges, syntaxTree } from "@codemirror/language";
+import { foldedRanges, syntaxTree, syntaxTreeAvailable } from "@codemirror/language";
 import { EditorView } from "@codemirror/view";
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createRef } from "react";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { Editor, type EditorHandle } from "./components/Editor";
@@ -50,9 +50,13 @@ function paste(view: EditorView, text: string) {
 }
 
 describe("Editor", () => {
-  it("parses YAML frontmatter as YAML (not Setext H2) and leaves it unfolded on open", () => {
+  it("parses YAML frontmatter as YAML (not Setext H2) and leaves it unfolded on open", async () => {
     const text = "---\r\nstatus: ready\r\ntags: test\r\n---\r\n# Body\r\n";
     const { view, onChange } = mountEditor(text);
+
+    await waitFor(() => expect(syntaxTreeAvailable(view.state, view.state.doc.length)).toBe(true), {
+      timeout: 2500,
+    });
 
     const folds: { from: number; to: number }[] = [];
     foldedRanges(view.state).between(0, view.state.doc.length, (from, to) => {

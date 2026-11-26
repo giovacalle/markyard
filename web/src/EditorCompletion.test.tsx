@@ -1,5 +1,6 @@
+import { syntaxTreeAvailable } from "@codemirror/language";
 import { EditorView } from "@codemirror/view";
-import { act, fireEvent, render } from "@testing-library/react";
+import { act, fireEvent, render, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { Editor } from "./components/Editor";
 import { detectTrigger } from "./editorCompletion";
@@ -98,8 +99,11 @@ describe("Editor [[ completion", () => {
     expect(listbox()).toBeNull();
   });
 
-  it("does not open inside inline code", () => {
+  it("does not open inside inline code", async () => {
     const { view, type, listbox } = mount("`code `");
+    await waitFor(() => expect(syntaxTreeAvailable(view.state, view.state.doc.length)).toBe(true), {
+      timeout: 2500,
+    });
     act(() => view.dispatch({ selection: { anchor: 6 } }));
     type("[[");
     expect(listbox()).toBeNull();

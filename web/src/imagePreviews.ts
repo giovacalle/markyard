@@ -1,7 +1,7 @@
 // Live image previews in the editor: an attachment image (`![alt](/api/files/<id>/blob)`) shows
 // its Drive thumbnail under its line, and its long URL folds into a small image chip until the
 // cursor or selection touches the image. Code blocks and external images are left alone.
-import { ensureSyntaxTree, syntaxTree } from "@codemirror/language";
+import { syntaxTree } from "@codemirror/language";
 import { type EditorState, type Extension, type Range, StateField } from "@codemirror/state";
 import { Decoration, type DecorationSet, EditorView, WidgetType } from "@codemirror/view";
 import { attachmentThumbUrl } from "./attachmentRefs";
@@ -102,19 +102,10 @@ class ImagePreview extends WidgetType {
 
 const CHIP = Decoration.replace({ widget: new LinkChip() });
 
-const INITIAL_PARSE_CAP = 3000;
-const INITIAL_PARSE_TIMEOUT_MS = 250;
-
 function previewDecorations(state: EditorState): DecorationSet {
   const ranges: Range<Decoration>[] = [];
   const selection = state.selection.ranges;
-  const tree =
-    ensureSyntaxTree(
-      state,
-      Math.min(state.doc.length, INITIAL_PARSE_CAP),
-      INITIAL_PARSE_TIMEOUT_MS,
-    ) ?? syntaxTree(state);
-  tree.iterate({
+  syntaxTree(state).iterate({
     enter(ref) {
       if (ref.name !== "Image") {
         return;

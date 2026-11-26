@@ -1,6 +1,7 @@
+import { syntaxTreeAvailable } from "@codemirror/language";
 import { EditorSelection } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
-import { act, render } from "@testing-library/react";
+import { act, render, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { Editor } from "./components/Editor";
 import { attachmentIdOfUrl } from "./imagePreviews";
@@ -28,22 +29,29 @@ describe("attachmentIdOfUrl", () => {
 });
 
 describe("editor image previews", () => {
-  it("shows a thumbnail under each attachment image and folds its URL", () => {
+  it("shows a thumbnail under each attachment image and folds its URL", async () => {
     const { root } = mountEditor(
       'Intro\n\nSee ![Beach](/api/files/img-1/blob) and ![](/api/files/img-2/blob "t")\n',
     );
-    expect(previews(root)).toEqual([
-      ["/api/files/img-1/thumb?size=800", "Beach"],
-      ["/api/files/img-2/thumb?size=800", ""],
-    ]);
+    await waitFor(
+      () => {
+        expect(previews(root)).toEqual([
+          ["/api/files/img-1/thumb?size=800", "Beach"],
+          ["/api/files/img-2/thumb?size=800", ""],
+        ]);
+      },
+      { timeout: 2500 },
+    );
     const line = root.querySelectorAll(".cm-line")[2];
     expect(line.textContent).toBe("See ![Beach] and ![]");
     expect(line.querySelectorAll(".cm-image-link")).toHaveLength(2);
   });
 
-  it("unfolds the URL while the cursor touches the image, keeping the preview", () => {
+  it("unfolds the URL while the cursor touches the image, keeping the preview", async () => {
     const text = "Intro\n![Beach](/api/files/img-1/blob)\nAfter";
     const { view, root } = mountEditor(text);
+    await waitFor(() => expect(previews(root)).toHaveLength(1), { timeout: 2500 });
+
     act(() => view.dispatch({ selection: EditorSelection.cursor(text.indexOf("Beach")) }));
     expect(root.querySelectorAll(".cm-line")[1].textContent).toBe(
       "![Beach](/api/files/img-1/blob)",
@@ -54,16 +62,21 @@ describe("editor image previews", () => {
     expect(root.querySelectorAll(".cm-line")[1].textContent).toBe("![Beach]");
   });
 
-  it("follows edits", () => {
+  it("follows edits", async () => {
     const { view, root } = mountEditor("Intro\n");
     act(() => view.dispatch({ changes: { from: 6, insert: "![Map](/api/files/img-3/blob)" } }));
-    expect(previews(root)).toEqual([["/api/files/img-3/thumb?size=800", "Map"]]);
+    await waitFor(
+      () => {
+        expect(previews(root)).toEqual([["/api/files/img-3/thumb?size=800", "Map"]]);
+      },
+      { timeout: 2500 },
+    );
     act(() => view.dispatch({ changes: { from: 6, to: view.state.doc.length } }));
-    expect(previews(root)).toEqual([]);
+    await waitFor(() => expect(previews(root)).toEqual([]), { timeout: 2500 });
   });
 
-  it("leaves external images, code and front matter alone", () => {
-    const { root } = mountEditor(
+  it("leaves external images, code and front matter alone", async () => {
+    const { view, root } = mountEditor(
       [
         "---",
         "cover: ![x](/api/files/img-9/blob)",
@@ -76,16 +89,67 @@ describe("editor image previews", () => {
         "![Real](/api/files/img-6/blob)",
       ].join("\n"),
     );
-    expect(previews(root)).toEqual([["/api/files/img-6/thumb?size=800", "Real"]]);
+    await waitFor(
+      () => {
+        expect(syntaxTreeAvailable(view.state, view.state.doc.length)).toBe(true);
+        expect(previews(root)).toEqual([["/api/files/img-6/thumb?size=800", "Real"]]);
+      },
+      { timeout: 2500 },
+    );
   });
 
-  it("names a preview that fails to load", () => {
+  it("names a preview that fails to load", async () => {
     const { root } = mountEditor("Intro\n![Beach](/api/files/img-1/blob)\n");
+    const img = await waitFor(
+      () => {
+        const el = root.querySelector(".cm-image-preview img");
+        expect(el).not.toBeNull();
+        return el!;
+      },
+      { timeout: 2500 },
+    );
     act(() => {
-      root.querySelector(".cm-image-preview img")!.dispatchEvent(new Event("error"));
+      img.dispatchEvent(new Event("error"));
     });
     expect(root.querySelector(".cm-image-preview-missing")?.textContent).toBe(
       "Beach (unavailable)",
+    );
+  });
+
+  it("defers slow initial parsing past CodeMirror's 20ms slice and renders previews when background parsing finishes", async () => {
+    // Varied Markdown inside CodeMirror's initial jsdom viewport (~900 chars) with an attachment
+    // image at the end so multiple Lezer parser steps are needed to reach it.
+    const filler = Array.from(
+      { length: 10 },
+      (_, i) => `- item ${i} with **bold**, *em*, \`code\` and [link](https://example.com/${i})`,
+    ).join("\n");
+    const doc = `${filler}\n\n![Tail](/api/files/img-tail/blob)\n`;
+
+    let fakeNow = 1_000_000;
+    const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => {
+      fakeNow += 25;
+      return fakeNow;
+    });
+    const start = fakeNow;
+    let mounted: ReturnType<typeof mountEditor>;
+    try {
+      mounted = mountEditor(doc);
+    } finally {
+      nowSpy.mockRestore();
+    }
+    const elapsedDuringMount = fakeNow - start;
+
+    // CodeMirror's own LanguageState.init uses a 20ms slice; neither Editor mount nor
+    // imagePreviews should force extra synchronous parsing beyond that slice.
+    expect(elapsedDuringMount).toBeLessThan(150);
+    expect(syntaxTreeAvailable(mounted.view.state, doc.length)).toBe(false);
+
+    // Once background parsing completes, imagePreviews updates its decorations automatically.
+    await waitFor(
+      () => {
+        expect(previews(mounted.root)).toEqual([["/api/files/img-tail/thumb?size=800", "Tail"]]);
+      },
+      { timeout: 2500 },
     );
   });
 });
