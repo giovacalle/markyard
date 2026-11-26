@@ -5,6 +5,7 @@ import { useOptionalDriveChanges } from "./driveChanges";
 import {
   type CachedCustomCss,
   customCssCacheToken,
+  hasCachedCustomCssMarker,
   readCachedCustomCss,
   writeCachedCustomCss,
 } from "./localCache";
@@ -254,6 +255,18 @@ export async function bootCustomCss(timeoutMs = BOOT_TIMEOUT_MS): Promise<void> 
     setCustomCss(cached.css);
   }
   setCustomCssLoadedNotes(cached.notes);
+}
+
+/**
+ * Calls `render` once custom CSS is ready: synchronously when no non-empty CSS is cached, else after
+ * `bootCustomCss()` so cached styles apply before the first paint.
+ */
+export function renderAfterCustomCss(render: () => void): void {
+  if (customCssDisabledByQuery() || !getSettings().customCss || !hasCachedCustomCssMarker()) {
+    render();
+    return;
+  }
+  void bootCustomCss().finally(render);
 }
 
 /** Clears the shared sheet, removes it from `document`, and resets cached query/status state. */

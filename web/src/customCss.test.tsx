@@ -17,6 +17,7 @@ import {
   extractCssBlocks,
   getCustomCssSheet,
   getCustomCssStatusText,
+  renderAfterCustomCss,
   resetCustomCssForTests,
   setCustomCss,
 } from "./customCss";
@@ -24,6 +25,7 @@ import {
   clearLocalCache,
   clearVaultCache,
   customCssCacheToken,
+  hasCachedCustomCssMarker,
   readCachedCustomCss,
   updateChangesState,
   writeCachedCustomCss,
@@ -296,6 +298,70 @@ describe("bootCustomCss", () => {
     await bootCustomCss();
     expect(getCustomCssSheet()!.cssRules.length).toBe(0);
     expect(document.adoptedStyleSheets).not.toContain(getCustomCssSheet());
+  });
+});
+
+describe("custom CSS boot marker", () => {
+  it("sets the marker when non-empty CSS is cached and clears it when the cache is emptied", async () => {
+    expect(hasCachedCustomCssMarker()).toBe(false);
+
+    await writeCachedCustomCss(
+      { css: ".a { color: red; }", notes: ["a.md"] },
+      customCssCacheToken(),
+    );
+    expect(hasCachedCustomCssMarker()).toBe(true);
+
+    await writeCachedCustomCss({ css: "", notes: [] }, customCssCacheToken());
+    expect(hasCachedCustomCssMarker()).toBe(false);
+  });
+
+  it("leaves the marker unset when a stale-token write is dropped", async () => {
+    const stale = customCssCacheToken();
+    await clearLocalCache();
+    await writeCachedCustomCss({ css: ".a { color: red; }", notes: ["a.md"] }, stale);
+    expect(hasCachedCustomCssMarker()).toBe(false);
+  });
+
+  it("clears the marker on clearLocalCache, clearVaultCache and account switch", async () => {
+    const cache = () =>
+      writeCachedCustomCss({ css: ".a { color: red; }", notes: ["a.md"] }, customCssCacheToken());
+
+    await cache();
+    await clearLocalCache();
+    expect(hasCachedCustomCssMarker()).toBe(false);
+
+    await cache();
+    await clearVaultCache();
+    expect(hasCachedCustomCssMarker()).toBe(false);
+
+    await writeCachedSession("one@example.com");
+    await cache();
+    expect(hasCachedCustomCssMarker()).toBe(true);
+    await writeCachedSession("two@example.com");
+    expect(hasCachedCustomCssMarker()).toBe(false);
+  });
+
+  it("renders synchronously without awaiting boot when no CSS is cached", () => {
+    const render = vi.fn();
+    renderAfterCustomCss(render);
+    expect(render).toHaveBeenCalledTimes(1);
+  });
+
+  it("applies cached CSS before rendering when the marker is present", async () => {
+    await writeCachedCustomCss(
+      { css: ".marker-boot { color: rgb(1, 2, 3); }", notes: ["look.md"] },
+      customCssCacheToken(),
+    );
+    let cssAtRender = "";
+    const render = vi.fn(() => {
+      cssAtRender = sheetCssText();
+    });
+
+    renderAfterCustomCss(render);
+    expect(render).not.toHaveBeenCalled();
+
+    await vi.waitFor(() => expect(render).toHaveBeenCalledTimes(1));
+    expect(cssAtRender).toContain("rgb(1, 2, 3)");
   });
 });
 

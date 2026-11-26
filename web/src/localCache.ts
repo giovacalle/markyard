@@ -68,6 +68,31 @@ export function customCssCacheToken(): number {
   return customCssCacheGeneration;
 }
 
+// Synchronous hint that IndexedDB holds non-empty custom CSS, so boot awaits the cache only
+// when there is CSS to apply (no unstyled flash) and renders at once otherwise.
+const CUSTOM_CSS_MARKER_KEY = "markyard:custom-css-cached";
+
+/** Whether the last cached custom CSS was non-empty (read synchronously at boot). */
+export function hasCachedCustomCssMarker(): boolean {
+  try {
+    return window.localStorage.getItem(CUSTOM_CSS_MARKER_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function setCustomCssMarker(present: boolean): void {
+  try {
+    if (present) {
+      window.localStorage.setItem(CUSTOM_CSS_MARKER_KEY, "1");
+    } else {
+      window.localStorage.removeItem(CUSTOM_CSS_MARKER_KEY);
+    }
+  } catch {
+    // Ignore storage errors.
+  }
+}
+
 export interface CachedFolder {
   folderId: string;
   nodes: DriveNode[];
@@ -264,6 +289,9 @@ export function writeCachedCustomCss(
         updatedAt: row.updatedAt ?? Date.now(),
       });
     });
+    if (token === customCssCacheGeneration) {
+      setCustomCssMarker(row.css.length > 0);
+    }
   }, undefined);
 }
 
@@ -328,6 +356,7 @@ export function writeCachedSession(
       const existing = (await db.meta.get("account")) as CachedAccount | undefined;
       if (existing !== undefined && existing.email !== email) {
         customCssCacheGeneration += 1;
+        setCustomCssMarker(false);
         clearCloudStateStamp();
         resetSettings();
         await db.folders.clear();
@@ -768,6 +797,7 @@ export function discardPendingWrite(
  */
 export function clearVaultCache(): Promise<void> {
   customCssCacheGeneration += 1;
+  setCustomCssMarker(false);
   clearCloudStateStamp();
   return safe(async (db) => {
     await db.transaction("rw", [db.meta, db.folders, db.files, db.outbox, db.ops], async () => {
@@ -787,6 +817,7 @@ export function clearVaultCache(): Promise<void> {
 /** Empties the local note cache, and deletes the attachment images cached on this device. */
 export function clearLocalCache(): Promise<void> {
   customCssCacheGeneration += 1;
+  setCustomCssMarker(false);
   clearCloudStateStamp();
   void clearCachedImages();
   return safe(async (db) => {

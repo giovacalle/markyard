@@ -1,7 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
-import { bootCustomCss } from "./customCss";
+import { renderAfterCustomCss } from "./customCss";
 import "./index.css";
 import { applyTheme, getStoredTheme } from "./theme";
 
@@ -12,7 +12,7 @@ if (!root) {
   throw new Error("Root element not found");
 }
 
-void bootCustomCss().finally(() => {
+renderAfterCustomCss(() => {
   createRoot(root).render(
     <StrictMode>
       <App />
