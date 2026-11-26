@@ -98,7 +98,8 @@ Architecture Decision Records live in [`docs/adr/`](docs/adr/):
 | Command | Description |
 | --- | --- |
 | `pnpm dev` | Run local Alchemy Worker (`:8787`) and Vite+ dev server (`:5173`) |
-| `pnpm preview:mock` | Serve built `web/dist` (`:4173`) with production CSP and a fixture `/api` |
+| `pnpm preview:mock` | Serve built `web/dist` (`:4173`) with production CSP and a fixture `/api`; `GET /__mock/csp-reports` lists CSP violations |
+| `pnpm smoke` | Build, serve `web/dist` with the fixture `/api` on a free port, and run the request and CSP-report smoke matrix |
 | `pnpm test:scripts` | Run local script tests (`scripts/`) |
 | `pnpm build` | Build production web bundle (`web/dist`) and verify BFF types/lint |
 | `pnpm check:web` | Format, lint, and typecheck `web/` |
