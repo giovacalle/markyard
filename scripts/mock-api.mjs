@@ -682,15 +682,15 @@ function main() {
   process.on("SIGTERM", shutdown);
 }
 
-function isMainEntry() {
+export function isMainEntry(entryPath) {
   if (!process.argv[1]) return false;
   try {
-    return realpathSync(resolve(process.argv[1])) === realpathSync(scriptPath);
+    return realpathSync(resolve(process.argv[1])) === realpathSync(entryPath);
   } catch {
-    return resolve(process.argv[1]) === scriptPath;
+    return resolve(process.argv[1]) === entryPath;
   }
 }
 
-if (isMainEntry()) {
+if (isMainEntry(scriptPath)) {
   main();
 }

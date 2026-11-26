@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { readFileSync, realpathSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { request as httpRequest } from "node:http";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { headersFor, parseHeaders } from "./mock-api.mjs";
+import { headersFor, isMainEntry, parseHeaders } from "./mock-api.mjs";
 
 const scriptPath = fileURLToPath(import.meta.url);
 const scriptDir = dirname(scriptPath);
@@ -323,43 +323,37 @@ export async function runSmoke({
   build = pnpmBuild,
   distDir,
   fixtureFile,
-  headersFile = DEFAULT_HEADERS_FILE,
   out = process.stderr,
 } = {}) {
   let baseUrl;
   let started = null;
+  let failed = false;
   try {
     await build();
     started = await startMockApi({ distDir, fixtureFile });
     baseUrl = started.baseUrl;
-    await runMatrix(baseUrl, { headersFile, out });
+    await runMatrix(baseUrl, { out });
     return { exitCode: 0, baseUrl };
   } catch (err) {
+    failed = true;
     if (!baseUrl) {
       const message = err instanceof Error ? err.message : String(err);
       out.write(`FAIL smoke: ${message}\n`);
-    }
-    const childStderr = started?.getStderr().trim();
-    if (childStderr) {
-      out.write(`mock-api stderr:\n${childStderr}\n`);
     }
     return { exitCode: 1, baseUrl };
   } finally {
     if (started) {
       await stopChild(started.child);
+      if (failed) {
+        const childStderr = started.getStderr().trim();
+        if (childStderr) {
+          out.write(`mock-api stderr:\n${childStderr}\n`);
+        }
+      }
     }
   }
 }
 
-function isMainEntry() {
-  if (!process.argv[1]) return false;
-  try {
-    return realpathSync(resolve(process.argv[1])) === realpathSync(scriptPath);
-  } catch {
-    return resolve(process.argv[1]) === scriptPath;
-  }
-}
-
-if (isMainEntry()) {
+if (isMainEntry(scriptPath)) {
   process.exitCode = (await runSmoke()).exitCode;
 }
