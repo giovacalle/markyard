@@ -370,6 +370,17 @@ export function readAllCachedFiles(): Promise<CachedFile[]> {
   return safe((db) => db.files.toArray(), []);
 }
 
+export function readCachedFilesByIds(fileIds: readonly string[]): Promise<CachedFile[]> {
+  if (fileIds.length === 0) {
+    return Promise.resolve([]);
+  }
+  return safe(
+    async (db) =>
+      (await db.files.bulkGet([...fileIds])).filter((row): row is CachedFile => row !== undefined),
+    [],
+  );
+}
+
 export function writeCachedFolder(folderId: string, nodes: DriveNode[]): Promise<void> {
   return safe(async (db) => {
     await db.folders.put({ folderId, nodes, updatedAt: Date.now() });
@@ -626,6 +637,19 @@ export function readPendingWrite(fileId: string): Promise<PendingWrite | undefin
 
 export function readAllPendingWrites(): Promise<PendingWrite[]> {
   return safe((db) => db.outbox.toArray(), []);
+}
+
+export function readPendingWritesByIds(fileIds: readonly string[]): Promise<PendingWrite[]> {
+  if (fileIds.length === 0) {
+    return Promise.resolve([]);
+  }
+  return safe(
+    async (db) =>
+      (await db.outbox.bulkGet([...fileIds])).filter(
+        (row): row is PendingWrite => row !== undefined,
+      ),
+    [],
+  );
 }
 
 /**

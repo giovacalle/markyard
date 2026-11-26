@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { DriveNode } from "./api";
 import { useOptionalDriveChanges } from "./driveChanges";
 import {
@@ -97,11 +97,6 @@ export function compileCustomCssWithNotes(notes: readonly StyleNote[]): {
   return { css: blocks.join("\n\n"), noteNames };
 }
 
-/** Concatenates every `css` fenced block across `notes` in `localeCompare` name order. */
-export function compileCustomCss(notes: readonly StyleNote[]): string {
-  return compileCustomCssWithNotes(notes).css;
-}
-
 let cachedNoCss: boolean | null = null;
 
 /** Whether this page load disabled custom CSS via `?nocss=1` (cached for the page load). */
@@ -156,13 +151,7 @@ export function adoptUserSheet(root: Document | ShadowRoot): void {
 
 /** Replaces the shared user stylesheet's rules and ensures it is adopted on `document`. */
 export function setCustomCss(css: string): void {
-  if (customCssDisabledByQuery()) {
-    if (sharedSheet !== null) {
-      sharedSheet.replaceSync("");
-    }
-    return;
-  }
-  if (css.length === 0) {
+  if (customCssDisabledByQuery() || css.length === 0) {
     if (sharedSheet !== null) {
       sharedSheet.replaceSync("");
     }
@@ -284,7 +273,7 @@ export function resetCustomCssForTests(): void {
 
 /**
  * Keeps the shared custom CSS stylesheet synchronized with the vault's styles folder, live edits,
- * Drive change polls, folder setting changes, vault switches, and account sign-out/unmount.
+ * Drive change polls, folder setting changes, vault switches, and account sign-out.
  */
 export function useCustomCss({
   accountEmail,
@@ -310,12 +299,15 @@ export function useCustomCss({
   const seenChangesRef = useRef<Set<string>>(new Set());
   const seenHydratedRef = useRef(false);
 
-  // Clear the shared sheet when the session tree unmounts.
-  useEffect(() => {
-    return () => {
-      setCustomCss("");
-      setCustomCssLoadedNotes([]);
-    };
+  const resetTracking = useCallback((nextRootId: string | null = null) => {
+    rootEpochRef.current += 1;
+    lastRootIdRef.current = nextRootId;
+    stylesFolderIdRef.current = null;
+    stylesNoteIdsRef.current = new Set();
+    lastModifiedByIdRef.current = new Map();
+    lastForcedTimeByIdRef.current = new Map();
+    seenChangesRef.current = new Set();
+    seenHydratedRef.current = false;
   }, []);
 
   // Re-key on account switch without clearing during initial undefined -> email resolution.
@@ -324,34 +316,20 @@ export function useCustomCss({
       return;
     }
     if (lastAccountRef.current !== null && lastAccountRef.current !== accountEmail) {
-      rootEpochRef.current += 1;
-      lastRootIdRef.current = null;
-      stylesFolderIdRef.current = null;
-      stylesNoteIdsRef.current = new Set();
-      lastModifiedByIdRef.current = new Map();
-      lastForcedTimeByIdRef.current = new Map();
-      seenChangesRef.current = new Set();
-      seenHydratedRef.current = false;
+      resetTracking();
       setCustomCss("");
       setCustomCssLoadedNotes([]);
       setAccountEpoch((value) => value + 1);
     }
     lastAccountRef.current = accountEmail;
-  }, [accountEmail]);
+  }, [accountEmail, resetTracking]);
 
   useEffect(() => {
     if (!enabled) {
       setCustomCss("");
       setCustomCssLoadedNotes([]);
       if (signedOut) {
-        rootEpochRef.current += 1;
-        lastRootIdRef.current = null;
-        stylesFolderIdRef.current = null;
-        stylesNoteIdsRef.current = new Set();
-        lastModifiedByIdRef.current = new Map();
-        lastForcedTimeByIdRef.current = new Map();
-        seenChangesRef.current = new Set();
-        seenHydratedRef.current = false;
+        resetTracking();
       }
       return;
     }
@@ -445,14 +423,9 @@ export function useCustomCss({
         return false;
       }
       if (lastRootIdRef.current !== null && lastRootIdRef.current !== root.id) {
-        lastRootIdRef.current = root.id;
-        rootEpochRef.current += 1;
         activeController?.abort();
         activeController = null;
-        stylesFolderIdRef.current = null;
-        stylesNoteIdsRef.current = new Set();
-        lastModifiedByIdRef.current = new Map();
-        lastForcedTimeByIdRef.current = new Map();
+        resetTracking(root.id);
         pendingForceIds.clear();
         setCustomCss("");
         setCustomCssLoadedNotes([]);
@@ -483,12 +456,18 @@ export function useCustomCss({
       const token = customCssCacheToken();
 
       try {
-        ignoreSelfQueryUpdates = true;
         const result = await readRootFolderNotes(queryClient, folderName, {
           signal: controller.signal,
           forceIds,
+          onCacheWrite: (write) => {
+            ignoreSelfQueryUpdates = true;
+            try {
+              write();
+            } finally {
+              ignoreSelfQueryUpdates = false;
+            }
+          },
         });
-        ignoreSelfQueryUpdates = false;
         if (cancelled || epoch !== rootEpochRef.current) {
           return;
         }
@@ -505,7 +484,6 @@ export function useCustomCss({
         setCustomCssLoadedNotes(noteNames);
         await writeCachedCustomCss({ css, notes: noteNames }, token);
       } finally {
-        ignoreSelfQueryUpdates = false;
         if (activeController === controller) {
           activeController = null;
         }
@@ -615,5 +593,13 @@ export function useCustomCss({
       unsubscribeQuery();
       unsubscribeChanges?.();
     };
-  }, [queryClient, driveChanges, enabled, signedOut, settings.stylesFolder, accountEpoch]);
+  }, [
+    queryClient,
+    driveChanges,
+    enabled,
+    signedOut,
+    settings.stylesFolder,
+    accountEpoch,
+    resetTracking,
+  ]);
 }

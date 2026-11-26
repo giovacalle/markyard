@@ -100,7 +100,6 @@ beforeAll(() => {
 afterEach(() => {
   server.resetHandlers();
   history.replaceState(null, "", "/");
-  document.documentElement.style.removeProperty("--markyard-text-size");
   vi.restoreAllMocks();
 });
 
@@ -151,11 +150,26 @@ describe("Custom CSS contract — source surface (C1a, C6, C7, C10)", () => {
       expect(content.length, `${file} must be non-empty`).toBeGreaterThan(0);
     }
 
-    const allSources = scannedEntries.map(([, content]) => content).join("\n");
+    const css = sourceOf("./index.css");
+    expect(extractCssBlock(css, "html")).toContain("var(--markyard-font-ui");
+    expect(extractCssBlock(css, ".markdown-preview a")).toContain("var(--markyard-accent");
+    expect(extractCssBlock(css, ".markdown-preview code")).toContain("var(--markyard-font-mono");
+    expect(extractCssBlock(css, ".markdown-preview pre")).toContain("var(--markyard-font-mono");
 
-    for (const variable of DOCUMENTED_VARIABLES) {
-      expect(allSources).toContain(`var(${variable}`);
+    const editor = sourceOf("./components/Editor.tsx");
+    for (const variable of [
+      "--markyard-font-text",
+      "--markyard-font-mono",
+      "--markyard-text-size",
+      "--markyard-line-height",
+      "--markyard-accent",
+    ]) {
+      expect(editor, `Editor.tsx must read ${variable}`).toContain(`var(${variable}`);
     }
+
+    const textWidthReads =
+      sourceOf("./components/DocumentView.tsx").match(/var\(--markyard-text-width\b/g) ?? [];
+    expect(textWidthReads).toHaveLength(2);
 
     for (const [file, content] of scannedEntries) {
       expect(content, `${file} must leave --markyard-* unset`).not.toMatch(
@@ -244,6 +258,7 @@ describe("Custom CSS contract — rendered regions & nesting (C1b, C1c, C2)", ()
   });
 
   it("tags the not-loaded branch wrapper with preview/editor and keeps note-header inside it", async () => {
+    // The App always passes a leading control (sidebar toggle), so the not-loaded header renders.
     history.replaceState(null, "", "/?file=doc-id");
     server.use(
       http.get("/api/session", () => HttpResponse.json({ email: "owner@example.com" })),
@@ -268,9 +283,8 @@ describe("Custom CSS contract — rendered regions & nesting (C1b, C1c, C2)", ()
     expect(previewWrapper?.contains(status)).toBe(true);
 
     const header = section.querySelector<HTMLElement>('[data-region="note-header"]');
-    if (header !== null) {
-      expect(previewWrapper?.contains(header)).toBe(true);
-    }
+    expect(header).not.toBeNull();
+    expect(previewWrapper?.contains(header)).toBe(true);
   });
 
   it("tags Settings, Tasks and Attachments regions when rendered", async () => {
@@ -339,16 +353,6 @@ describe("Custom CSS contract — rendered regions & nesting (C1b, C1c, C2)", ()
     expect(cssText).toContain("var(--markyard-font-text");
     expect(cssText).toContain("var(--markyard-text-size");
     expect(cssText).toContain("var(--markyard-line-height");
-
-    // Verify variable override reaches the editor root when the engine resolves CSS variables.
-    document.documentElement.style.setProperty("--markyard-text-size", "22px");
-    const cmEditor = host.shadowRoot?.querySelector<HTMLElement>(".cm-editor");
-    expect(cmEditor).not.toBeNull();
-    const computedFontSize = cmEditor ? getComputedStyle(cmEditor).fontSize : "";
-    // jsdom may leave unresolved var(...) strings verbatim; real browser resolution is proven in E3/E6.
-    expect(
-      computedFontSize === "22px" || computedFontSize.includes("var(--markyard-text-size"),
-    ).toBe(true);
   });
 });
 

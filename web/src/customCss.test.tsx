@@ -12,7 +12,7 @@ import { mountSvgInShadow } from "./cspSafeSvg";
 import {
   adoptUserSheet,
   bootCustomCss,
-  compileCustomCss,
+  compileCustomCssWithNotes,
   customCssDisabledByQuery,
   extractCssBlocks,
   getCustomCssSheet,
@@ -96,7 +96,7 @@ function pressSave() {
   });
 }
 
-describe("extractCssBlocks and compileCustomCss", () => {
+describe("extractCssBlocks and compileCustomCssWithNotes", () => {
   it("extracts only exact css fenced blocks in document order", () => {
     const md = [
       "# Styles",
@@ -146,7 +146,7 @@ describe("extractCssBlocks and compileCustomCss", () => {
   });
 
   it("concatenates notes in localeCompare name order and blocks in document order", () => {
-    const css = compileCustomCss([
+    const { css } = compileCustomCssWithNotes([
       { name: "z.md", text: "```css\n.z { opacity: 0.5; }\n```" },
       {
         name: "a.md",
@@ -351,7 +351,7 @@ describe("custom CSS cache generation fencing", () => {
 });
 
 describe("custom CSS live loading, updates, offline safety and vault switches", () => {
-  it("loads _styles/look.md, updates live after editing and saving, creates no style elements, and clears on unmount", async () => {
+  it("loads _styles/look.md, updates live after editing and saving, creates no style elements, and keeps the sheet across an unmount", async () => {
     const nonUiSdkStyleCountBefore = document.querySelectorAll('style:not([id^="ui-sdk-"])').length;
     let savedText = "```css\n.markdown-preview h1 { color: rgb(255, 0, 0); }\n```";
 
@@ -415,8 +415,9 @@ describe("custom CSS live loading, updates, offline safety and vault switches", 
       Array.from(document.querySelectorAll("style"), (el) => el.textContent ?? "").join("\n"),
     ).not.toContain("markdown-preview");
 
+    // A StrictMode-style unmount must not wipe applied CSS; sign-out and account switch clear it.
     unmount();
-    expect(getCustomCssSheet()!.cssRules.length).toBe(0);
+    expect(sheetCssText()).toContain("rgb(0, 128, 0)");
   });
 
   it("never wipes boot-cached CSS while offline before the styles folder is listed", async () => {
@@ -521,7 +522,7 @@ describe("custom CSS live loading, updates, offline safety and vault switches", 
       forceIds: new Set(["look-id"]),
     });
     expect(result.state).toBe("known");
-    expect(compileCustomCss(result.notes)).toContain("rgb(1, 2, 3)");
+    expect(compileCustomCssWithNotes(result.notes).css).toContain("rgb(1, 2, 3)");
   });
 
   it("skips persisted Drive changes after hydrate and force-fetches only unseen style note changes", async () => {

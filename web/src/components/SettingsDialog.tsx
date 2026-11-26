@@ -367,6 +367,7 @@ function SettingsBody({
   const tabRefs = useRef<Partial<Record<SectionValue, HTMLButtonElement | null>>>({});
   // The section a narrow drill-in came from, so Back returns focus to its tab.
   const returnTo = useRef<SectionValue | null>(null);
+  const wasDrilledIn = useRef(false);
 
   useEffect(() => {
     if (drilledIn) {
@@ -374,8 +375,12 @@ function SettingsBody({
     } else if (narrow && returnTo.current !== null) {
       tabRefs.current[returnTo.current]?.focus();
       returnTo.current = null;
+    } else if (!narrow && wasDrilledIn.current && document.activeElement === document.body) {
+      tabRefs.current[selected ?? "appearance"]?.focus();
+      returnTo.current = null;
     }
-  }, [drilledIn, narrow]);
+    wasDrilledIn.current = drilledIn;
+  }, [drilledIn, narrow, selected]);
 
   const clearCache = async () => {
     setClearing(true);

@@ -135,6 +135,8 @@ If custom CSS hides controls or breaks the layout:
 
 ### 3. Accent headings in Preview and a tinted Document info panel
 
+Inside `.markdown-preview`, Markdown `#`, `##`, and `###` headings render as `h3`, `h4`, and `h5` (with deeper headings capped at `h6`) so they sit below the app and note title headings.
+
 ````markdown
 ```css
 [data-region="preview"] .markdown-preview h3 {

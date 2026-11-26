@@ -5,6 +5,8 @@ import { type DriveNode, fetchChildren, fetchContent } from "./api";
 import {
   readAllCachedFiles,
   readAllPendingWrites,
+  readCachedFilesByIds,
+  readPendingWritesByIds,
   writeCachedFolder,
   writeCachedRemoteFile,
 } from "./localCache";
@@ -108,6 +110,8 @@ export interface ReadRootFolderNotesOptions {
   signal?: AbortSignal;
   /** File ids to fetch fresh from Drive even when a local copy exists (unless a write is pending). */
   forceIds?: ReadonlySet<string>;
+  /** Wraps synchronous `queryClient.setQueryData` writes made while reading notes. */
+  onCacheWrite?: (write: () => void) => void;
 }
 
 /**
@@ -125,6 +129,7 @@ export async function readRootFolderNotes(
 ): Promise<RootFolderNotesResult> {
   const signal = options?.signal;
   const forceIds = options?.forceIds;
+  const writeCache = options?.onCacheWrite ?? ((write: () => void) => write());
   const root = queryClient.getQueryData<DriveNode>(["root"]);
   if (root === undefined) {
     return { state: "unknown", notes: [] };
@@ -151,7 +156,7 @@ export async function readRootFolderNotes(
   if ((folderChildren === undefined || needsForceListing) && !isLocalId(folder.id) && online) {
     try {
       const children = await fetchChildren(folder.id, signal);
-      queryClient.setQueryData(childrenKey(folder.id), children);
+      writeCache(() => queryClient.setQueryData(childrenKey(folder.id), children));
       void writeCachedFolder(folder.id, children);
       folderChildren = children;
     } catch {
@@ -170,7 +175,11 @@ export async function readRootFolderNotes(
     return { state: "known", notes: [] };
   }
 
-  const [files, pending] = await Promise.all([readAllCachedFiles(), readAllPendingWrites()]);
+  const noteIds = notes.map((note) => note.id);
+  const [files, pending] = await Promise.all([
+    readCachedFilesByIds(noteIds),
+    readPendingWritesByIds(noteIds),
+  ]);
   const cachedById = new Map(files.map((file) => [file.fileId, file]));
   const pendingById = new Map(pending.map((write) => [write.fileId, write]));
 
@@ -190,10 +199,12 @@ export async function readRootFolderNotes(
         try {
           const remote = await fetchContent(note.id, signal);
           if (live !== undefined) {
-            queryClient.setQueryData(["files", note.id, "content"], {
-              text: remote.text,
-              revision: remote.revision,
-            });
+            writeCache(() =>
+              queryClient.setQueryData(["files", note.id, "content"], {
+                text: remote.text,
+                revision: remote.revision,
+              }),
+            );
           }
           void writeCachedRemoteFile(note.id, remote.text, remote.revision);
           return { id: note.id, name: note.name, text: remote.text };

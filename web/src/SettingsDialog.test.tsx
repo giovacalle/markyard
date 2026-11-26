@@ -263,6 +263,36 @@ describe("Settings sections", () => {
     );
   });
 
+  it("focuses the open section's tab when the screen widens while Back had focus", async () => {
+    let narrow = true;
+    const listeners = new Set<() => void>();
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      writable: true,
+      value: (query: string) => ({
+        get matches() {
+          return narrow && query === "(max-width: 47.99rem)";
+        },
+        media: query,
+        addEventListener: (_type: string, listener: () => void) => listeners.add(listener),
+        removeEventListener: (_type: string, listener: () => void) => listeners.delete(listener),
+      }),
+    });
+    const dialog = await renderSettledSettings();
+    fireEvent.click(within(dialog).getByRole("tab", { name: "Vault" }));
+    const back = within(dialog).getByRole("button", { name: "Back to settings sections" });
+    expect(document.activeElement).toBe(back);
+
+    narrow = false;
+    act(() => {
+      for (const listener of listeners) {
+        listener();
+      }
+    });
+    expect(within(dialog).queryByRole("button", { name: "Back to settings sections" })).toBeNull();
+    expect(document.activeElement).toBe(within(dialog).getByRole("tab", { name: "Vault" }));
+  });
+
   it("falls back to the desktop layout without matchMedia", () => {
     Reflect.deleteProperty(window, "matchMedia");
     const dialog = renderSettings();
