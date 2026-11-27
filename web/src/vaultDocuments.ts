@@ -71,6 +71,14 @@ interface ContentData {
 }
 
 /**
+ * Freshest local text of `doc`: the in-memory query cache entry (updated synchronously by
+ * `SyncQueue.enqueueSave`), falling back to `doc.text` when no cache entry is present.
+ */
+export function freshNoteText(queryClient: QueryClient | undefined, doc: VaultDocument): string {
+  return queryClient?.getQueryData<ContentData>(["files", doc.id, "content"])?.text ?? doc.text;
+}
+
+/**
  * Every listed note with a local copy, freshest text first: the in-memory query, then an edit
  * waiting to sync, then the IndexedDB cache.
  */

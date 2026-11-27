@@ -1116,12 +1116,43 @@ function DocumentSession({
     [base, saveError, queryClient, syncQueue, fileId],
   );
 
-  // Preview checkbox toggles (and restored versions) are complete edits: store and sync them
-  // right away, like a save.
-  const handleToggleTask = useCallback(
-    (nextText: string) => {
+  const isPreviewRef = useRef(isPreview);
+  isPreviewRef.current = isPreview;
+  const editorActiveRef = useRef(editorActive);
+  editorActiveRef.current = editorActive;
+  const getFullText = useCallback(() => draftRef.current, []);
+
+  // Whole-note edits (task toggles, restored revisions, drawer edits): update the draft, sync the
+  // kept-alive editor, and enqueue a save right away. While the editor is active in Visual mode,
+  // keep the pinned `frontmatterRawRef` whenever `nextText` still starts with it so YAML or a
+  // leading newline typed into the body does not get stripped out from under CM6.
+  const applyWholeNoteEdit = useCallback(
+    (nextText: string, undoable: boolean, options?: { repinFrontmatter?: boolean }) => {
       setDraft(nextText);
       draftRef.current = nextText;
+      let nextEditorText: string;
+      const pinned = frontmatterRawRef.current;
+      if (
+        !options?.repinFrontmatter &&
+        editorActiveRef.current &&
+        !rawYamlModeRef.current &&
+        nextText.startsWith(pinned)
+      ) {
+        const sliced = nextText.slice(pinned.length);
+        nextEditorText =
+          pinned !== "" && !/(?:\r\n|\r|\n)$/.test(pinned)
+            ? sliced.replace(/^(?:\r\n|\r|\n)/, "")
+            : sliced;
+      } else {
+        const nextSplit = splitFrontmatter(nextText);
+        frontmatterRawRef.current = nextSplit.frontmatterRaw;
+        nextEditorText = rawYamlModeRef.current ? nextText : nextSplit.body;
+      }
+      if (undoable) {
+        editorHandleRef.current?.replaceText(nextEditorText);
+      } else {
+        editorHandleRef.current?.syncText(nextEditorText);
+      }
       if (blocksNewSaveRef.current || reloadingRef.current) {
         return;
       }
@@ -1130,6 +1161,13 @@ function DocumentSession({
       syncQueue.enqueueSave(fileId, nextText, baseRevisionRef.current, baseTextRef.current);
     },
     [fileId, syncQueue],
+  );
+
+  // Preview checkbox toggles sync non-destructively; toggles while editing (from an inline query
+  // preview) record an undoable editor edit so Cmd/Ctrl+Z reverts them cleanly.
+  const handleToggleTask = useCallback(
+    (nextText: string) => applyWholeNoteEdit(nextText, !isPreviewRef.current),
+    [applyWholeNoteEdit],
   );
 
   const statusText =
@@ -1190,10 +1228,7 @@ function DocumentSession({
   // note's current Drive tag, so a concurrent change on Drive still surfaces as a conflict.
   const handleRestore = (text: string, revision: Revision) => {
     setHistoryOpen(false);
-    const nextSplit = splitFrontmatter(text);
-    frontmatterRawRef.current = nextSplit.frontmatterRaw;
-    editorHandleRef.current?.replaceText(rawYamlModeRef.current ? text : nextSplit.body);
-    handleToggleTask(text);
+    applyWholeNoteEdit(text, true, { repinFrontmatter: true });
     toaster(`Restored revision from ${formatRevisionDate(revision.modifiedTime)}`, {
       id: RESTORED_TOAST_ID,
     });
@@ -1204,10 +1239,7 @@ function DocumentSession({
     if (text === draftRef.current) {
       return;
     }
-    const nextSplit = splitFrontmatter(text);
-    frontmatterRawRef.current = nextSplit.frontmatterRaw;
-    editorHandleRef.current?.replaceText(rawYamlModeRef.current ? text : nextSplit.body);
-    handleToggleTask(text);
+    applyWholeNoteEdit(text, true, { repinFrontmatter: true });
   };
   const handleEditorChange = useCallback(
     (nextEditorText: string) => {
@@ -1681,6 +1713,8 @@ function DocumentSession({
                   text={editorText}
                   active={!isPreview && mergeRemote === null}
                   onChange={handleEditorChange}
+                  onToggleTask={readOnly ? undefined : handleToggleTask}
+                  getFullText={getFullText}
                   onUploadingChange={setUploadingImages}
                   editorRef={editorHandleRef}
                   autoFocus={focusOnEnter}

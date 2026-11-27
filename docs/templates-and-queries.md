@@ -1,6 +1,6 @@
 # Templates & Declarative Query Blocks
 
-Markyard supports reusable Markdown templates with dynamic placeholders and live declarative ```` ```query ```` blocks that filter, sort, and summarize notes and tasks directly inside Preview mode—all client-side, with zero custom scripting and full strict-CSP safety.
+Markyard supports reusable Markdown templates with dynamic placeholders and live declarative ```` ```query ```` blocks that filter, sort, and summarize notes and tasks directly in Preview mode and inline inside Edit mode—all client-side, with zero custom scripting and full strict-CSP safety.
 
 ## Templates
 
@@ -70,7 +70,15 @@ tags: [daily]
 
 ## Declarative Query Blocks
 
-Add a fenced ```` ```query ```` code block to any Markdown note to render live lists, tables, interactive task lists, or counts in Preview mode. Queries are purely declarative (no JavaScript evaluation) and run locally over your cached vault notes.
+Add a fenced ```` ```query ```` code block to any Markdown note to render live lists, tables, interactive task lists, or counts in Preview mode and inline inside Edit mode. Queries are purely declarative (no JavaScript evaluation) and run locally over your cached vault notes.
+
+### Edit mode (Live Preview)
+
+- **Cursor outside the block**: A closed top-level ```` ```query ```` block folds into its rendered result directly inside the editor, with an **Edit** button in the header to unfold it.
+- **Keyboard unfolding**: Moving across a folded block with `ArrowDown` / `ArrowUp` (or `Ctrl-n` / `Ctrl-p` on macOS) stops on its edge and unfolds it. Pressing `Backspace` at the start of the line after a folded block or `Delete` at the end of the line before it moves the cursor into the block instead of joining lines onto the fence.
+- **Cursor inside the block**: The YAML remains editable with syntax highlighting, and a **Live preview** renders right below the closing fence—updating as you type.
+- **Unclosed fences**: While typing a new ```` ```query ```` block before adding the closing fence, it stays plain text.
+- Note links and task checkboxes remain interactive inline (respecting Read-only mode and preserving unsaved edits in the current note).
 
 ### Block schema
 
@@ -123,7 +131,7 @@ Expressions support operator precedence **`OR` < `AND` < `NOT` < `(...)`** (keyw
 
 - **`list`**: Compact list of clickable note links with folder subtitles (or task items when `type: tasks`).
 - **`table(col1, col2, ...)`**: Responsive table with the requested columns. A `title` column renders as clickable note links, `tags` renders as pills, and missing values display as `—`.
-- **`tasks`** (requires `type: tasks`): Interactive checklist built with `@ui-sdk/react` checkboxes, optional `@YYYY-MM-DD` due badges, and source note links. Checking or unchecking a task updates the view immediately and saves the change back to the source note through the sync queue.
+- **`tasks`** (requires `type: tasks`): Interactive checklist with optional `@YYYY-MM-DD` due badges and source note links. Checking or unchecking a task updates the view immediately and saves the change back to the source note through the sync queue (and records an undoable edit when toggling a task inside the active note in Edit mode). If the note changed since the results were drawn, the click writes nothing and the results refresh.
 - **`count`**: Clean numeric summary card showing how many notes or tasks match the query.
 
 ### Examples
@@ -162,6 +170,6 @@ view: count
 
 ### Local cache & offline vault behavior
 
-Query blocks evaluate strictly against notes cached locally on your device (in memory, pending edits, or IndexedDB) so Preview stays instant and never triggers background Google Drive downloads.
+Query blocks evaluate strictly against notes cached locally on your device (in memory, pending edits, or IndexedDB) so both Preview and Edit mode stay instant and never trigger background Google Drive downloads.
 
 Each query block displays a compact footer showing both the number of results and how many vault notes are currently cached (for example, `3 results · 14 of 120 notes cached`). To include every note in your vault in query results—even notes you have not opened recently—enable **Offline vault** pinning in **Settings**.

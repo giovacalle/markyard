@@ -854,10 +854,16 @@ interface PreparedNote {
   tags: string[];
   tagSet: Set<string>;
   frontmatter: Map<string, string | string[]>;
-  body: string;
 }
 
+const PREPARED = new WeakMap<VaultDocument, PreparedNote>();
+const TASKS = new WeakMap<VaultDocument, ReturnType<typeof parseTasks>>();
+
 function prepareNote(doc: VaultDocument): PreparedNote {
+  const cached = PREPARED.get(doc);
+  if (cached !== undefined) {
+    return cached;
+  }
   const title = noteStem(doc.name);
   const folder = doc.path.join("/");
   const path = folder.length > 0 ? `${folder}/${title}` : title;
@@ -872,7 +878,28 @@ function prepareNote(doc: VaultDocument): PreparedNote {
   const body = fm === null ? doc.text : doc.text.slice(fm.end);
   const tags = mergeTags(frontmatterTags(fm), extractBodyTags(body));
   const tagSet = new Set(tags.map((t) => t.toLowerCase()));
-  return { doc, title, folder, path, modified, tags, tagSet, frontmatter, body };
+  const prepared: PreparedNote = {
+    doc,
+    title,
+    folder,
+    path,
+    modified,
+    tags,
+    tagSet,
+    frontmatter,
+  };
+  PREPARED.set(doc, prepared);
+  return prepared;
+}
+
+function tasksOf(doc: VaultDocument): ReturnType<typeof parseTasks> {
+  const cached = TASKS.get(doc);
+  if (cached !== undefined) {
+    return cached;
+  }
+  const tasks = parseTasks(doc.text);
+  TASKS.set(doc, tasks);
+  return tasks;
 }
 
 function noteFieldLookup(note: PreparedNote): (name: string) => FieldValue {
@@ -959,7 +986,7 @@ export function executeQuery(
   const rows: TaskQueryRow[] = [];
   for (const note of inScope) {
     const parentLookup = noteFieldLookup(note);
-    for (const task of parseTasks(note.doc.text)) {
+    for (const task of tasksOf(note.doc)) {
       const taskTagSet = new Set(task.tags.map((t) => t.toLowerCase()));
       const getField = (name: string): FieldValue => {
         const key = name.toLowerCase();

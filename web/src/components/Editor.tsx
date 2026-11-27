@@ -22,14 +22,23 @@ import { EditorView, keymap } from "@codemirror/view";
 import { tags as t } from "@lezer/highlight";
 import { Toggle } from "@ui-sdk/react/toggle";
 import { Toolbar, ToolbarButton, ToolbarSeparator } from "@ui-sdk/react/toolbar";
-import { type ReactNode, type RefObject, useEffect, useRef, useState } from "react";
+import {
+  type ReactNode,
+  type RefObject,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
+import { createPortal } from "react-dom";
 import { ATTACHMENT_TYPES, uploadAttachment } from "../api";
 import { adoptUserSheet } from "../customCss";
-import type { Frontmatter } from "../frontmatter";
-import { getSettings } from "../settings";
 import { matchCodeLanguage } from "../editorCodeLanguages";
 import { type CompletionSources, pkmCompletions } from "../editorCompletion";
 import { focusMode, typewriterMode } from "../editorModes";
+import type { Frontmatter } from "../frontmatter";
 import { imagePreviews } from "../imagePreviews";
 import { dragHasFiles, imageFiles, imagePlaceholders, insertImages } from "../imageUploads";
 import {
@@ -42,10 +51,14 @@ import {
   toggleTask,
 } from "../markdownEditing";
 import { usePkm } from "../pkm";
+import { hasQueryFence } from "../queryFormat";
+import { queryPreviews, QueryWidgetRegistry } from "../queryPreviews";
+import { getSettings } from "../settings";
 import type { TemplateNote } from "../templates";
 import { getViewPrefs, setViewPref, useViewPrefs } from "../viewPrefs";
 import { noteStem } from "../wikilinks";
 import { AccessoryBar, type AccessoryAction } from "./AccessoryBar";
+import { QueryBlock, QueryVaultDocumentsProvider } from "./QueryBlock";
 import {
   BoldIcon,
   CheckSquareIcon,
@@ -435,6 +448,8 @@ export interface EditorHandle {
 
 const IMAGE_ACCEPT = ATTACHMENT_TYPES.join(",");
 
+export const LIVE_DRAFT_DEBOUNCE_MS = 300;
+
 interface ImageHandlers {
   insert: (view: EditorView, files: readonly File[], pos: number) => void;
   setDropTarget: (active: boolean) => void;
@@ -443,6 +458,8 @@ interface ImageHandlers {
 export function Editor({
   initialText,
   onChange,
+  onToggleTask,
+  getFullText,
   onUploadingChange,
   editorRef,
   autoFocus = false,
@@ -454,6 +471,10 @@ export function Editor({
 }: {
   initialText: string;
   onChange: (text: string) => void;
+  /** Called when an inline query widget toggles a task inside the currently open note. */
+  onToggleTask?: (nextText: string) => void;
+  /** Returns the open note's latest full Markdown (frontmatter + body) so live queries never read stale autosave buffers. */
+  getFullText?: () => string;
   /** Called when inline image uploads start or finish (`true` while at least one is in flight). */
   onUploadingChange?: (uploading: boolean) => void;
   editorRef?: RefObject<EditorHandle | null>;
@@ -480,6 +501,8 @@ export function Editor({
   const frontmatterRef = useRef(frontmatter);
   frontmatterRef.current = frontmatter;
   const onChangeRef = useRef(onChange);
+  const getFullTextRef = useRef(getFullText);
+  getFullTextRef.current = getFullText;
   const autoFocusRef = useRef(autoFocus);
   autoFocusRef.current = autoFocus;
   const textRef = useRef(text);
@@ -491,6 +514,33 @@ export function Editor({
   const pkm = usePkm();
   const pkmRef = useRef(pkm);
   pkmRef.current = pkm;
+  const [queryWidgets] = useState(() => new QueryWidgetRegistry());
+  const slots = useSyncExternalStore(queryWidgets.subscribe, queryWidgets.getSnapshot);
+  const [hasQueryBlocks, setHasQueryBlocks] = useState(() => hasQueryFence(text ?? initialText));
+  const [liveDraft, setLiveDraft] = useState<string | undefined>(() => getFullText?.());
+  const liveDraftTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const scheduleLiveDraft = useCallback(() => {
+    clearTimeout(liveDraftTimerRef.current);
+    liveDraftTimerRef.current = setTimeout(() => {
+      setLiveDraft(getFullTextRef.current?.());
+    }, LIVE_DRAFT_DEBOUNCE_MS);
+  }, []);
+  const readCurrentNoteText = useCallback(() => getFullTextRef.current?.(), []);
+  const handleToggleTask = useMemo(
+    () =>
+      onToggleTask === undefined
+        ? undefined
+        : (nextText: string) => {
+            clearTimeout(liveDraftTimerRef.current);
+            setLiveDraft(nextText);
+            onToggleTask(nextText);
+            clearTimeout(liveDraftTimerRef.current);
+          },
+    [onToggleTask],
+  );
+  const requestQueryMeasure = useCallback(() => {
+    viewRef.current?.requestMeasure();
+  }, []);
   const templatesRef = useRef<readonly TemplateNote[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(0);
@@ -626,6 +676,7 @@ export function Editor({
         history(),
         imagePlaceholders,
         imagePreviews,
+        queryPreviews(queryWidgets),
         imageEvents,
         MARKDOWN_EDITING,
         pkmCompletions(completionSources),
@@ -636,11 +687,16 @@ export function Editor({
         typewriterRef.current.of(initialPrefs.typewriterMode ? typewriterMode : []),
         EditorView.contentAttributes.of({ "aria-label": "Note text" }),
         EditorView.updateListener.of((update) => {
-          if (
-            update.docChanged &&
-            !update.transactions.some((tr) => tr.annotation(externalSync) === true)
-          ) {
-            onChangeRef.current(update.state.doc.sliceString(0, undefined, separator));
+          if (update.docChanged) {
+            const serialized = update.state.doc.sliceString(0, undefined, separator);
+            const found = hasQueryFence(serialized);
+            if (!update.transactions.some((tr) => tr.annotation(externalSync) === true)) {
+              onChangeRef.current(serialized);
+            }
+            setHasQueryBlocks((prev) => (prev === found ? prev : found));
+            if (found) {
+              scheduleLiveDraft();
+            }
           }
         }),
       ],
@@ -697,7 +753,24 @@ export function Editor({
       viewRef.current = null;
       view.destroy();
     };
-  }, [editorRef]);
+  }, [editorRef, queryWidgets, scheduleLiveDraft]);
+
+  useEffect(() => () => clearTimeout(liveDraftTimerRef.current), []);
+
+  // Refresh the live-draft overlay when frontmatter or text changes outside CodeMirror
+  // (e.g., Visual-mode property edits or external syncs) while the editor is active.
+  useEffect(() => {
+    if (!hasQueryBlocks || !active) {
+      return;
+    }
+    scheduleLiveDraft();
+  }, [hasQueryBlocks, active, frontmatter, text, scheduleLiveDraft]);
+
+  useEffect(() => {
+    if (slots.length > 0) {
+      viewRef.current?.requestMeasure();
+    }
+  }, [slots]);
 
   // Hidden → shown: catch up with text edited elsewhere, then focus where the cursor was left.
   useEffect(() => {
@@ -714,6 +787,15 @@ export function Editor({
       view.focus();
     }
   }, [active]);
+
+  // Flush liveDraft immediately when query widgets become active (closing fence completed or
+  // hidden → shown transition) and cancel pending timers when query blocks disappear or hide.
+  useEffect(() => {
+    clearTimeout(liveDraftTimerRef.current);
+    if (hasQueryBlocks && active) {
+      setLiveDraft(getFullTextRef.current?.());
+    }
+  }, [hasQueryBlocks, active]);
 
   useEffect(() => {
     viewRef.current?.dispatch({
@@ -989,6 +1071,24 @@ export function Editor({
         data-drop-target={dropTarget ? "true" : undefined}
         className="min-h-[60vh] flex-1 cursor-text rounded-lg transition-shadow data-[drop-target=true]:bg-blue-50/40 data-[drop-target=true]:ring-2 data-[drop-target=true]:ring-blue-400/60 dark:data-[drop-target=true]:bg-blue-950/20"
       />
+      {hasQueryBlocks && (
+        <QueryVaultDocumentsProvider enabled={active}>
+          {slots.map((slot) =>
+            createPortal(
+              <QueryBlock
+                source={slot.source}
+                live={slot.mode === "live"}
+                currentNoteText={liveDraft}
+                getCurrentNoteText={readCurrentNoteText}
+                onToggleTask={handleToggleTask}
+                onContentChange={requestQueryMeasure}
+              />,
+              slot.dom,
+              String(slot.key),
+            ),
+          )}
+        </QueryVaultDocumentsProvider>
+      )}
       <AccessoryBar actions={accessoryActions} />
     </div>
   );

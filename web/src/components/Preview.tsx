@@ -31,6 +31,7 @@ import {
   OctagonAlertIcon,
 } from "./icons";
 import { BareUrlBookmark, ExternalLink } from "./LinkPreview";
+import { hasQueryFence } from "../queryFormat";
 import { QueryBlock, QueryVaultDocumentsProvider } from "./QueryBlock";
 
 type PluginList = NonNullable<ComponentPropsWithoutRef<typeof Markdown>["remarkPlugins"]>;
@@ -114,13 +115,9 @@ function hasFence(text: string): boolean {
   return /^[ \t]{0,3}(`{3,}|~{3,})/m.test(text);
 }
 
-function hasQueryFence(text: string): boolean {
-  return /^[ \t]{0,3}(?:`{3,}|~{3,})[ \t]*query(?:\s|$)/im.test(text);
-}
-
 function PreviewQueryBlock({ source }: { source: string }) {
-  const { onToggleTask } = useContext(PreviewContext);
-  return <QueryBlock source={source} onToggleTask={onToggleTask} />;
+  const { text, onToggleTask } = useContext(PreviewContext);
+  return <QueryBlock source={source} currentNoteText={text} onToggleTask={onToggleTask} />;
 }
 
 function hasMath(text: string): boolean {
@@ -485,7 +482,7 @@ const MARKDOWN_COMPONENTS = {
     if (language === "mermaid") {
       return <MermaidBlock source={raw} />;
     }
-    if (language === "query") {
+    if (language?.toLowerCase() === "query") {
       return <PreviewQueryBlock source={raw} />;
     }
     return (

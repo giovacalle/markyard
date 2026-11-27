@@ -1,3 +1,5 @@
+import { undo } from "@codemirror/commands";
+import { EditorView } from "@codemirror/view";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
@@ -5,6 +7,7 @@ import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vite-plus/test";
 import { App } from "./App";
 import { VersionHistoryDialog } from "./components/VersionHistoryDialog";
+import { clearLocalCache } from "./localCache";
 import { setViewPref } from "./viewPrefs";
 
 const server = setupServer();
@@ -13,10 +16,11 @@ beforeAll(() => {
   server.listen({ onUnhandledFrame: "error" });
 });
 
-afterEach(() => {
+afterEach(async () => {
   server.resetHandlers();
   history.replaceState(null, "", "/");
   vi.useRealTimers();
+  await clearLocalCache();
 });
 
 afterAll(() => {
@@ -51,6 +55,21 @@ function revisionHandlers(revisions = REVISIONS) {
     }),
   );
   return contentCalls;
+}
+
+function getEditorView(region: HTMLElement): EditorView {
+  const host = region.querySelector('[data-testid="editor-host"]');
+  const textbox = host?.shadowRoot?.querySelector<HTMLElement>(
+    '[role="textbox"][aria-label="Note text"]',
+  );
+  if (!textbox) {
+    throw new Error("CodeMirror textbox not found");
+  }
+  const view = EditorView.findFromDOM(textbox);
+  if (!view) {
+    throw new Error("EditorView not found");
+  }
+  return view;
 }
 
 function openNote() {
@@ -150,6 +169,91 @@ describe("Version history", () => {
     fireEvent.click(await within(palette).findByRole("option", { name: /Version history/ }));
 
     expect(await screen.findByRole("dialog", { name: "Version history" })).toBeInTheDocument();
+  });
+
+  it("sends one PUT and remains undoable in a single step when restoring from Edit mode", async () => {
+    revisionHandlers();
+    const puts = openNote();
+    const preview = await screen.findByRole("region", { name: "Preview" });
+    await within(preview).findByRole("heading", { name: "Plan" });
+
+    // Enter Edit mode before restoring.
+    fireEvent.click(within(preview).getByTestId("editor-canvas"));
+    const editor = await screen.findByRole("region", { name: "Editor" });
+    const view = getEditorView(editor);
+    expect(view.state.doc.toString()).toBe(CURRENT);
+
+    fireEvent.click(within(editor).getByRole("button", { name: "Version history" }));
+    const dialog = await screen.findByRole("dialog", { name: "Version history" });
+    const options = within(
+      await within(dialog).findByRole("listbox", { name: "Revisions" }),
+    ).getAllByRole("option");
+    fireEvent.click(options[1]);
+    const diffHost = await within(dialog).findByTestId("revision-diff-host");
+    await waitFor(() => expect(diffHost.shadowRoot?.textContent).toContain("Ship it later."));
+
+    expect(screen.getByRole("region", { name: "Editor" })).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Restore this version" }));
+
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Version history" })).not.toBeInTheDocument(),
+    );
+    await waitFor(() => expect(puts).toHaveLength(1));
+    expect(puts).toEqual([{ ifMatch: '"etag-1"', body: OLDER }]);
+    expect(view.state.doc.toString()).toBe(OLDER);
+
+    act(() => {
+      undo(view);
+    });
+    expect(view.state.doc.toString()).toBe(CURRENT);
+    expect(puts).toHaveLength(1);
+  });
+
+  it("sends one PUT and remains undoable in a single step when restoring from Preview mode", async () => {
+    revisionHandlers();
+    const puts = openNote();
+    const preview = await screen.findByRole("region", { name: "Preview" });
+    await within(preview).findByRole("heading", { name: "Plan" });
+
+    // Warm the editor first so its undo history tracks the restore from Preview.
+    fireEvent.click(within(preview).getByTestId("editor-canvas"));
+    const editor = await screen.findByRole("region", { name: "Editor" });
+    expect(getEditorView(editor).state.doc.toString()).toBe(CURRENT);
+
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    });
+    const previewAgain = await screen.findByRole("region", { name: "Preview" });
+
+    fireEvent.click(within(previewAgain).getByRole("button", { name: "Version history" }));
+    const dialog = await screen.findByRole("dialog", { name: "Version history" });
+    const options = within(
+      await within(dialog).findByRole("listbox", { name: "Revisions" }),
+    ).getAllByRole("option");
+    fireEvent.click(options[1]);
+    const diffHost = await within(dialog).findByTestId("revision-diff-host");
+    await waitFor(() => expect(diffHost.shadowRoot?.textContent).toContain("Ship it later."));
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Restore this version" }));
+
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Version history" })).not.toBeInTheDocument(),
+    );
+    expect(await within(previewAgain).findByText("Ship it later.")).toBeInTheDocument();
+    await waitFor(() => expect(puts).toHaveLength(1));
+    expect(puts).toEqual([{ ifMatch: '"etag-1"', body: OLDER }]);
+
+    // Re-enter Edit mode: one undo returns to the pre-restore text.
+    fireEvent.click(within(previewAgain).getByTestId("editor-canvas"));
+    const editorAfter = await screen.findByRole("region", { name: "Editor" });
+    const view = getEditorView(editorAfter);
+    expect(view.state.doc.toString()).toBe(OLDER);
+
+    act(() => {
+      undo(view);
+    });
+    expect(view.state.doc.toString()).toBe(CURRENT);
+    expect(puts).toHaveLength(1);
   });
 });
 

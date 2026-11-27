@@ -1,6 +1,6 @@
 import { QueryClientContext } from "@tanstack/react-query";
 import { Checkbox, CheckboxIndicator } from "@ui-sdk/react/checkbox";
-import { createContext, type ReactNode, useContext, useMemo, useState } from "react";
+import { createContext, type ReactNode, useContext, useEffect, useMemo, useState } from "react";
 import { type PkmApi, usePkm } from "../pkm";
 import {
   executeQuery,
@@ -10,13 +10,12 @@ import {
   type QueryResult,
   type TaskQueryRow,
 } from "../queryEngine";
+import { formatModifiedDate, formatQueryCountLabel, formatQueryFooter } from "../queryFormat";
 import { type SyncQueue, SyncQueueContext } from "../syncQueue";
-import { toggleTaskAt } from "../taskToggle";
+import { toggleTaskIfUnchanged } from "../taskToggle";
 import { useVaultDocuments } from "../useVaultDocuments";
-import { saveVaultDocument, type VaultDocument } from "../vaultDocuments";
+import { freshNoteText, saveVaultDocument, type VaultDocument } from "../vaultDocuments";
 import { CheckIcon } from "./icons";
-
-const ISO_TIMESTAMP_RE = /^(\d{4}-\d{2}-\d{2})T/;
 
 interface TextOverride {
   baseText: string;
@@ -90,28 +89,9 @@ function renderCellValue(
     return value ? "true" : "false";
   }
   if (typeof value === "string" && lower === "modified") {
-    const match = ISO_TIMESTAMP_RE.exec(value);
-    if (match !== null) {
-      return match[1];
-    }
+    return formatModifiedDate(value);
   }
   return String(value);
-}
-
-function formatFooter(result: QueryResult, cachedCount: number, totalKnownNotes: number): string {
-  const cacheLabel =
-    totalKnownNotes > cachedCount
-      ? `${cachedCount} of ${totalKnownNotes} notes cached`
-      : `${cachedCount} ${cachedCount === 1 ? "cached note" : "cached notes"}`;
-  if (result.view.kind === "count") {
-    return cacheLabel;
-  }
-  const shown = result.rows.length;
-  const resultLabel =
-    result.totalMatched > shown
-      ? `${shown} of ${result.totalMatched} results`
-      : `${shown} ${shown === 1 ? "result" : "results"}`;
-  return `${resultLabel} · ${cacheLabel}`;
 }
 
 function QueryBlockContent({
@@ -119,14 +99,23 @@ function QueryBlockContent({
   docs,
   pkm,
   syncQueue,
+  currentNoteText,
+  getCurrentNoteText,
+  live = false,
   onToggleTask,
+  onContentChange,
 }: {
   source: string;
   docs: readonly VaultDocument[] | null;
   pkm: PkmApi | null;
   syncQueue: SyncQueue | null;
+  currentNoteText?: string;
+  getCurrentNoteText?: () => string | undefined;
+  live?: boolean;
   onToggleTask?: (nextText: string) => void;
+  onContentChange?: () => void;
 }) {
+  const queryClient = useContext(QueryClientContext);
   const parsed = useMemo(() => parseQuery(source), [source]);
   const [overrides, setOverrides] = useState<ReadonlyMap<string, TextOverride>>(new Map());
 
@@ -134,20 +123,50 @@ function QueryBlockContent({
     if (docs === null) {
       return null;
     }
+    const currentFileId = pkm?.currentFileId ?? null;
     return docs.map((doc) => {
+      const baseText =
+        currentFileId !== null && doc.id === currentFileId && currentNoteText !== undefined
+          ? currentNoteText
+          : doc.text;
       const override = overrides.get(doc.id);
-      if (override !== undefined && override.baseText === doc.text) {
-        return { ...doc, text: override.text };
-      }
-      return doc;
+      const text =
+        override !== undefined && override.baseText === baseText ? override.text : baseText;
+      return text === doc.text ? doc : { ...doc, text };
     });
-  }, [docs, overrides]);
+  }, [docs, overrides, pkm?.currentFileId, currentNoteText]);
 
   const docsById = useMemo(() => new Map((docs ?? []).map((doc) => [doc.id, doc])), [docs]);
-  const effectiveById = useMemo(
-    () => new Map((effectiveDocs ?? []).map((doc) => [doc.id, doc])),
-    [effectiveDocs],
-  );
+
+  // Evict display overrides once their source text moves on, so cycling back to an earlier
+  // note text (e.g. toggle off -> toggle on from a sibling query block) cannot resurrect them.
+  useEffect(() => {
+    if (docs === null) {
+      return;
+    }
+    const currentFileId = pkm?.currentFileId ?? null;
+    setOverrides((prev) => {
+      if (prev.size === 0) {
+        return prev;
+      }
+      let changed = false;
+      const next = new Map(prev);
+      for (const [id, override] of prev) {
+        const doc = docsById.get(id);
+        const baseText =
+          doc === undefined
+            ? undefined
+            : currentFileId !== null && id === currentFileId && currentNoteText !== undefined
+              ? currentNoteText
+              : doc.text;
+        if (baseText !== override.baseText) {
+          next.delete(id);
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [docs, docsById, pkm?.currentFileId, currentNoteText]);
 
   const result = useMemo((): QueryResult | null => {
     if (!parsed.ok || effectiveDocs === null) {
@@ -156,9 +175,15 @@ function QueryBlockContent({
     return executeQuery(parsed.query, effectiveDocs);
   }, [parsed, effectiveDocs]);
 
+  useEffect(() => {
+    onContentChange?.();
+  }, [onContentChange, parsed, result, effectiveDocs]);
+
+  const regionLabel = live ? "Query live preview" : "Query results";
+
   if (!parsed.ok) {
     return (
-      <div role="alert" className="query-block-error">
+      <div role={live ? "status" : "alert"} className="query-block-error">
         <p className="query-block-error-message">{parsed.error}</p>
         <pre>
           <code>{source}</code>
@@ -169,7 +194,7 @@ function QueryBlockContent({
 
   if (result === null || effectiveDocs === null) {
     return (
-      <section className="query-block" data-slot="query-block" aria-label="Query results">
+      <section className="query-block" data-slot="query-block" aria-label={regionLabel}>
         <p role="status" className="query-block-empty">
           Running query…
         </p>
@@ -179,43 +204,42 @@ function QueryBlockContent({
 
   const canToggleTasks = onToggleTask !== undefined && syncQueue !== null;
 
-  const toggleTask = (noteId: string, offset: number) => {
+  const toggleTask = (row: TaskQueryRow) => {
     if (!canToggleTasks) {
       return;
     }
-    const original = docsById.get(noteId);
-    const current = effectiveById.get(noteId);
-    if (original === undefined || current === undefined) {
+    const original = docsById.get(row.id);
+    if (original === undefined) {
       return;
     }
-    const next = toggleTaskAt(current.text, offset);
+    const isCurrent = row.id === pkm?.currentFileId;
+    const baseText = isCurrent && currentNoteText !== undefined ? currentNoteText : original.text;
+    const liveCurrent = isCurrent ? (getCurrentNoteText?.() ?? currentNoteText) : undefined;
+    const fresh =
+      isCurrent && liveCurrent !== undefined ? liveCurrent : freshNoteText(queryClient, original);
+    const next = toggleTaskIfUnchanged(fresh, row);
     if (next === null) {
+      setOverrides((prev) => new Map(prev).set(row.id, { baseText, text: fresh }));
       return;
     }
-    setOverrides((prev) => new Map(prev).set(noteId, { baseText: original.text, text: next }));
-    if (noteId === pkm?.currentFileId) {
+    setOverrides((prev) => new Map(prev).set(row.id, { baseText, text: next }));
+    if (isCurrent) {
       onToggleTask(next);
     } else {
-      saveVaultDocument(syncQueue, current, next);
+      saveVaultDocument(syncQueue, original, next);
     }
   };
 
   const totalKnownNotes = pkm?.notes.length ?? effectiveDocs.length;
-  const footer = formatFooter(result, effectiveDocs.length, totalKnownNotes);
+  const footer = formatQueryFooter(result, effectiveDocs.length, totalKnownNotes);
 
   return (
-    <section className="query-block" data-slot="query-block" aria-label="Query results">
+    <section className="query-block" data-slot="query-block" aria-label={regionLabel}>
       {result.view.kind === "count" ? (
         <div className="query-block-count">
           <span className="query-block-count-value">{result.totalMatched}</span>
           <span className="query-block-count-label">
-            {result.type === "notes"
-              ? result.totalMatched === 1
-                ? "matching note"
-                : "matching notes"
-              : result.totalMatched === 1
-                ? "matching task"
-                : "matching tasks"}
+            {formatQueryCountLabel(result.type, result.totalMatched)}
           </span>
         </div>
       ) : result.rows.length === 0 ? (
@@ -253,7 +277,7 @@ function QueryBlockContent({
                 checked={row.done}
                 disabled={!canToggleTasks}
                 onClick={(event) => event.stopPropagation()}
-                onCheckedChange={() => toggleTask(row.id, row.offset)}
+                onCheckedChange={() => toggleTask(row)}
                 className="query-block-checkbox"
               >
                 <CheckboxIndicator className="query-block-checkbox-indicator">
@@ -318,8 +342,8 @@ const SharedVaultDocsContext = createContext<readonly VaultDocument[] | null | u
   undefined,
 );
 
-function VaultDocsSubscription({ children }: { children: ReactNode }) {
-  const docs = useVaultDocuments();
+function VaultDocsSubscription({ enabled, children }: { enabled: boolean; children: ReactNode }) {
+  const docs = useVaultDocuments(enabled);
   return <SharedVaultDocsContext.Provider value={docs}>{children}</SharedVaultDocsContext.Provider>;
 }
 
@@ -327,24 +351,38 @@ function VaultDocsSubscription({ children }: { children: ReactNode }) {
  * Shares a single `useVaultDocuments()` scan across every `QueryBlock` rendered inside a note
  * so multi-query dashboards do not multiply IndexedDB scans.
  */
-export function QueryVaultDocumentsProvider({ children }: { children: ReactNode }) {
+export function QueryVaultDocumentsProvider({
+  enabled = true,
+  children,
+}: {
+  enabled?: boolean;
+  children: ReactNode;
+}) {
   const queryClient = useContext(QueryClientContext);
   if (!queryClient) {
     return <SharedVaultDocsContext.Provider value={[]}>{children}</SharedVaultDocsContext.Provider>;
   }
-  return <VaultDocsSubscription>{children}</VaultDocsSubscription>;
+  return <VaultDocsSubscription enabled={enabled}>{children}</VaultDocsSubscription>;
 }
 
 function VaultQueryBlock({
   source,
   pkm,
   syncQueue,
+  currentNoteText,
+  getCurrentNoteText,
+  live,
   onToggleTask,
+  onContentChange,
 }: {
   source: string;
   pkm: PkmApi | null;
   syncQueue: SyncQueue | null;
+  currentNoteText?: string;
+  getCurrentNoteText?: () => string | undefined;
+  live?: boolean;
   onToggleTask?: (nextText: string) => void;
+  onContentChange?: () => void;
 }) {
   const docs = useVaultDocuments();
   return (
@@ -353,7 +391,11 @@ function VaultQueryBlock({
       docs={docs}
       pkm={pkm}
       syncQueue={syncQueue}
+      currentNoteText={currentNoteText}
+      getCurrentNoteText={getCurrentNoteText}
+      live={live}
       onToggleTask={onToggleTask}
+      onContentChange={onContentChange}
     />
   );
 }
@@ -361,10 +403,18 @@ function VaultQueryBlock({
 /** Renders a declarative ` ```query ` fenced code block live against locally cached notes. */
 export function QueryBlock({
   source,
+  currentNoteText,
+  getCurrentNoteText,
+  live,
   onToggleTask,
+  onContentChange,
 }: {
   source: string;
+  currentNoteText?: string;
+  getCurrentNoteText?: () => string | undefined;
+  live?: boolean;
   onToggleTask?: (nextText: string) => void;
+  onContentChange?: () => void;
 }) {
   const queryClient = useContext(QueryClientContext);
   const sharedDocs = useContext(SharedVaultDocsContext);
@@ -378,7 +428,11 @@ export function QueryBlock({
         docs={sharedDocs}
         pkm={pkm}
         syncQueue={syncQueue}
+        currentNoteText={currentNoteText}
+        getCurrentNoteText={getCurrentNoteText}
+        live={live}
         onToggleTask={onToggleTask}
+        onContentChange={onContentChange}
       />
     );
   }
@@ -389,11 +443,24 @@ export function QueryBlock({
         docs={[]}
         pkm={pkm}
         syncQueue={syncQueue}
+        currentNoteText={currentNoteText}
+        getCurrentNoteText={getCurrentNoteText}
+        live={live}
         onToggleTask={onToggleTask}
+        onContentChange={onContentChange}
       />
     );
   }
   return (
-    <VaultQueryBlock source={source} pkm={pkm} syncQueue={syncQueue} onToggleTask={onToggleTask} />
+    <VaultQueryBlock
+      source={source}
+      pkm={pkm}
+      syncQueue={syncQueue}
+      currentNoteText={currentNoteText}
+      getCurrentNoteText={getCurrentNoteText}
+      live={live}
+      onToggleTask={onToggleTask}
+      onContentChange={onContentChange}
+    />
   );
 }
