@@ -556,7 +556,7 @@ const QUERY_PREVIEW_THEME = EditorView.theme({
     padding: "0.75rem 0.875rem",
     fontSize: "0.875rem",
     lineHeight: "1.25rem",
-    color: "var(--cm-muted, #737373)",
+    color: "var(--cm-quote, #525252)",
   },
   ".cm-query-widget .query-block .query-block-list > li + li, .cm-query-widget .query-block .query-block-tasks > li + li":
     {
@@ -580,7 +580,7 @@ const QUERY_PREVIEW_THEME = EditorView.theme({
     whiteSpace: "nowrap",
     fontSize: "0.75rem",
     lineHeight: "1rem",
-    color: "var(--cm-muted, #737373)",
+    color: "var(--cm-quote, #525252)",
   },
   ".cm-query-widget .query-block .query-block-task-item": {
     display: "flex",
@@ -604,14 +604,14 @@ const QUERY_PREVIEW_THEME = EditorView.theme({
     marginTop: "0.125rem",
     borderWidth: "1px",
     borderStyle: "solid",
-    borderColor: "var(--cm-widget-border, #d4d4d4)",
+    borderColor: "var(--cm-muted, #737373)",
     borderRadius: "0.25rem",
     backgroundColor: "var(--cm-popup-bg, #ffffff)",
     color: "#ffffff",
     transition: "color 150ms, background-color 150ms, border-color 150ms",
   },
   ".cm-query-widget .query-block .query-block-checkbox:hover": {
-    borderColor: "var(--cm-muted, #737373)",
+    borderColor: "var(--cm-quote, #525252)",
   },
   ".cm-query-widget .query-block .query-block-checkbox:focus-visible": {
     outline: "2px solid var(--markyard-accent, var(--cm-link, #2563eb))",
@@ -643,7 +643,7 @@ const QUERY_PREVIEW_THEME = EditorView.theme({
   },
   ".cm-query-widget .query-block .query-block-task-done": {
     textDecoration: "line-through",
-    color: "var(--cm-muted, #737373)",
+    color: "var(--cm-quote, #525252)",
   },
   ".cm-query-widget .query-block .query-block-due": {
     flexShrink: "0",
@@ -725,7 +725,7 @@ const QUERY_PREVIEW_THEME = EditorView.theme({
     color: "var(--cm-fg, #171717)",
   },
   ".cm-query-widget .query-block .query-block-muted": {
-    color: "var(--cm-muted, #737373)",
+    color: "var(--cm-quote, #525252)",
   },
   ".cm-query-widget .query-block .query-block-count": {
     display: "flex",
@@ -744,7 +744,7 @@ const QUERY_PREVIEW_THEME = EditorView.theme({
   ".cm-query-widget .query-block .query-block-count-label": {
     fontSize: "0.875rem",
     lineHeight: "1.25rem",
-    color: "var(--cm-muted, #737373)",
+    color: "var(--cm-quote, #525252)",
   },
   ".cm-query-widget .query-block .query-block-meta": {
     margin: "0",
@@ -755,7 +755,7 @@ const QUERY_PREVIEW_THEME = EditorView.theme({
     padding: "0.375rem 0.875rem",
     fontSize: "0.75rem",
     lineHeight: "1rem",
-    color: "var(--cm-muted, #737373)",
+    color: "var(--cm-quote, #525252)",
   },
 });
 
