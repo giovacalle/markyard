@@ -1,11 +1,17 @@
+import { defaultKeymap } from "@codemirror/commands";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { yamlFrontmatter } from "@codemirror/lang-yaml";
 import { ensureSyntaxTree } from "@codemirror/language";
 import { EditorSelection, EditorState } from "@codemirror/state";
-import { EditorView } from "@codemirror/view";
+import { EditorView, keymap, runScopeHandlers } from "@codemirror/view";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { matchCodeLanguage } from "./editorCodeLanguages";
-import { queryPreviews, QueryWidgetRegistry } from "./queryPreviews";
+import {
+  queryCursorLineDown,
+  queryCursorLineUp,
+  queryPreviews,
+  QueryWidgetRegistry,
+} from "./queryPreviews";
 
 let activeViews: EditorView[] = [];
 
@@ -34,6 +40,7 @@ function mountView(
         content: markdown({ base: markdownLanguage, codeLanguages: matchCodeLanguage }),
       }),
       queryPreviews(registry),
+      keymap.of(defaultKeymap),
     ],
   });
   const view = new EditorView({ state, parent });
@@ -159,5 +166,174 @@ describe("queryPreviews inline CodeMirror extension", () => {
     expect(registry.getSnapshot()).toHaveLength(1);
     view.destroy();
     expect(registry.getSnapshot()).toHaveLength(0);
+  });
+});
+
+function pressKey(view: EditorView, key: string, init?: KeyboardEventInit): boolean {
+  return runScopeHandlers(view, new KeyboardEvent("keydown", { key, ...init }), "editor");
+}
+
+describe("queryPreviews keyboard unfolding", () => {
+  const doc = ["Before line", "```query", "type: tasks", "```", "After line"].join("\n");
+  const fenceFrom = doc.indexOf("```query");
+  const fenceTo = doc.indexOf("\nAfter line");
+
+  it("ArrowDown stops on a folded query block and unfolds it when motion skips the block", () => {
+    const { view, registry } = mountView(doc, 0);
+    expect(registry.getSnapshot()[0]?.mode).toBe("collapsed");
+
+    vi.spyOn(view, "moveVertically").mockReturnValue(EditorSelection.cursor(fenceTo + 1));
+    pressKey(view, "ArrowDown");
+
+    expect(view.state.selection.main.head).toBe(fenceFrom);
+    expect(registry.getSnapshot()[0]?.mode).toBe("live");
+  });
+
+  it("ArrowDown stops at the opening edge when motion lands inside a folded block", () => {
+    const { view, registry } = mountView(doc, 0);
+    expect(registry.getSnapshot()[0]?.mode).toBe("collapsed");
+
+    vi.spyOn(view, "moveVertically").mockReturnValue(EditorSelection.cursor(fenceFrom + 3));
+    pressKey(view, "ArrowDown");
+
+    expect(view.state.selection.main.head).toBe(fenceFrom);
+    expect(registry.getSnapshot()[0]?.mode).toBe("live");
+  });
+
+  it("ArrowUp stops on a folded query block and unfolds it when motion skips the block", () => {
+    const { view, registry } = mountView(doc, fenceTo + 1);
+    expect(registry.getSnapshot()[0]?.mode).toBe("collapsed");
+
+    vi.spyOn(view, "moveVertically").mockReturnValue(EditorSelection.cursor(fenceFrom - 1));
+    pressKey(view, "ArrowUp");
+
+    expect(view.state.selection.main.head).toBe(fenceTo);
+    expect(registry.getSnapshot()[0]?.mode).toBe("live");
+  });
+
+  it("ArrowUp stops at the closing edge when motion lands inside a folded block", () => {
+    const { view, registry } = mountView(doc, fenceTo + 1);
+    expect(registry.getSnapshot()[0]?.mode).toBe("collapsed");
+
+    vi.spyOn(view, "moveVertically").mockReturnValue(EditorSelection.cursor(fenceTo - 3));
+    pressKey(view, "ArrowUp");
+
+    expect(view.state.selection.main.head).toBe(fenceTo);
+    expect(registry.getSnapshot()[0]?.mode).toBe("live");
+  });
+
+  it("ArrowDown does not intervene when moving between visual rows of a wrapped line before the block", () => {
+    const wrappedDoc = [
+      "A very long wrapped paragraph before the query block",
+      "```query",
+      "type: tasks",
+      "```",
+      "After line",
+    ].join("\n");
+    const { view, registry } = mountView(wrappedDoc, 2);
+    expect(registry.getSnapshot()[0]?.mode).toBe("collapsed");
+
+    const nextVisualRow = 28;
+    vi.spyOn(view, "moveVertically").mockReturnValue(EditorSelection.cursor(nextVisualRow));
+    expect(queryCursorLineDown(view)).toBe(false);
+    pressKey(view, "ArrowDown");
+
+    expect(view.state.selection.main.head).toBe(nextVisualRow);
+    expect(registry.getSnapshot()[0]?.mode).toBe("collapsed");
+  });
+
+  it("ArrowUp does not intervene when moving between visual rows of a wrapped line after the block", () => {
+    const wrappedDoc = [
+      "Before line",
+      "```query",
+      "type: tasks",
+      "```",
+      "A very long wrapped paragraph after the query block",
+    ].join("\n");
+    const afterStart = wrappedDoc.indexOf("A very long");
+    const { view, registry } = mountView(wrappedDoc, afterStart + 35);
+    expect(registry.getSnapshot()[0]?.mode).toBe("collapsed");
+
+    const prevVisualRow = afterStart + 5;
+    vi.spyOn(view, "moveVertically").mockReturnValue(EditorSelection.cursor(prevVisualRow));
+    expect(queryCursorLineUp(view)).toBe(false);
+    pressKey(view, "ArrowUp");
+
+    expect(view.state.selection.main.head).toBe(prevVisualRow);
+    expect(registry.getSnapshot()[0]?.mode).toBe("collapsed");
+  });
+
+  it("Backspace at the start of the line after a folded block unfolds it without deleting the newline", () => {
+    const { view, registry } = mountView(doc, fenceTo + 1);
+    expect(registry.getSnapshot()[0]?.mode).toBe("collapsed");
+
+    pressKey(view, "Backspace");
+
+    expect(view.state.doc.toString()).toBe(doc);
+    expect(view.state.selection.main.head).toBe(fenceTo);
+    expect(registry.getSnapshot()[0]?.mode).toBe("live");
+  });
+
+  it("Delete at the end of the line before a folded block unfolds it without deleting the newline", () => {
+    const { view, registry } = mountView(doc, fenceFrom - 1);
+    expect(registry.getSnapshot()[0]?.mode).toBe("collapsed");
+
+    pressKey(view, "Delete");
+
+    expect(view.state.doc.toString()).toBe(doc);
+    expect(view.state.selection.main.head).toBe(fenceFrom);
+    expect(registry.getSnapshot()[0]?.mode).toBe("live");
+  });
+
+  it("keeps default behavior for non-empty selections and lines not adjacent to a folded block", () => {
+    const spacedDoc = [
+      "Line 1",
+      "Line 2",
+      "```query",
+      "type: tasks",
+      "```",
+      "Line 3",
+      "Line 4",
+    ].join("\n");
+    const line2Start = spacedDoc.indexOf("Line 2");
+    const { view, registry } = mountView(spacedDoc, 0);
+
+    // ArrowDown on a line not next to the folded block follows moveVertically normally.
+    vi.spyOn(view, "moveVertically").mockReturnValue(EditorSelection.cursor(line2Start));
+    pressKey(view, "ArrowDown");
+    expect(view.state.selection.main.head).toBe(line2Start);
+    expect(registry.getSnapshot()[0]?.mode).toBe("collapsed");
+
+    // Non-empty selection before the folded block collapses on ArrowDown instead of unfolding.
+    const spacedFenceFrom = spacedDoc.indexOf("```query");
+    view.dispatch({
+      selection: EditorSelection.range(line2Start, spacedFenceFrom - 1),
+    });
+    pressKey(view, "ArrowDown");
+    expect(view.state.selection.main.empty).toBe(true);
+    expect(view.state.selection.main.head).toBe(spacedFenceFrom - 1);
+    expect(registry.getSnapshot()[0]?.mode).toBe("collapsed");
+
+    // Non-empty selection before the folded block deletes with default behavior.
+    view.dispatch({
+      selection: EditorSelection.range(line2Start, spacedFenceFrom - 1),
+    });
+    pressKey(view, "Delete");
+    expect(view.state.doc.toString()).toBe(
+      ["Line 1", "", "```query", "type: tasks", "```", "Line 3", "Line 4"].join("\n"),
+    );
+
+    // Non-empty selection starting at the line after the folded block deletes normally on Backspace.
+    const line3Start = view.state.doc.toString().indexOf("Line 3");
+    view.dispatch({ selection: EditorSelection.range(line3Start, line3Start + 4) });
+    pressKey(view, "Backspace");
+    expect(view.state.doc.toString()).toContain("\n 3\nLine 4");
+    expect(registry.getSnapshot()[0]?.mode).toBe("collapsed");
+
+    // Backspace in normal text deletes normally.
+    const line4Start = view.state.doc.toString().indexOf("Line 4");
+    view.dispatch({ selection: EditorSelection.cursor(line4Start + 2) });
+    pressKey(view, "Backspace");
+    expect(view.state.doc.toString()).toContain("Lne 4");
   });
 });

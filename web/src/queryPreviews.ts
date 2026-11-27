@@ -10,10 +10,18 @@ import {
   type EditorState,
   type Extension,
   Facet,
+  Prec,
   type Range,
   StateField,
 } from "@codemirror/state";
-import { Decoration, type DecorationSet, EditorView, WidgetType } from "@codemirror/view";
+import {
+  type Command,
+  Decoration,
+  type DecorationSet,
+  EditorView,
+  keymap,
+  WidgetType,
+} from "@codemirror/view";
 
 export type QueryWidgetMode = "collapsed" | "live";
 
@@ -304,6 +312,124 @@ const queryPreviewField = StateField.define<DecorationSet>({
   },
   provide: (field) => EditorView.decorations.from(field),
 });
+
+interface FoldedRange {
+  readonly from: number;
+  readonly to: number;
+}
+
+function foldedRanges(state: EditorState): FoldedRange[] {
+  const decos = state.field(queryPreviewField, false);
+  if (decos === undefined || decos.size === 0) {
+    return [];
+  }
+  const ranges: FoldedRange[] = [];
+  decos.between(0, state.doc.length, (from, to, value) => {
+    if (
+      from < to &&
+      value.spec.widget instanceof QueryPreviewWidget &&
+      value.spec.widget.mode === "collapsed"
+    ) {
+      ranges.push({ from, to });
+    }
+  });
+  return ranges;
+}
+
+function moveIntoFolded(view: EditorView, pos: number): true {
+  view.dispatch({
+    selection: EditorSelection.cursor(pos),
+    scrollIntoView: true,
+    userEvent: "select",
+  });
+  return true;
+}
+
+function moveVerticallyAcrossFolded(view: EditorView, forward: boolean): boolean {
+  const { selection } = view.state;
+  if (selection.ranges.length !== 1 || !selection.main.empty) {
+    return false;
+  }
+  const folded = foldedRanges(view.state);
+  if (folded.length === 0) {
+    return false;
+  }
+  const range = selection.main;
+  const target = view.moveVertically(range, forward);
+  if (forward) {
+    if (target.head <= range.head) {
+      return false;
+    }
+    for (const block of folded) {
+      if (range.head < block.from && target.head >= block.from) {
+        return moveIntoFolded(view, block.from);
+      }
+    }
+    return false;
+  }
+  if (target.head >= range.head) {
+    return false;
+  }
+  for (let i = folded.length - 1; i >= 0; i--) {
+    const block = folded[i];
+    if (range.head > block.to && target.head <= block.to) {
+      return moveIntoFolded(view, block.to);
+    }
+  }
+  return false;
+}
+
+/** Move down onto the opening edge of a folded query block instead of skipping over it. */
+export const queryCursorLineDown: Command = (view) => moveVerticallyAcrossFolded(view, true);
+
+/** Move up onto the closing edge of a folded query block instead of skipping over it. */
+export const queryCursorLineUp: Command = (view) => moveVerticallyAcrossFolded(view, false);
+
+/** Unfold a folded query block when pressing Backspace at the start of the line after it. */
+export const queryDeleteBackward: Command = (view) => {
+  const { selection } = view.state;
+  if (selection.ranges.length !== 1 || !selection.main.empty) {
+    return false;
+  }
+  const head = selection.main.head;
+  for (const block of foldedRanges(view.state)) {
+    if (head === block.to + 1) {
+      return moveIntoFolded(view, block.to);
+    }
+  }
+  return false;
+};
+
+/** Unfold a folded query block when pressing Delete at the end of the line before it. */
+export const queryDeleteForward: Command = (view) => {
+  const { selection } = view.state;
+  if (selection.ranges.length !== 1 || !selection.main.empty) {
+    return false;
+  }
+  const head = selection.main.head;
+  for (const block of foldedRanges(view.state)) {
+    if (head === block.from - 1) {
+      return moveIntoFolded(view, block.from);
+    }
+  }
+  return false;
+};
+
+const queryNavigationKeymap = Prec.high(
+  keymap.of([
+    { key: "ArrowDown", run: queryCursorLineDown },
+    { key: "ArrowUp", run: queryCursorLineUp },
+    { mac: "Ctrl-n", run: queryCursorLineDown },
+    { mac: "Ctrl-p", run: queryCursorLineUp },
+  ]),
+);
+
+const queryDeleteKeymap = Prec.highest(
+  keymap.of([
+    { key: "Backspace", run: queryDeleteBackward },
+    { key: "Delete", run: queryDeleteForward },
+  ]),
+);
 
 // Shadow-root styles for the shared `QueryBlock` rendered inside `.cm-query-widget`.
 // Specificity comes from CodeMirror's theme scope class + `.cm-query-widget` (no `@layer`),
@@ -635,5 +761,11 @@ const QUERY_PREVIEW_THEME = EditorView.theme({
 
 /** Live inline previews for ` ```query ` blocks inside CodeMirror. */
 export function queryPreviews(registry: QueryWidgetRegistry): Extension {
-  return [queryWidgetRegistry.of(registry), queryPreviewField, QUERY_PREVIEW_THEME];
+  return [
+    queryWidgetRegistry.of(registry),
+    queryPreviewField,
+    queryNavigationKeymap,
+    queryDeleteKeymap,
+    QUERY_PREVIEW_THEME,
+  ];
 }

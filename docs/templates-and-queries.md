@@ -75,6 +75,7 @@ Add a fenced ```` ```query ```` code block to any Markdown note to render live l
 ### Edit mode (Live Preview)
 
 - **Cursor outside the block**: A closed top-level ```` ```query ```` block folds into its rendered result directly inside the editor, with an **Edit** button in the header to unfold it.
+- **Keyboard unfolding**: Moving across a folded block with `ArrowDown` / `ArrowUp` (or `Ctrl-n` / `Ctrl-p` on macOS) stops on its edge and unfolds it. Pressing `Backspace` at the start of the line after a folded block or `Delete` at the end of the line before it moves the cursor into the block instead of joining lines onto the fence.
 - **Cursor inside the block**: The YAML remains editable with syntax highlighting, and a **Live preview** renders right below the closing fence—updating as you type.
 - **Unclosed fences**: While typing a new ```` ```query ```` block before adding the closing fence, it stays plain text.
 - Note links and task checkboxes remain interactive inline (respecting Read-only mode and preserving unsaved edits in the current note).
