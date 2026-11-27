@@ -274,6 +274,17 @@ describe("queryPreviews keyboard unfolding", () => {
     expect(registry.getSnapshot()[0]?.mode).toBe("live");
   });
 
+  it("Shift+Backspace at the start of the line after a folded block unfolds it without deleting the newline", () => {
+    const { view, registry } = mountView(doc, fenceTo + 1);
+    expect(registry.getSnapshot()[0]?.mode).toBe("collapsed");
+
+    pressKey(view, "Backspace", { shiftKey: true });
+
+    expect(view.state.doc.toString()).toBe(doc);
+    expect(view.state.selection.main.head).toBe(fenceTo);
+    expect(registry.getSnapshot()[0]?.mode).toBe("live");
+  });
+
   it("Delete at the end of the line before a folded block unfolds it without deleting the newline", () => {
     const { view, registry } = mountView(doc, fenceFrom - 1);
     expect(registry.getSnapshot()[0]?.mode).toBe("collapsed");

@@ -426,7 +426,7 @@ const queryNavigationKeymap = Prec.high(
 
 const queryDeleteKeymap = Prec.highest(
   keymap.of([
-    { key: "Backspace", run: queryDeleteBackward },
+    { key: "Backspace", run: queryDeleteBackward, shift: queryDeleteBackward },
     { key: "Delete", run: queryDeleteForward },
   ]),
 );

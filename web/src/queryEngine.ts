@@ -854,7 +854,6 @@ interface PreparedNote {
   tags: string[];
   tagSet: Set<string>;
   frontmatter: Map<string, string | string[]>;
-  body: string;
 }
 
 const PREPARED = new WeakMap<VaultDocument, PreparedNote>();
@@ -888,7 +887,6 @@ function prepareNote(doc: VaultDocument): PreparedNote {
     tags,
     tagSet,
     frontmatter,
-    body,
   };
   PREPARED.set(doc, prepared);
   return prepared;

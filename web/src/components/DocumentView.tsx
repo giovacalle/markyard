@@ -1127,16 +1127,22 @@ function DocumentSession({
   // keep the pinned `frontmatterRawRef` whenever `nextText` still starts with it so YAML or a
   // leading newline typed into the body does not get stripped out from under CM6.
   const applyWholeNoteEdit = useCallback(
-    (nextText: string, undoable: boolean) => {
+    (nextText: string, undoable: boolean, options?: { repinFrontmatter?: boolean }) => {
       setDraft(nextText);
       draftRef.current = nextText;
       let nextEditorText: string;
+      const pinned = frontmatterRawRef.current;
       if (
+        !options?.repinFrontmatter &&
         editorActiveRef.current &&
         !rawYamlModeRef.current &&
-        nextText.startsWith(frontmatterRawRef.current)
+        nextText.startsWith(pinned)
       ) {
-        nextEditorText = nextText.slice(frontmatterRawRef.current.length);
+        const sliced = nextText.slice(pinned.length);
+        nextEditorText =
+          pinned !== "" && !/(?:\r\n|\r|\n)$/.test(pinned)
+            ? sliced.replace(/^(?:\r\n|\r|\n)/, "")
+            : sliced;
       } else {
         const nextSplit = splitFrontmatter(nextText);
         frontmatterRawRef.current = nextSplit.frontmatterRaw;
@@ -1222,8 +1228,7 @@ function DocumentSession({
   // note's current Drive tag, so a concurrent change on Drive still surfaces as a conflict.
   const handleRestore = (text: string, revision: Revision) => {
     setHistoryOpen(false);
-    frontmatterRawRef.current = splitFrontmatter(text).frontmatterRaw;
-    applyWholeNoteEdit(text, true);
+    applyWholeNoteEdit(text, true, { repinFrontmatter: true });
     toaster(`Restored revision from ${formatRevisionDate(revision.modifiedTime)}`, {
       id: RESTORED_TOAST_ID,
     });
@@ -1234,8 +1239,7 @@ function DocumentSession({
     if (text === draftRef.current) {
       return;
     }
-    frontmatterRawRef.current = splitFrontmatter(text).frontmatterRaw;
-    applyWholeNoteEdit(text, true);
+    applyWholeNoteEdit(text, true, { repinFrontmatter: true });
   };
   const handleEditorChange = useCallback(
     (nextEditorText: string) => {

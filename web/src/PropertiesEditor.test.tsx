@@ -589,4 +589,39 @@ describe("Direction A frontmatter editing (PropertiesEditor + DocumentView)", ()
     await waitFor(() => expect(saved).toEqual([expected]));
     expect(view.state.doc.toString()).toBe(expected);
   });
+
+  it("inverts joinFrontmatter without injecting a leading newline when pinned frontmatter has no trailing EOL", async () => {
+    const initial = "---\ntitle: x\n---";
+    const saved: string[] = [];
+    setupNote(initial, (body) => saved.push(body));
+    render(<App />);
+
+    const preview = await screen.findByRole("region", { name: "Preview" });
+    fireEvent.click(await within(preview).findByTestId("editor-canvas"));
+    const editor = await screen.findByRole("region", { name: "Editor" });
+    const view = getEditorView(editor);
+    expect(view.state.doc.toString()).toBe("");
+
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const typedBody = "- [ ] A\n\n```query\ntype: tasks\n```\n";
+    act(() => {
+      view.dispatch({ changes: { from: 0, to: 0, insert: typedBody } });
+      ensureSyntaxTree(view.state, view.state.doc.length, 5_000);
+    });
+    act(() => {
+      vi.advanceTimersByTime(LIVE_DRAFT_DEBOUNCE_MS);
+    });
+    vi.useRealTimers();
+
+    await waitFor(() => {
+      expect(within(view.dom).getByRole("checkbox", { name: "A" })).toBeInTheDocument();
+    });
+
+    fireEvent.click(within(view.dom).getByRole("checkbox", { name: "A" }));
+
+    const expectedBody = "- [x] A\n\n```query\ntype: tasks\n```\n";
+    const expectedFull = `---\ntitle: x\n---\n${expectedBody}`;
+    await waitFor(() => expect(saved).toEqual([expectedFull]));
+    expect(view.state.doc.toString()).toBe(expectedBody);
+  });
 });
