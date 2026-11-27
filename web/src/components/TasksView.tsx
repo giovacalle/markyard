@@ -9,7 +9,7 @@ import {
   SelectValue,
 } from "@ui-sdk/react/select";
 import { Toggle, ToggleGroup } from "@ui-sdk/react/toggle";
-import { type ReactNode, useMemo, useState } from "react";
+import { type ReactNode, useId, useMemo, useState } from "react";
 import { usePkm } from "../pkm";
 import { useSyncQueue } from "../syncQueue";
 import { filterTasks, type NoteTasks, parseTasks, type TaskStatusFilter } from "../tasks";
@@ -18,6 +18,7 @@ import { useVaultDocuments } from "../useVaultDocuments";
 import { saveVaultDocument, type VaultDocument } from "../vaultDocuments";
 import { noteStem } from "../wikilinks";
 import { CheckIcon, ChevronsUpDownIcon } from "./icons";
+import { InlineMarkdown } from "./InlineMarkdown";
 
 const STATUS_OPTIONS: { value: TaskStatusFilter; label: string }[] = [
   { value: "open", label: "Open" },
@@ -58,6 +59,7 @@ export function TasksPanel({
   onOpenNote: (id: string) => void;
   header?: ReactNode;
 }) {
+  const taskIdPrefix = useId();
   const [status, setStatus] = useState<TaskStatusFilter>("open");
   const [query, setQuery] = useState("");
   const [folder, setFolder] = useState<string | null>(null);
@@ -250,7 +252,7 @@ export function TasksPanel({
                   {note.tasks.map((task) => (
                     <li key={task.offset} className="flex items-start gap-2 px-1 py-0.5">
                       <Checkbox
-                        aria-label={task.text}
+                        aria-labelledby={`${taskIdPrefix}-${note.id}-${task.offset}`}
                         checked={task.done}
                         onCheckedChange={() => toggle(note.id, task.offset)}
                         className="mt-0.5 flex size-4 shrink-0 items-center justify-center rounded border border-neutral-300 bg-white text-white transition-colors hover:border-neutral-400 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 data-checked:border-blue-600 data-checked:bg-blue-600 dark:border-neutral-600 dark:bg-neutral-900 dark:hover:border-neutral-500 dark:data-checked:border-blue-500 dark:data-checked:bg-blue-500"
@@ -260,13 +262,14 @@ export function TasksPanel({
                         </CheckboxIndicator>
                       </Checkbox>
                       <span
-                        className={`min-w-0 flex-1 break-words text-sm ${
+                        id={`${taskIdPrefix}-${note.id}-${task.offset}`}
+                        className={`inline-markdown min-w-0 flex-1 break-words text-sm ${
                           task.done
                             ? "text-neutral-400 line-through dark:text-neutral-500"
                             : "text-neutral-800 dark:text-neutral-200"
                         }`}
                       >
-                        {task.text}
+                        <InlineMarkdown text={task.text} sourceId={note.id} />
                       </span>
                       {task.due !== undefined && (
                         <span className="shrink-0 text-xs tabular-nums text-neutral-500 dark:text-neutral-400">

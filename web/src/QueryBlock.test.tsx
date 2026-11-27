@@ -476,6 +476,96 @@ describe("QueryBlock via Preview", () => {
     ).not.toBeChecked();
   });
 
+  describe("inline markdown in task text", () => {
+    const MARKUP_NOTES: FixtureNote[] = [
+      {
+        id: "n-todo",
+        name: "Todo.md",
+        folderId: "root",
+        path: [],
+        modifiedTime: "2026-11-27T10:00:00Z",
+        text: [
+          "- [ ] **Close account** with *care*, `rm -rf`, [[Target]] and <b>raw</b>",
+          "- [ ] 2. Call Bob",
+          "- [ ] > quoted",
+          "- [ ] Check ![diagram](x.png)",
+          "",
+        ].join("\n"),
+      },
+      {
+        id: "n-target",
+        name: "Target.md",
+        folderId: "root",
+        path: [],
+        modifiedTime: "2026-11-27T10:00:00Z",
+        text: "# Target\n",
+      },
+    ];
+    const PLAIN = "Close account with care, rm -rf, Target and raw";
+
+    function renderMarkup(view: string) {
+      const ctx = setupVault(MARKUP_NOTES);
+      const result = render(
+        <QueryClientProvider client={ctx.queryClient}>
+          <SyncQueueContext.Provider value={ctx.syncQueue}>
+            <PkmContext.Provider value={ctx.pkm}>
+              <Preview text={`\`\`\`query\ntype: tasks\nview: ${view}\n\`\`\`\n`} />
+            </PkmContext.Provider>
+          </SyncQueueContext.Provider>
+        </QueryClientProvider>,
+      );
+      return { ...ctx, ...result };
+    }
+
+    async function expectInlineMarkup(cell: HTMLElement, openNote: PkmApi["openNote"]) {
+      expect(cell).toHaveTextContent(PLAIN);
+      expect(cell.textContent).not.toMatch(/[*`<>]|\[\[/);
+      expect(cell.querySelector("strong")).toHaveTextContent("Close account");
+      expect(cell.querySelector("em")).toHaveTextContent("care");
+      expect(cell.querySelector("code")).toHaveTextContent("rm -rf");
+      expect(cell.querySelector("b, p, div")).toBeNull();
+      fireEvent.click(within(cell).getByRole("link", { name: "Target" }));
+      expect(openNote).toHaveBeenCalledWith("n-target", { heading: undefined });
+    }
+
+    it("renders bold, italic, code and wikilinks in table text cells", async () => {
+      const { openNote, container } = renderMarkup("table(text)");
+      const table = await screen.findByRole("table");
+      const cell = within(table).getAllByRole("cell")[0];
+      await expectInlineMarkup(cell, openNote);
+      expect(container.querySelector("[style]")).toBeNull();
+    });
+
+    it("renders inline markdown in the tasks view and keeps a plain-text checkbox name", async () => {
+      const { openNote, container } = renderMarkup("tasks");
+      const region = await screen.findByRole("region", { name: "Query results" });
+      expect(await within(region).findByRole("checkbox", { name: PLAIN })).toBeInTheDocument();
+      const text = container.querySelector<HTMLElement>(".query-block-task-text");
+      expect(text).not.toBeNull();
+      await expectInlineMarkup(text!, openNote);
+    });
+
+    it("keeps block markers literal and image alt text, as Preview shows them after a checkbox", async () => {
+      renderMarkup("tasks");
+      const region = await screen.findByRole("region", { name: "Query results" });
+      for (const name of ["2. Call Bob", "> quoted", "Check diagram"]) {
+        expect(await within(region).findByRole("checkbox", { name })).toBeInTheDocument();
+      }
+      expect(region.querySelector("img, ol, ul ul, blockquote")).toBeNull();
+    });
+
+    it("renders inline markdown in the task list view", async () => {
+      const { openNote, container } = renderMarkup("list");
+      await screen.findByRole("region", { name: "Query results" });
+      const text = await waitFor(() => {
+        const el = container.querySelector<HTMLElement>(".query-block-task-text");
+        expect(el).not.toBeNull();
+        return el!;
+      });
+      await expectInlineMarkup(text, openNote);
+    });
+  });
+
   it("renders a syntax error alert with raw query source without needing vault providers", () => {
     const raw = "select: *\nwhere: status =";
     const { container } = render(<Preview text={`\`\`\`query\n${raw}\n\`\`\`\n`} />);

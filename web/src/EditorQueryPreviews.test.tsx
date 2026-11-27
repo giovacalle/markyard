@@ -291,7 +291,7 @@ describe("Editor inline query previews integration", () => {
   });
 
   it("renders the shared QueryBlock inside the editor shadow root", async () => {
-    const doc = "# Self\n\n- [ ] Shared task\n\n```query\ntype: tasks\n```\n";
+    const doc = "# Self\n\n- [ ] **Shared** task\n\n```query\ntype: tasks\n```\n";
     const { queryClient, pkm, syncQueue } = setupEditorVault(
       [{ id: "n-self", name: "Self.md", text: doc }],
       "n-self",
@@ -326,6 +326,7 @@ describe("Editor inline query previews integration", () => {
     expect(within(widget).getByRole("region", { name: "Query results" })).toBeInTheDocument();
     expect(widget.querySelector('section[data-slot="query-block"]')).not.toBeNull();
     expect(widget.querySelector('[data-slot="checkbox"]')).not.toBeNull();
+    expect(widget.querySelector(".query-block-task-text strong")).toHaveTextContent("Shared");
     expect(widget.querySelector('a.wikilink[data-note-id="n-self"]')).not.toBeNull();
     expect(widget.querySelector(".cm-query-task-item")).toBeNull();
     expect(widget.querySelector(".cm-query-list")).toBeNull();

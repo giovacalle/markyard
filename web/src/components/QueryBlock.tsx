@@ -1,6 +1,14 @@
 import { QueryClientContext } from "@tanstack/react-query";
 import { Checkbox, CheckboxIndicator } from "@ui-sdk/react/checkbox";
-import { createContext, type ReactNode, useContext, useEffect, useMemo, useState } from "react";
+import {
+  createContext,
+  type ReactNode,
+  useContext,
+  useEffect,
+  useId,
+  useMemo,
+  useState,
+} from "react";
 import { type PkmApi, usePkm } from "../pkm";
 import {
   executeQuery,
@@ -16,6 +24,7 @@ import { toggleTaskIfUnchanged } from "../taskToggle";
 import { useVaultDocuments } from "../useVaultDocuments";
 import { freshNoteText, saveVaultDocument, type VaultDocument } from "../vaultDocuments";
 import { CheckIcon } from "./icons";
+import { InlineMarkdown } from "./InlineMarkdown";
 
 interface TextOverride {
   baseText: string;
@@ -88,10 +97,61 @@ function renderCellValue(
   if (typeof value === "boolean") {
     return value ? "true" : "false";
   }
+  if (row.kind === "task" && lower === "text") {
+    return <InlineMarkdown text={row.text} sourceId={row.id} />;
+  }
   if (typeof value === "string" && lower === "modified") {
     return formatModifiedDate(value);
   }
   return String(value);
+}
+
+function TaskItem({
+  row,
+  pkm,
+  canToggle,
+  onToggle,
+}: {
+  row: TaskQueryRow;
+  pkm: PkmApi | null;
+  canToggle: boolean;
+  onToggle: () => void;
+}) {
+  const textId = useId();
+  const label =
+    row.text.trim() === "" ? { "aria-label": "Task item" } : { "aria-labelledby": textId };
+  return (
+    <li className="query-block-task-item">
+      {/* Labelled by the rendered text so the accessible name is plain text, not Markdown. */}
+      <Checkbox
+        {...label}
+        checked={row.done}
+        disabled={!canToggle}
+        onClick={(event) => event.stopPropagation()}
+        onCheckedChange={onToggle}
+        className="query-block-checkbox"
+      >
+        <CheckboxIndicator className="query-block-checkbox-indicator">
+          <CheckIcon className="size-3" strokeWidth={2.5} />
+        </CheckboxIndicator>
+      </Checkbox>
+      <span
+        id={textId}
+        className={
+          row.done ? "query-block-task-text query-block-task-done" : "query-block-task-text"
+        }
+      >
+        <InlineMarkdown text={row.text} sourceId={row.id} />
+      </span>
+      {row.due !== undefined && <span className="query-block-due">@{row.due}</span>}
+      <NoteLink
+        id={row.id}
+        title={row.title}
+        pkm={pkm}
+        className="wikilink query-block-source-link"
+      />
+    </li>
+  );
 }
 
 function QueryBlockContent({
@@ -273,34 +333,13 @@ function QueryBlockContent({
       ) : result.view.kind === "tasks" && result.type === "tasks" ? (
         <ul className="query-block-tasks">
           {result.rows.map((row) => (
-            <li key={`${row.id}:${row.offset}`} className="query-block-task-item">
-              <Checkbox
-                aria-label={row.text || "Task item"}
-                checked={row.done}
-                disabled={!canToggleTasks}
-                onClick={(event) => event.stopPropagation()}
-                onCheckedChange={() => toggleTask(row)}
-                className="query-block-checkbox"
-              >
-                <CheckboxIndicator className="query-block-checkbox-indicator">
-                  <CheckIcon className="size-3" strokeWidth={2.5} />
-                </CheckboxIndicator>
-              </Checkbox>
-              <span
-                className={
-                  row.done ? "query-block-task-text query-block-task-done" : "query-block-task-text"
-                }
-              >
-                {row.text}
-              </span>
-              {row.due !== undefined && <span className="query-block-due">@{row.due}</span>}
-              <NoteLink
-                id={row.id}
-                title={row.title}
-                pkm={pkm}
-                className="wikilink query-block-source-link"
-              />
-            </li>
+            <TaskItem
+              key={`${row.id}:${row.offset}`}
+              row={row}
+              pkm={pkm}
+              canToggle={canToggleTasks}
+              onToggle={() => toggleTask(row)}
+            />
           ))}
         </ul>
       ) : (
@@ -323,7 +362,7 @@ function QueryBlockContent({
                         : "query-block-task-text"
                     }
                   >
-                    {row.text}
+                    <InlineMarkdown text={row.text} sourceId={row.id} />
                   </span>
                   <NoteLink
                     id={row.id}

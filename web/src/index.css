@@ -111,6 +111,20 @@
   .markdown-preview a:where(.dark, .dark *) {
     color: var(--markyard-accent, var(--color-blue-400, oklch(70.7% 0.165 254.624)));
   }
+  .inline-markdown code {
+    @apply rounded bg-neutral-100 px-1 py-0.5 text-xs dark:bg-neutral-800 dark:text-neutral-100;
+    font-family: var(--markyard-font-mono, var(--default-mono-font-family, monospace));
+  }
+  .inline-markdown a {
+    @apply underline underline-offset-2;
+    color: var(--markyard-accent, var(--color-blue-600, oklch(54.6% 0.245 262.881)));
+  }
+  .inline-markdown a:where(.dark, .dark *) {
+    color: var(--markyard-accent, var(--color-blue-400, oklch(70.7% 0.165 254.624)));
+  }
+  .inline-markdown .wikilink-unresolved {
+    @apply border-b border-dashed border-neutral-400 text-neutral-500 dark:border-neutral-600 dark:text-neutral-400;
+  }
   .markdown-preview .wikilink {
     color: var(--markyard-accent, var(--color-blue-700, oklch(48.8% 0.243 264.376)));
     @apply cursor-pointer rounded-sm no-underline decoration-blue-300 hover:underline focus-visible:outline-2 focus-visible:outline-blue-600 dark:decoration-blue-700;
