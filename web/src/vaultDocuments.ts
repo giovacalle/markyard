@@ -19,6 +19,7 @@ import type { VaultNote } from "./wikilinks";
 /** A note known from the tree cache, with the folder that lists it. */
 export interface VaultNoteRef extends VaultNote {
   folderId: string;
+  modifiedTime?: string;
 }
 
 /** A note whose text is available locally (memory or IndexedDB). */
@@ -37,6 +38,7 @@ export function vaultNotes(queryClient: QueryClient): VaultNoteRef[] {
     name: note.node.name,
     path: note.path,
     folderId: note.folderId,
+    modifiedTime: note.node.modifiedTime,
   }));
 }
 

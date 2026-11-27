@@ -159,6 +159,86 @@
   .markdown-preview .mermaid-error {
     @apply space-y-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/50 dark:text-red-300;
   }
+  .markdown-preview .query-block {
+    @apply overflow-hidden rounded-lg border border-neutral-200 bg-neutral-50/70 dark:border-neutral-800 dark:bg-neutral-900/50;
+  }
+  .markdown-preview .query-block-error {
+    @apply space-y-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/50 dark:text-red-300;
+  }
+  .markdown-preview .query-block-error-message {
+    @apply font-medium;
+  }
+  .markdown-preview .query-block-empty {
+    @apply px-3.5 py-3 text-sm text-neutral-500 dark:text-neutral-400;
+  }
+  .markdown-preview .query-block-list,
+  .markdown-preview .query-block-tasks {
+    @apply m-0 list-none divide-y divide-neutral-200/70 p-0 dark:divide-neutral-800/80;
+  }
+  .markdown-preview .query-block-list-item {
+    @apply flex flex-wrap items-baseline justify-between gap-2 px-3.5 py-2 text-sm;
+  }
+  .markdown-preview .query-block-folder {
+    @apply truncate text-xs text-neutral-500 dark:text-neutral-400;
+  }
+  .markdown-preview .query-block-task-item {
+    @apply flex items-start gap-2.5 px-3.5 py-2 text-sm;
+  }
+  .markdown-preview .query-block-checkbox {
+    @apply mt-0.5 flex size-4 shrink-0 items-center justify-center rounded border border-neutral-300 bg-white text-white transition-colors hover:border-neutral-400 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 disabled:cursor-not-allowed disabled:opacity-60 data-checked:border-blue-600 data-checked:bg-blue-600 dark:border-neutral-600 dark:bg-neutral-900 dark:hover:border-neutral-500 dark:data-checked:border-blue-500 dark:data-checked:bg-blue-500;
+  }
+  .markdown-preview .query-block-checkbox-indicator {
+    @apply flex items-center justify-center;
+  }
+  .markdown-preview .query-block-task-text {
+    @apply min-w-0 flex-1 break-words text-neutral-800 dark:text-neutral-200;
+  }
+  .markdown-preview .query-block-task-done {
+    @apply text-neutral-400 line-through dark:text-neutral-500;
+  }
+  .markdown-preview .query-block-due {
+    @apply shrink-0 rounded bg-amber-100/80 px-1.5 py-0.5 text-xs font-medium tabular-nums text-amber-800 dark:bg-amber-950/70 dark:text-amber-300;
+  }
+  .markdown-preview .query-block-source-link {
+    @apply shrink-0 text-xs;
+  }
+  .markdown-preview .query-block-table-wrap {
+    @apply w-full overflow-x-auto;
+  }
+  .markdown-preview .query-block-table {
+    @apply m-0 table w-full border-collapse text-left text-sm;
+  }
+  .markdown-preview .query-block-table th,
+  .markdown-preview .query-block-table td {
+    @apply border-x-0 border-t-0 border-b border-neutral-200/80 px-3.5 py-2 dark:border-neutral-800;
+  }
+  .markdown-preview .query-block-table tbody tr:last-child td {
+    @apply border-b-0;
+  }
+  .markdown-preview .query-block-table th {
+    @apply bg-neutral-100/80 text-xs font-semibold tracking-wide text-neutral-600 uppercase dark:bg-neutral-900 dark:text-neutral-400;
+  }
+  .markdown-preview .query-block-tags {
+    @apply inline-flex flex-wrap gap-1;
+  }
+  .markdown-preview .query-block-tag {
+    @apply rounded-full bg-neutral-200/80 px-2 py-0.5 text-xs text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300;
+  }
+  .markdown-preview .query-block-muted {
+    @apply text-neutral-400 dark:text-neutral-600;
+  }
+  .markdown-preview .query-block-count {
+    @apply flex items-baseline gap-2.5 px-4 py-3.5;
+  }
+  .markdown-preview .query-block-count-value {
+    @apply text-3xl font-semibold tracking-tight tabular-nums text-neutral-900 dark:text-neutral-50;
+  }
+  .markdown-preview .query-block-count-label {
+    @apply text-sm text-neutral-500 dark:text-neutral-400;
+  }
+  .markdown-preview .query-block-meta {
+    @apply m-0 border-t border-neutral-200/80 bg-neutral-100/50 px-3.5 py-1.5 text-xs text-neutral-500 dark:border-neutral-800 dark:bg-neutral-900/70 dark:text-neutral-400;
+  }
   .markdown-preview .katex-display {
     @apply overflow-x-auto overflow-y-hidden py-1;
   }

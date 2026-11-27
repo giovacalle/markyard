@@ -31,6 +31,7 @@ import {
   OctagonAlertIcon,
 } from "./icons";
 import { BareUrlBookmark, ExternalLink } from "./LinkPreview";
+import { QueryBlock } from "./QueryBlock";
 
 type PluginList = NonNullable<ComponentPropsWithoutRef<typeof Markdown>["remarkPlugins"]>;
 
@@ -475,6 +476,9 @@ const MARKDOWN_COMPONENTS = {
     if (language === "mermaid") {
       return <MermaidBlock source={raw} />;
     }
+    if (language === "query") {
+      return <QueryBlock source={raw} />;
+    }
     return (
       <CodeBlock language={language} code={raw}>
         <pre {...props}>{children}</pre>
@@ -483,7 +487,10 @@ const MARKDOWN_COMPONENTS = {
   },
 } as Components;
 
-const HIGHLIGHT_OPTIONS = { detect: false, plainText: ["mermaid", "math", "text", "txt"] };
+const HIGHLIGHT_OPTIONS = {
+  detect: false,
+  plainText: ["mermaid", "query", "math", "text", "txt"],
+};
 
 export function Preview({
   text,
