@@ -10,13 +10,12 @@ import {
   type QueryResult,
   type TaskQueryRow,
 } from "../queryEngine";
+import { formatModifiedDate, formatQueryCountLabel, formatQueryFooter } from "../queryFormat";
 import { type SyncQueue, SyncQueueContext } from "../syncQueue";
 import { toggleTaskAt } from "../taskToggle";
 import { useVaultDocuments } from "../useVaultDocuments";
 import { saveVaultDocument, type VaultDocument } from "../vaultDocuments";
 import { CheckIcon } from "./icons";
-
-const ISO_TIMESTAMP_RE = /^(\d{4}-\d{2}-\d{2})T/;
 
 interface TextOverride {
   baseText: string;
@@ -90,28 +89,9 @@ function renderCellValue(
     return value ? "true" : "false";
   }
   if (typeof value === "string" && lower === "modified") {
-    const match = ISO_TIMESTAMP_RE.exec(value);
-    if (match !== null) {
-      return match[1];
-    }
+    return formatModifiedDate(value);
   }
   return String(value);
-}
-
-function formatFooter(result: QueryResult, cachedCount: number, totalKnownNotes: number): string {
-  const cacheLabel =
-    totalKnownNotes > cachedCount
-      ? `${cachedCount} of ${totalKnownNotes} notes cached`
-      : `${cachedCount} ${cachedCount === 1 ? "cached note" : "cached notes"}`;
-  if (result.view.kind === "count") {
-    return cacheLabel;
-  }
-  const shown = result.rows.length;
-  const resultLabel =
-    result.totalMatched > shown
-      ? `${shown} of ${result.totalMatched} results`
-      : `${shown} ${shown === 1 ? "result" : "results"}`;
-  return `${resultLabel} · ${cacheLabel}`;
 }
 
 function QueryBlockContent({
@@ -201,7 +181,7 @@ function QueryBlockContent({
   };
 
   const totalKnownNotes = pkm?.notes.length ?? effectiveDocs.length;
-  const footer = formatFooter(result, effectiveDocs.length, totalKnownNotes);
+  const footer = formatQueryFooter(result, effectiveDocs.length, totalKnownNotes);
 
   return (
     <section className="query-block" data-slot="query-block" aria-label="Query results">
@@ -209,13 +189,7 @@ function QueryBlockContent({
         <div className="query-block-count">
           <span className="query-block-count-value">{result.totalMatched}</span>
           <span className="query-block-count-label">
-            {result.type === "notes"
-              ? result.totalMatched === 1
-                ? "matching note"
-                : "matching notes"
-              : result.totalMatched === 1
-                ? "matching task"
-                : "matching tasks"}
+            {formatQueryCountLabel(result.type, result.totalMatched)}
           </span>
         </div>
       ) : result.rows.length === 0 ? (

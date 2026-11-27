@@ -1116,12 +1116,25 @@ function DocumentSession({
     [base, saveError, queryClient, syncQueue, fileId],
   );
 
+  const isPreviewRef = useRef(isPreview);
+  isPreviewRef.current = isPreview;
+  const getFullText = useCallback(() => draftRef.current, []);
+
   // Preview checkbox toggles (and restored versions) are complete edits: store and sync them
-  // right away, like a save.
+  // right away, like a save. When toggled while editing (from an inline query preview), record an
+  // undoable editor edit so Cmd/Ctrl+Z reverts it cleanly.
   const handleToggleTask = useCallback(
     (nextText: string) => {
       setDraft(nextText);
       draftRef.current = nextText;
+      const nextSplit = splitFrontmatter(nextText);
+      frontmatterRawRef.current = nextSplit.frontmatterRaw;
+      const nextEditorText = rawYamlModeRef.current ? nextText : nextSplit.body;
+      if (isPreviewRef.current) {
+        editorHandleRef.current?.syncText(nextEditorText);
+      } else {
+        editorHandleRef.current?.replaceText(nextEditorText);
+      }
       if (blocksNewSaveRef.current || reloadingRef.current) {
         return;
       }
@@ -1681,6 +1694,8 @@ function DocumentSession({
                   text={editorText}
                   active={!isPreview && mergeRemote === null}
                   onChange={handleEditorChange}
+                  onToggleTask={readOnly ? undefined : handleToggleTask}
+                  getFullText={getFullText}
                   onUploadingChange={setUploadingImages}
                   editorRef={editorHandleRef}
                   autoFocus={focusOnEnter}
