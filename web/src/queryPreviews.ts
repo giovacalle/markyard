@@ -1,6 +1,7 @@
 // Live inline previews for ` ```query ` fenced code blocks in the CodeMirror editor:
-// - When the cursor is outside a closed top-level ` ```query ` fence, the raw YAML folds into the
-//   rendered result block (with an "Edit" button to unfold it, Obsidian Live Preview style).
+// - When the cursor is outside a closed top-level ` ```query ` fence, the raw YAML folds into a
+//   widget shell whose body hosts the shared React `QueryBlock` via a portal from `Editor` (with
+//   a native "Edit" button to unfold it, Obsidian Live Preview style).
 // - When the cursor is inside the fence (or for blockquoted / list-nested fences), the YAML stays
 //   editable and a live preview renders right underneath the closing fence, updating as you type.
 import { syntaxTree } from "@codemirror/language";
@@ -10,156 +11,98 @@ import {
   type Extension,
   Facet,
   type Range,
-  StateEffect,
   StateField,
 } from "@codemirror/state";
 import { Decoration, type DecorationSet, EditorView, WidgetType } from "@codemirror/view";
-import {
-  executeQuery,
-  type FieldValue,
-  type NoteQueryRow,
-  parseQuery,
-  type TaskQueryRow,
-} from "./queryEngine";
-import { formatModifiedDate, formatQueryCountLabel, formatQueryFooter } from "./queryFormat";
-import type { TaskSnapshot } from "./taskToggle";
-import type { VaultDocument } from "./vaultDocuments";
 
-export interface QueryPreviewSources {
-  getDocs: () => readonly VaultDocument[] | null;
-  getTotalNotes: () => number;
-  openNote: (id: string) => void;
-  /** Returns false when PkmContext is unavailable so note titles render as plain spans. */
-  canOpenNote?: () => boolean;
-  /** Returns whether task checkboxes should be enabled (read-only / missing SyncQueue => false). */
-  canToggleTasks?: () => boolean;
-  /** Toggles a task when unchanged at its offset; returns false if the toggle did not apply so the checkbox can revert. */
-  toggleTask?: (noteId: string, task: TaskSnapshot) => boolean;
+export type QueryWidgetMode = "collapsed" | "live";
+
+export interface QueryWidgetSlot {
+  readonly key: number;
+  readonly dom: HTMLElement;
+  readonly source: string;
+  readonly mode: QueryWidgetMode;
 }
 
-export const queryPreviewSources = Facet.define<QueryPreviewSources, QueryPreviewSources | null>({
+/**
+ * Tracks active CodeMirror query widget containers so `Editor` can render the shared `QueryBlock`
+ * into each slot via React portals (`useSyncExternalStore`) without per-widget React roots.
+ */
+export class QueryWidgetRegistry {
+  private nextKey = 1;
+  private readonly slots = new Map<HTMLElement, QueryWidgetSlot>();
+  private readonly listeners = new Set<() => void>();
+  private snapshot: readonly QueryWidgetSlot[] = [];
+
+  readonly subscribe = (listener: () => void): (() => void) => {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  };
+
+  readonly getSnapshot = (): readonly QueryWidgetSlot[] => this.snapshot;
+
+  mount(dom: HTMLElement, source: string, mode: QueryWidgetMode): void {
+    const existing = this.slots.get(dom);
+    if (existing !== undefined && existing.source === source && existing.mode === mode) {
+      return;
+    }
+    const key = existing?.key ?? this.nextKey++;
+    this.slots.set(dom, { key, dom, source, mode });
+    this.emit();
+  }
+
+  update(dom: HTMLElement, source: string, mode: QueryWidgetMode): void {
+    const existing = this.slots.get(dom);
+    if (existing === undefined) {
+      this.mount(dom, source, mode);
+      return;
+    }
+    if (existing.source === source && existing.mode === mode) {
+      return;
+    }
+    this.slots.set(dom, { key: existing.key, dom, source, mode });
+    this.emit();
+  }
+
+  unmount(dom: HTMLElement): void {
+    if (!this.slots.delete(dom)) {
+      return;
+    }
+    this.emit();
+  }
+
+  private emit(): void {
+    this.snapshot = Array.from(this.slots.values());
+    for (const listener of this.listeners) {
+      listener();
+    }
+  }
+}
+
+const queryWidgetRegistry = Facet.define<QueryWidgetRegistry, QueryWidgetRegistry | null>({
   combine: (values) => values.at(-1) ?? null,
 });
 
-/** Dispatched when the vault document cache or interactivity state updates. */
-export const refreshQueryPreviews = StateEffect.define<number>();
-
-function createNoteLink(
-  id: string,
-  title: string,
-  sources: QueryPreviewSources | null,
-  className = "cm-query-link",
-): HTMLElement {
-  const interactive = sources !== null && (sources.canOpenNote?.() ?? true);
-  if (!interactive) {
-    const span = document.createElement("span");
-    span.className = className;
-    span.textContent = title;
-    return span;
-  }
-  const link = document.createElement("a");
-  link.href = `/?file=${encodeURIComponent(id)}`;
-  link.className = className;
-  link.dataset.noteId = id;
-  link.textContent = title;
-  link.addEventListener("click", (event) => {
-    event.stopPropagation();
-    if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) {
-      return;
-    }
-    event.preventDefault();
-    sources.openNote(id);
-  });
-  return link;
+interface WidgetMount {
+  header: HTMLElement;
+  body: HTMLElement;
+  mode: QueryWidgetMode;
+  registry: QueryWidgetRegistry | null;
 }
 
-function appendCellValue(
-  cell: HTMLElement,
-  row: NoteQueryRow | TaskQueryRow,
-  column: string,
-  sources: QueryPreviewSources | null,
-): void {
-  const lower = column.toLowerCase();
-  if (lower === "title") {
-    cell.appendChild(createNoteLink(row.id, row.title, sources));
-    return;
-  }
-  const value: FieldValue = row.getField(column);
-  if (value === undefined || value === "") {
-    const muted = document.createElement("span");
-    muted.className = "cm-query-muted";
-    muted.textContent = "—";
-    cell.appendChild(muted);
-    return;
-  }
-  if (Array.isArray(value)) {
-    if (value.length === 0) {
-      const muted = document.createElement("span");
-      muted.className = "cm-query-muted";
-      muted.textContent = "—";
-      cell.appendChild(muted);
-      return;
-    }
-    if (lower === "tags") {
-      const wrap = document.createElement("span");
-      wrap.className = "cm-query-tags";
-      for (const tag of value) {
-        const pill = document.createElement("span");
-        pill.className = "cm-query-tag";
-        pill.textContent = `#${tag}`;
-        wrap.appendChild(pill);
-      }
-      cell.appendChild(wrap);
-      return;
-    }
-    cell.textContent = value.join(", ");
-    return;
-  }
-  if (typeof value === "boolean") {
-    cell.textContent = value ? "true" : "false";
-    return;
-  }
-  if (typeof value === "string" && lower === "modified") {
-    cell.textContent = formatModifiedDate(value);
-    return;
-  }
-  cell.textContent = String(value);
-}
+const widgetMounts = new WeakMap<HTMLElement, WidgetMount>();
 
-type WidgetMode = "collapsed" | "live";
-
-function renderWidgetContents(
+function populateHeader(
   container: HTMLElement,
-  source: string,
-  mode: WidgetMode,
+  header: HTMLElement,
+  mode: QueryWidgetMode,
   view: EditorView,
 ): void {
-  // Preserve keyboard focus on a toggled task checkbox across in-place updates.
-  const activeEl = view.root.activeElement;
-  const focusedTaskKey =
-    activeEl instanceof HTMLInputElement && container.contains(activeEl)
-      ? (activeEl.dataset.taskKey ?? null)
-      : null;
-
-  container.className =
-    mode === "live" ? "cm-query-widget cm-query-widget-live" : "cm-query-widget";
-  container.setAttribute("role", "region");
-  container.setAttribute("aria-label", mode === "live" ? "Query live preview" : "Query results");
-
-  const sources = view.state.facet(queryPreviewSources);
-  const docs = sources?.getDocs() ?? null;
-  const parsed = parseQuery(source);
-  const canToggle = sources?.toggleTask !== undefined && (sources.canToggleTasks?.() ?? true);
-
-  const fragment = document.createDocumentFragment();
-
-  const header = document.createElement("div");
-  header.className = "cm-query-header";
-
   const badge = document.createElement("span");
   badge.className = "cm-query-badge";
   badge.textContent = mode === "live" ? "Live preview" : "Query";
-  header.appendChild(badge);
 
   if (mode === "collapsed") {
     const editBtn = document.createElement("button");
@@ -181,193 +124,22 @@ function renderWidgetContents(
       view.dispatch({ selection: EditorSelection.cursor(target) });
       view.focus();
     });
-    header.appendChild(editBtn);
-  }
-
-  fragment.appendChild(header);
-
-  if (!parsed.ok) {
-    const err = document.createElement("p");
-    err.className = "cm-query-error";
-    // Announce politely while typing live; use an assertive alert on collapsed query errors.
-    err.setAttribute("role", mode === "live" ? "status" : "alert");
-    err.textContent = parsed.error;
-    fragment.appendChild(err);
-    container.replaceChildren(fragment);
-    return;
-  }
-
-  if (docs === null) {
-    const loading = document.createElement("p");
-    loading.className = "cm-query-empty";
-    loading.setAttribute("role", "status");
-    loading.textContent = "Running query…";
-    fragment.appendChild(loading);
-    container.replaceChildren(fragment);
-    return;
-  }
-
-  const result = executeQuery(parsed.query, docs);
-
-  if (result.view.kind === "count") {
-    const countWrap = document.createElement("div");
-    countWrap.className = "cm-query-count";
-    const val = document.createElement("span");
-    val.className = "cm-query-count-value";
-    val.textContent = String(result.totalMatched);
-    const label = document.createElement("span");
-    label.className = "cm-query-count-label";
-    label.textContent = formatQueryCountLabel(result.type, result.totalMatched);
-    countWrap.append(val, label);
-    fragment.appendChild(countWrap);
-  } else if (result.rows.length === 0) {
-    const empty = document.createElement("p");
-    empty.className = "cm-query-empty";
-    empty.textContent = `No matching ${result.type}.`;
-    fragment.appendChild(empty);
-  } else if (result.view.kind === "table") {
-    const wrap = document.createElement("div");
-    wrap.className = "cm-query-table-wrap";
-    const table = document.createElement("table");
-    table.className = "cm-query-table";
-    const thead = document.createElement("thead");
-    const headRow = document.createElement("tr");
-    for (const col of result.view.columns) {
-      const th = document.createElement("th");
-      th.scope = "col";
-      th.textContent = col;
-      headRow.appendChild(th);
-    }
-    thead.appendChild(headRow);
-    table.appendChild(thead);
-
-    const tbody = document.createElement("tbody");
-    for (const row of result.rows) {
-      const tr = document.createElement("tr");
-      for (const col of result.view.columns) {
-        const td = document.createElement("td");
-        appendCellValue(td, row, col, sources);
-        tr.appendChild(td);
-      }
-      tbody.appendChild(tr);
-    }
-    table.appendChild(tbody);
-    wrap.appendChild(table);
-    fragment.appendChild(wrap);
-  } else if (result.view.kind === "tasks" && result.type === "tasks") {
-    const ul = document.createElement("ul");
-    ul.className = "cm-query-tasks";
-    for (const row of result.rows) {
-      const li = document.createElement("li");
-      li.className = "cm-query-task-item";
-
-      const taskKey = `${row.id}:${row.offset}`;
-      const label = document.createElement("label");
-      label.className = "cm-query-task-label";
-
-      // Native checkbox inside CodeMirror's imperative Shadow DOM WidgetType (per ADR 0004).
-      const checkbox = document.createElement("input");
-      checkbox.type = "checkbox";
-      checkbox.className = "cm-query-checkbox";
-      checkbox.dataset.taskKey = taskKey;
-      checkbox.checked = row.done;
-      checkbox.disabled = !canToggle;
-      checkbox.setAttribute("aria-label", row.text || "Task item");
-      checkbox.addEventListener("click", (event) => {
-        event.stopPropagation();
-      });
-      checkbox.addEventListener("change", () => {
-        const ok =
-          sources?.toggleTask?.(row.id, { offset: row.offset, text: row.text, done: row.done }) ??
-          false;
-        if (!ok) {
-          checkbox.checked = row.done;
-        }
-      });
-      label.appendChild(checkbox);
-
-      const textSpan = document.createElement("span");
-      textSpan.className = row.done
-        ? "cm-query-task-text cm-query-task-done"
-        : "cm-query-task-text";
-      textSpan.textContent = row.text;
-      label.appendChild(textSpan);
-
-      li.appendChild(label);
-
-      if (row.due !== undefined) {
-        const due = document.createElement("span");
-        due.className = "cm-query-due";
-        due.textContent = `@${row.due}`;
-        li.appendChild(due);
-      }
-
-      li.appendChild(createNoteLink(row.id, row.title, sources, "cm-query-link cm-query-source"));
-      ul.appendChild(li);
-    }
-    fragment.appendChild(ul);
+    header.replaceChildren(badge, editBtn);
   } else {
-    const ul = document.createElement("ul");
-    ul.className = "cm-query-list";
-    if (result.type === "notes") {
-      for (const row of result.rows) {
-        const li = document.createElement("li");
-        li.className = "cm-query-list-item";
-        li.appendChild(createNoteLink(row.id, row.title, sources));
-        if (row.folder.length > 0) {
-          const folder = document.createElement("span");
-          folder.className = "cm-query-folder";
-          folder.textContent = row.folder;
-          li.appendChild(folder);
-        }
-        ul.appendChild(li);
-      }
-    } else {
-      for (const row of result.rows) {
-        const li = document.createElement("li");
-        li.className = "cm-query-list-item";
-        const textSpan = document.createElement("span");
-        textSpan.className = row.done
-          ? "cm-query-task-text cm-query-task-done"
-          : "cm-query-task-text";
-        textSpan.textContent = row.text;
-        li.appendChild(textSpan);
-        li.appendChild(createNoteLink(row.id, row.title, sources, "cm-query-link cm-query-source"));
-        ul.appendChild(li);
-      }
-    }
-    fragment.appendChild(ul);
-  }
-
-  const totalNotes = sources?.getTotalNotes() ?? docs.length;
-  const meta = document.createElement("p");
-  meta.className = "cm-query-meta";
-  meta.textContent = formatQueryFooter(result, docs.length, totalNotes);
-  fragment.appendChild(meta);
-
-  container.replaceChildren(fragment);
-
-  if (focusedTaskKey !== null) {
-    const nextCheckbox = container.querySelector<HTMLInputElement>(
-      `input[data-task-key="${CSS.escape(focusedTaskKey)}"]`,
-    );
-    nextCheckbox?.focus();
+    header.replaceChildren(badge);
   }
 }
 
 class QueryPreviewWidget extends WidgetType {
   constructor(
     readonly source: string,
-    readonly version: number,
-    readonly mode: WidgetMode,
+    readonly mode: QueryWidgetMode,
   ) {
     super();
   }
 
   eq(other: QueryPreviewWidget): boolean {
-    return (
-      other.source === this.source && other.version === this.version && other.mode === this.mode
-    );
+    return other.source === this.source && other.mode === this.mode;
   }
 
   get estimatedHeight(): number {
@@ -376,14 +148,47 @@ class QueryPreviewWidget extends WidgetType {
 
   toDOM(view: EditorView): HTMLElement {
     const container = document.createElement("div");
-    renderWidgetContents(container, this.source, this.mode, view);
+    container.className =
+      this.mode === "live" ? "cm-query-widget cm-query-widget-live" : "cm-query-widget";
+
+    const header = document.createElement("div");
+    header.className = "cm-query-header";
+    populateHeader(container, header, this.mode, view);
+
+    const body = document.createElement("div");
+    body.className = "cm-query-body";
+
+    container.append(header, body);
+
+    const registry = view.state.facet(queryWidgetRegistry);
+    widgetMounts.set(container, { header, body, mode: this.mode, registry });
+    registry?.mount(body, this.source, this.mode);
     return container;
   }
 
   updateDOM(dom: HTMLElement, view: EditorView): boolean {
-    renderWidgetContents(dom, this.source, this.mode, view);
+    const mount = widgetMounts.get(dom);
+    if (mount === undefined) {
+      return false;
+    }
+    if (mount.mode !== this.mode) {
+      dom.className =
+        this.mode === "live" ? "cm-query-widget cm-query-widget-live" : "cm-query-widget";
+      populateHeader(dom, mount.header, this.mode, view);
+      mount.mode = this.mode;
+    }
+    mount.registry?.update(mount.body, this.source, this.mode);
     view.requestMeasure();
     return true;
+  }
+
+  destroy(dom: HTMLElement): void {
+    const mount = widgetMounts.get(dom);
+    if (mount === undefined) {
+      return;
+    }
+    widgetMounts.delete(dom);
+    mount.registry?.unmount(mount.body);
   }
 
   ignoreEvent(event: Event): boolean {
@@ -393,17 +198,12 @@ class QueryPreviewWidget extends WidgetType {
     if (el === null) {
       return false;
     }
-    // Let clicks on links, checkboxes, labels, and the Edit button run natively without CodeMirror hijacking them.
+    // Let clicks and keyboard events on links, checkboxes, labels, and the Edit button run natively.
     if (el.closest("a, input, button, label") !== null) {
       return true;
     }
     return this.mode === "live";
   }
-}
-
-interface QueryPreviewState {
-  version: number;
-  decorations: DecorationSet;
 }
 
 const SKIP_NODES = new Set([
@@ -422,7 +222,7 @@ const SKIP_NODES = new Set([
   "Frontmatter",
 ]);
 
-function buildDecorations(state: EditorState, version: number): DecorationSet {
+function buildDecorations(state: EditorState): DecorationSet {
   const ranges: Range<Decoration>[] = [];
   const selection = state.selection.ranges;
 
@@ -468,7 +268,7 @@ function buildDecorations(state: EditorState, version: number): DecorationSet {
       if (editing || !isTopLevel) {
         ranges.push(
           Decoration.widget({
-            widget: new QueryPreviewWidget(source, version, "live"),
+            widget: new QueryPreviewWidget(source, "live"),
             block: true,
             side: 1,
           }).range(closeLine.to),
@@ -476,7 +276,7 @@ function buildDecorations(state: EditorState, version: number): DecorationSet {
       } else {
         ranges.push(
           Decoration.replace({
-            widget: new QueryPreviewWidget(source, version, "collapsed"),
+            widget: new QueryPreviewWidget(source, "collapsed"),
             block: true,
           }).range(replaceFrom, replaceTo),
         );
@@ -488,46 +288,38 @@ function buildDecorations(state: EditorState, version: number): DecorationSet {
   return Decoration.set(ranges, true);
 }
 
-const queryPreviewField = StateField.define<QueryPreviewState>({
+const queryPreviewField = StateField.define<DecorationSet>({
   create(state) {
-    return { version: 0, decorations: buildDecorations(state, 0) };
+    return buildDecorations(state);
   },
   update(value, tr) {
-    let version = value.version;
-    let refreshed = false;
-    for (const effect of tr.effects) {
-      if (effect.is(refreshQueryPreviews)) {
-        version = effect.value;
-        refreshed = true;
-      }
-    }
     const treeChanged = syntaxTree(tr.state) !== syntaxTree(tr.startState);
-    if (!refreshed && !tr.docChanged && !treeChanged) {
+    if (!tr.docChanged && !treeChanged) {
       // O(1) fast path for cursor movement in notes with no query blocks.
-      if (value.decorations.size === 0 || tr.selection === undefined) {
+      if (value.size === 0 || tr.selection === undefined) {
         return value;
       }
     }
-    return { version, decorations: buildDecorations(tr.state, version) };
+    return buildDecorations(tr.state);
   },
-  provide: (field) => EditorView.decorations.from(field, (value) => value.decorations),
+  provide: (field) => EditorView.decorations.from(field),
 });
 
+// Shadow-root styles for the shared `QueryBlock` rendered inside `.cm-query-widget`.
+// Specificity comes from CodeMirror's theme scope class + `.cm-query-widget` (no `@layer`),
+// beating unlayered editor rules under the strict CSP. Colors reuse existing `--cm-*` tokens.
 const QUERY_PREVIEW_THEME = EditorView.theme({
   ".cm-query-widget": {
     margin: "0.5rem 0 0.75rem",
-    padding: "0.75rem 0.875rem",
-    borderRadius: "0.625rem",
-    border: "1px solid var(--cm-widget-border, #d4d4d4)",
-    backgroundColor: "var(--cm-code-bg, #f5f5f5)",
-    color: "var(--cm-fg, #171717)",
-    fontFamily:
-      'var(--markyard-font-ui, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif)',
-    fontSize: "0.875rem",
-    lineHeight: "1.5",
+    padding: "0",
+    border: "0 solid transparent",
+    backgroundColor: "transparent",
+    whiteSpace: "normal",
   },
   ".cm-query-widget-live": {
     marginTop: "0.375rem",
+  },
+  ".cm-query-widget-live .query-block": {
     borderStyle: "dashed",
   },
   ".cm-query-header": {
@@ -535,7 +327,10 @@ const QUERY_PREVIEW_THEME = EditorView.theme({
     alignItems: "center",
     justifyContent: "space-between",
     gap: "0.5rem",
-    marginBottom: "0.5rem",
+    marginBottom: "0.375rem",
+    fontFamily:
+      'var(--markyard-font-ui, var(--default-font-family, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif))',
+    lineHeight: "1.25",
   },
   ".cm-query-badge": {
     fontSize: "0.6875rem",
@@ -550,155 +345,295 @@ const QUERY_PREVIEW_THEME = EditorView.theme({
     border: "1px solid var(--cm-widget-border, #d4d4d4)",
     backgroundColor: "var(--cm-popup-bg, #ffffff)",
     color: "var(--cm-fg, #171717)",
+    fontFamily: "inherit",
     fontSize: "0.75rem",
     fontWeight: "500",
+    lineHeight: "1.25",
     cursor: "pointer",
   },
   ".cm-query-edit-btn:hover": {
     opacity: "0.85",
   },
-  ".cm-query-edit-btn:focus-visible, .cm-query-link:focus-visible, .cm-query-checkbox:focus-visible":
+  ".cm-query-edit-btn:focus-visible": {
+    outline: "2px solid var(--markyard-accent, var(--cm-link, #2563eb))",
+    outlineOffset: "2px",
+  },
+  ".cm-query-widget :where(.query-block, .query-block *, .query-block ::before, .query-block ::after, .query-block-error, .query-block-error *, .query-block-error ::before, .query-block-error ::after)":
     {
-      outline: "2px solid var(--markyard-accent, var(--cm-link, #2563eb))",
-      outlineOffset: "2px",
+      boxSizing: "border-box",
+      border: "0 solid",
+      margin: "0",
     },
-  ".cm-query-error": {
-    margin: "0",
-    color: "var(--cm-code-deleted, #b91c1c)",
-    fontSize: "0.8125rem",
-    fontWeight: "500",
-  },
-  ".cm-query-empty": {
-    margin: "0",
-    color: "var(--cm-quote, #525252)",
-    fontSize: "0.8125rem",
-  },
-  ".cm-query-count": {
-    display: "flex",
-    alignItems: "baseline",
-    gap: "0.5rem",
-  },
-  ".cm-query-count-value": {
-    fontSize: "1.625rem",
-    fontWeight: "700",
-    lineHeight: "1.1",
-    fontVariantNumeric: "tabular-nums",
-  },
-  ".cm-query-count-label": {
-    color: "var(--cm-quote, #525252)",
-    fontSize: "0.8125rem",
-  },
-  ".cm-query-list, .cm-query-tasks": {
-    listStyle: "none",
-    margin: "0",
+  ".cm-query-widget .query-block": {
+    overflow: "hidden",
+    borderRadius: "0.5rem",
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "var(--cm-popup-border, #e5e5e5)",
+    backgroundColor: "color-mix(in srgb, var(--cm-code-bg, #f5f5f5) 45%, transparent)",
     padding: "0",
+    fontFamily:
+      "var(--markyard-font-text, var(--default-font-family, ui-sans-serif, system-ui, sans-serif))",
+    fontSize: "var(--markyard-text-size, 1rem)",
+    lineHeight: "var(--markyard-line-height, var(--leading-relaxed, 1.625))",
+    color: "var(--cm-fg, #171717)",
+    whiteSpace: "normal",
+  },
+  ".cm-query-widget .query-block-error": {
     display: "flex",
     flexDirection: "column",
-    gap: "0.3125rem",
-  },
-  ".cm-query-list-item, .cm-query-task-item": {
-    display: "flex",
-    alignItems: "baseline",
     gap: "0.5rem",
-    flexWrap: "wrap",
+    borderRadius: "0.5rem",
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "color-mix(in srgb, var(--cm-code-deleted, #b91c1c) 30%, transparent)",
+    backgroundColor: "color-mix(in srgb, var(--cm-code-deleted, #b91c1c) 8%, transparent)",
+    padding: "0.75rem",
+    fontFamily:
+      "var(--markyard-font-text, var(--default-font-family, ui-sans-serif, system-ui, sans-serif))",
+    fontSize: "0.875rem",
+    lineHeight: "1.25rem",
+    color: "var(--cm-code-deleted, #b91c1c)",
+    whiteSpace: "normal",
   },
-  ".cm-query-task-item": {
-    alignItems: "center",
-  },
-  ".cm-query-task-label": {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: "0.5rem",
-    flex: "1 1 auto",
-    minWidth: "0",
-    minHeight: "1.5rem",
-    cursor: "pointer",
-  },
-  ".cm-query-checkbox": {
+  ".cm-query-widget .query-block-error :where(p)": {
     margin: "0",
+    padding: "0",
+  },
+  ".cm-query-widget .query-block-error .query-block-error-message": {
+    fontWeight: "500",
+  },
+  ".cm-query-widget .query-block-error pre": {
+    overflowX: "auto",
+    borderRadius: "0.25rem",
+    backgroundColor: "var(--cm-code-bg, #f5f5f5)",
+    padding: "0.75rem",
+    margin: "0",
+    fontFamily: "var(--markyard-font-mono, var(--default-mono-font-family, monospace))",
+    fontSize: "0.75rem",
+    lineHeight: "1.5",
+    color: "var(--cm-code-fg, #171717)",
+    whiteSpace: "pre",
+  },
+  ".cm-query-widget .query-block-error pre code": {
+    backgroundColor: "transparent",
+    padding: "0",
+    fontFamily: "inherit",
+    fontSize: "inherit",
+  },
+  ".cm-query-widget .query-block :where(ul, li, p)": {
+    listStyle: "none",
+    padding: "0",
+    margin: "0",
+  },
+  ".cm-query-widget .query-block .query-block-empty": {
+    padding: "0.75rem 0.875rem",
+    fontSize: "0.875rem",
+    lineHeight: "1.25rem",
+    color: "var(--cm-muted, #737373)",
+  },
+  ".cm-query-widget .query-block .query-block-list > li + li, .cm-query-widget .query-block .query-block-tasks > li + li":
+    {
+      borderTopWidth: "1px",
+      borderTopStyle: "solid",
+      borderTopColor: "color-mix(in srgb, var(--cm-popup-border, #e5e5e5) 80%, transparent)",
+    },
+  ".cm-query-widget .query-block .query-block-list-item": {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "baseline",
+    justifyContent: "space-between",
+    gap: "0.5rem",
+    padding: "0.5rem 0.875rem",
+    fontSize: "0.875rem",
+    lineHeight: "1.25rem",
+  },
+  ".cm-query-widget .query-block .query-block-folder": {
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    fontSize: "0.75rem",
+    lineHeight: "1rem",
+    color: "var(--cm-muted, #737373)",
+  },
+  ".cm-query-widget .query-block .query-block-task-item": {
+    display: "flex",
+    alignItems: "flex-start",
+    gap: "0.625rem",
+    padding: "0.5rem 0.875rem",
+    fontSize: "0.875rem",
+    lineHeight: "1.25rem",
+  },
+  ".cm-query-widget .query-block .query-block-checkbox": {
+    appearance: "none",
+    padding: "0",
+    font: "inherit",
+    cursor: "pointer",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
     width: "1rem",
     height: "1rem",
     flexShrink: "0",
-    accentColor: "var(--markyard-accent, var(--cm-link, #2563eb))",
-    cursor: "pointer",
+    marginTop: "0.125rem",
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "var(--cm-widget-border, #d4d4d4)",
+    borderRadius: "0.25rem",
+    backgroundColor: "var(--cm-popup-bg, #ffffff)",
+    color: "#ffffff",
+    transition: "color 150ms, background-color 150ms, border-color 150ms",
   },
-  ".cm-query-checkbox:disabled": {
+  ".cm-query-widget .query-block .query-block-checkbox:hover": {
+    borderColor: "var(--cm-muted, #737373)",
+  },
+  ".cm-query-widget .query-block .query-block-checkbox:focus-visible": {
+    outline: "2px solid var(--markyard-accent, var(--cm-link, #2563eb))",
+    outlineOffset: "2px",
+  },
+  ".cm-query-widget .query-block .query-block-checkbox:disabled": {
     cursor: "not-allowed",
     opacity: "0.6",
   },
-  ".cm-query-task-text": {
-    flex: "1 1 auto",
+  ".cm-query-widget .query-block .query-block-checkbox[data-checked]": {
+    borderColor: "var(--markyard-accent, var(--cm-link, #2563eb))",
+    backgroundColor: "var(--markyard-accent, var(--cm-link, #2563eb))",
+  },
+  ".cm-query-widget .query-block .query-block-checkbox-indicator": {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  ".cm-query-widget .query-block .query-block-checkbox-indicator svg": {
+    width: "0.75rem",
+    height: "0.75rem",
+    flexShrink: "0",
+  },
+  ".cm-query-widget .query-block .query-block-task-text": {
     minWidth: "0",
+    flex: "1 1 0%",
+    overflowWrap: "break-word",
+    color: "var(--cm-fg, #171717)",
   },
-  ".cm-query-task-done": {
+  ".cm-query-widget .query-block .query-block-task-done": {
     textDecoration: "line-through",
-    color: "var(--cm-quote, #525252)",
+    color: "var(--cm-muted, #737373)",
   },
-  ".cm-query-due": {
+  ".cm-query-widget .query-block .query-block-due": {
+    flexShrink: "0",
+    borderRadius: "0.25rem",
+    backgroundColor: "color-mix(in srgb, var(--cm-yaml-atom, #b45309) 14%, transparent)",
+    padding: "0.125rem 0.375rem",
     fontSize: "0.75rem",
-    color: "var(--cm-quote, #525252)",
+    lineHeight: "1rem",
+    fontWeight: "500",
     fontVariantNumeric: "tabular-nums",
+    color: "var(--cm-yaml-atom, #b45309)",
   },
-  ".cm-query-link": {
+  ".cm-query-widget .query-block .query-block-source-link": {
+    flexShrink: "0",
+    fontSize: "0.75rem",
+    lineHeight: "1rem",
+  },
+  ".cm-query-widget .query-block .wikilink": {
     color: "var(--markyard-accent, var(--cm-link, #2563eb))",
-    textDecoration: "underline",
-    textUnderlineOffset: "2px",
+    textDecoration: "none",
     cursor: "pointer",
+    borderRadius: "0.125rem",
   },
-  ".cm-query-source": {
-    fontSize: "0.75rem",
-    marginLeft: "auto",
+  ".cm-query-widget .query-block .wikilink:hover": {
+    textDecoration: "underline",
   },
-  ".cm-query-folder": {
-    fontSize: "0.75rem",
-    color: "var(--cm-quote, #525252)",
+  ".cm-query-widget .query-block .wikilink:focus-visible": {
+    outline: "2px solid var(--markyard-accent, var(--cm-link, #2563eb))",
+    outlineOffset: "2px",
   },
-  ".cm-query-table-wrap": {
+  ".cm-query-widget .query-block .query-block-table-wrap": {
+    width: "100%",
     overflowX: "auto",
   },
-  ".cm-query-table": {
+  ".cm-query-widget .query-block .query-block-table": {
+    display: "table",
     width: "100%",
     borderCollapse: "collapse",
-    fontSize: "0.8125rem",
+    borderSpacing: "0",
+    textIndent: "0",
     textAlign: "left",
+    fontSize: "0.875rem",
+    lineHeight: "1.25rem",
+    margin: "0",
   },
-  ".cm-query-table th, .cm-query-table td": {
-    padding: "0.375rem 0.5rem",
-    borderBottom: "1px solid var(--cm-widget-border, #d4d4d4)",
+  ".cm-query-widget .query-block .query-block-table th, .cm-query-widget .query-block .query-block-table td":
+    {
+      textAlign: "left",
+      fontWeight: "inherit",
+      borderWidth: "0",
+      borderBottomWidth: "1px",
+      borderBottomStyle: "solid",
+      borderBottomColor: "var(--cm-popup-border, #e5e5e5)",
+      padding: "0.5rem 0.875rem",
+    },
+  ".cm-query-widget .query-block .query-block-table tbody tr:last-child td": {
+    borderBottomWidth: "0",
   },
-  ".cm-query-table th": {
-    fontWeight: "600",
+  ".cm-query-widget .query-block .query-block-table th": {
+    backgroundColor: "color-mix(in srgb, var(--cm-code-bg, #f5f5f5) 80%, transparent)",
     fontSize: "0.75rem",
+    lineHeight: "1rem",
+    fontWeight: "600",
+    letterSpacing: "0.025em",
+    textTransform: "uppercase",
     color: "var(--cm-quote, #525252)",
   },
-  ".cm-query-table tbody tr:last-child td": {
-    borderBottom: "none",
-  },
-  ".cm-query-tags": {
+  ".cm-query-widget .query-block .query-block-tags": {
     display: "inline-flex",
     flexWrap: "wrap",
     gap: "0.25rem",
   },
-  ".cm-query-tag": {
-    padding: "0.0625rem 0.375rem",
-    borderRadius: "999px",
-    backgroundColor: "var(--cm-popup-bg, #ffffff)",
-    border: "1px solid var(--cm-widget-border, #d4d4d4)",
+  ".cm-query-widget .query-block .query-block-tag": {
+    borderRadius: "9999px",
+    backgroundColor: "color-mix(in srgb, var(--cm-popup-border, #e5e5e5) 80%, transparent)",
+    padding: "0.125rem 0.5rem",
     fontSize: "0.75rem",
+    lineHeight: "1rem",
+    color: "var(--cm-fg, #171717)",
   },
-  ".cm-query-muted": {
-    color: "var(--cm-quote, #525252)",
+  ".cm-query-widget .query-block .query-block-muted": {
+    color: "var(--cm-muted, #737373)",
   },
-  ".cm-query-meta": {
-    margin: "0.5rem 0 0",
-    paddingTop: "0.375rem",
-    borderTop: "1px solid var(--cm-widget-border, #d4d4d4)",
+  ".cm-query-widget .query-block .query-block-count": {
+    display: "flex",
+    alignItems: "baseline",
+    gap: "0.625rem",
+    padding: "0.875rem 1rem",
+  },
+  ".cm-query-widget .query-block .query-block-count-value": {
+    fontSize: "1.875rem",
+    lineHeight: "2.25rem",
+    fontWeight: "600",
+    letterSpacing: "-0.025em",
+    fontVariantNumeric: "tabular-nums",
+    color: "var(--cm-heading, #0a0a0a)",
+  },
+  ".cm-query-widget .query-block .query-block-count-label": {
+    fontSize: "0.875rem",
+    lineHeight: "1.25rem",
+    color: "var(--cm-muted, #737373)",
+  },
+  ".cm-query-widget .query-block .query-block-meta": {
+    margin: "0",
+    borderTopWidth: "1px",
+    borderTopStyle: "solid",
+    borderTopColor: "var(--cm-popup-border, #e5e5e5)",
+    backgroundColor: "color-mix(in srgb, var(--cm-code-bg, #f5f5f5) 50%, transparent)",
+    padding: "0.375rem 0.875rem",
     fontSize: "0.75rem",
-    color: "var(--cm-quote, #525252)",
+    lineHeight: "1rem",
+    color: "var(--cm-muted, #737373)",
   },
 });
 
 /** Live inline previews for ` ```query ` blocks inside CodeMirror. */
-export function queryPreviews(sources: QueryPreviewSources): Extension {
-  return [queryPreviewSources.of(sources), queryPreviewField, QUERY_PREVIEW_THEME];
+export function queryPreviews(registry: QueryWidgetRegistry): Extension {
+  return [queryWidgetRegistry.of(registry), queryPreviewField, QUERY_PREVIEW_THEME];
 }

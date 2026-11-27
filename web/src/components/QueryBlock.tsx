@@ -1,6 +1,6 @@
 import { QueryClientContext } from "@tanstack/react-query";
 import { Checkbox, CheckboxIndicator } from "@ui-sdk/react/checkbox";
-import { createContext, type ReactNode, useContext, useMemo, useState } from "react";
+import { createContext, type ReactNode, useContext, useEffect, useMemo, useState } from "react";
 import { type PkmApi, usePkm } from "../pkm";
 import {
   executeQuery,
@@ -100,14 +100,20 @@ function QueryBlockContent({
   pkm,
   syncQueue,
   currentNoteText,
+  getCurrentNoteText,
+  live = false,
   onToggleTask,
+  onContentChange,
 }: {
   source: string;
   docs: readonly VaultDocument[] | null;
   pkm: PkmApi | null;
   syncQueue: SyncQueue | null;
   currentNoteText?: string;
+  getCurrentNoteText?: () => string | undefined;
+  live?: boolean;
   onToggleTask?: (nextText: string) => void;
+  onContentChange?: () => void;
 }) {
   const queryClient = useContext(QueryClientContext);
   const parsed = useMemo(() => parseQuery(source), [source]);
@@ -139,9 +145,15 @@ function QueryBlockContent({
     return executeQuery(parsed.query, effectiveDocs);
   }, [parsed, effectiveDocs]);
 
+  useEffect(() => {
+    onContentChange?.();
+  }, [onContentChange, parsed, result, effectiveDocs]);
+
+  const regionLabel = live ? "Query live preview" : "Query results";
+
   if (!parsed.ok) {
     return (
-      <div role="alert" className="query-block-error">
+      <div role={live ? "status" : "alert"} className="query-block-error">
         <p className="query-block-error-message">{parsed.error}</p>
         <pre>
           <code>{source}</code>
@@ -152,7 +164,7 @@ function QueryBlockContent({
 
   if (result === null || effectiveDocs === null) {
     return (
-      <section className="query-block" data-slot="query-block" aria-label="Query results">
+      <section className="query-block" data-slot="query-block" aria-label={regionLabel}>
         <p role="status" className="query-block-empty">
           Running query…
         </p>
@@ -172,10 +184,9 @@ function QueryBlockContent({
     }
     const isCurrent = row.id === pkm?.currentFileId;
     const baseText = isCurrent && currentNoteText !== undefined ? currentNoteText : original.text;
+    const liveCurrent = isCurrent ? (getCurrentNoteText?.() ?? currentNoteText) : undefined;
     const fresh =
-      isCurrent && currentNoteText !== undefined
-        ? currentNoteText
-        : freshNoteText(queryClient, original);
+      isCurrent && liveCurrent !== undefined ? liveCurrent : freshNoteText(queryClient, original);
     const next = toggleTaskIfUnchanged(fresh, row);
     if (next === null) {
       setOverrides((prev) => new Map(prev).set(row.id, { baseText, text: fresh }));
@@ -193,7 +204,7 @@ function QueryBlockContent({
   const footer = formatQueryFooter(result, effectiveDocs.length, totalKnownNotes);
 
   return (
-    <section className="query-block" data-slot="query-block" aria-label="Query results">
+    <section className="query-block" data-slot="query-block" aria-label={regionLabel}>
       {result.view.kind === "count" ? (
         <div className="query-block-count">
           <span className="query-block-count-value">{result.totalMatched}</span>
@@ -301,8 +312,8 @@ const SharedVaultDocsContext = createContext<readonly VaultDocument[] | null | u
   undefined,
 );
 
-function VaultDocsSubscription({ children }: { children: ReactNode }) {
-  const docs = useVaultDocuments();
+function VaultDocsSubscription({ enabled, children }: { enabled: boolean; children: ReactNode }) {
+  const docs = useVaultDocuments(enabled);
   return <SharedVaultDocsContext.Provider value={docs}>{children}</SharedVaultDocsContext.Provider>;
 }
 
@@ -310,12 +321,18 @@ function VaultDocsSubscription({ children }: { children: ReactNode }) {
  * Shares a single `useVaultDocuments()` scan across every `QueryBlock` rendered inside a note
  * so multi-query dashboards do not multiply IndexedDB scans.
  */
-export function QueryVaultDocumentsProvider({ children }: { children: ReactNode }) {
+export function QueryVaultDocumentsProvider({
+  enabled = true,
+  children,
+}: {
+  enabled?: boolean;
+  children: ReactNode;
+}) {
   const queryClient = useContext(QueryClientContext);
   if (!queryClient) {
     return <SharedVaultDocsContext.Provider value={[]}>{children}</SharedVaultDocsContext.Provider>;
   }
-  return <VaultDocsSubscription>{children}</VaultDocsSubscription>;
+  return <VaultDocsSubscription enabled={enabled}>{children}</VaultDocsSubscription>;
 }
 
 function VaultQueryBlock({
@@ -323,13 +340,19 @@ function VaultQueryBlock({
   pkm,
   syncQueue,
   currentNoteText,
+  getCurrentNoteText,
+  live,
   onToggleTask,
+  onContentChange,
 }: {
   source: string;
   pkm: PkmApi | null;
   syncQueue: SyncQueue | null;
   currentNoteText?: string;
+  getCurrentNoteText?: () => string | undefined;
+  live?: boolean;
   onToggleTask?: (nextText: string) => void;
+  onContentChange?: () => void;
 }) {
   const docs = useVaultDocuments();
   return (
@@ -339,7 +362,10 @@ function VaultQueryBlock({
       pkm={pkm}
       syncQueue={syncQueue}
       currentNoteText={currentNoteText}
+      getCurrentNoteText={getCurrentNoteText}
+      live={live}
       onToggleTask={onToggleTask}
+      onContentChange={onContentChange}
     />
   );
 }
@@ -348,11 +374,17 @@ function VaultQueryBlock({
 export function QueryBlock({
   source,
   currentNoteText,
+  getCurrentNoteText,
+  live,
   onToggleTask,
+  onContentChange,
 }: {
   source: string;
   currentNoteText?: string;
+  getCurrentNoteText?: () => string | undefined;
+  live?: boolean;
   onToggleTask?: (nextText: string) => void;
+  onContentChange?: () => void;
 }) {
   const queryClient = useContext(QueryClientContext);
   const sharedDocs = useContext(SharedVaultDocsContext);
@@ -367,7 +399,10 @@ export function QueryBlock({
         pkm={pkm}
         syncQueue={syncQueue}
         currentNoteText={currentNoteText}
+        getCurrentNoteText={getCurrentNoteText}
+        live={live}
         onToggleTask={onToggleTask}
+        onContentChange={onContentChange}
       />
     );
   }
@@ -379,7 +414,10 @@ export function QueryBlock({
         pkm={pkm}
         syncQueue={syncQueue}
         currentNoteText={currentNoteText}
+        getCurrentNoteText={getCurrentNoteText}
+        live={live}
         onToggleTask={onToggleTask}
+        onContentChange={onContentChange}
       />
     );
   }
@@ -389,7 +427,10 @@ export function QueryBlock({
       pkm={pkm}
       syncQueue={syncQueue}
       currentNoteText={currentNoteText}
+      getCurrentNoteText={getCurrentNoteText}
+      live={live}
       onToggleTask={onToggleTask}
+      onContentChange={onContentChange}
     />
   );
 }

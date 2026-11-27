@@ -20,18 +20,18 @@ import {
 } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import { tags as t } from "@lezer/highlight";
-import { QueryClientContext } from "@tanstack/react-query";
 import { Toggle } from "@ui-sdk/react/toggle";
 import { Toolbar, ToolbarButton, ToolbarSeparator } from "@ui-sdk/react/toolbar";
 import {
   type ReactNode,
   type RefObject,
   useCallback,
-  useContext,
   useEffect,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
+import { createPortal } from "react-dom";
 import { ATTACHMENT_TYPES, uploadAttachment } from "../api";
 import { adoptUserSheet } from "../customCss";
 import { matchCodeLanguage } from "../editorCodeLanguages";
@@ -51,16 +51,13 @@ import {
 } from "../markdownEditing";
 import { usePkm } from "../pkm";
 import { hasQueryFence } from "../queryFormat";
-import { type QueryPreviewSources, queryPreviews, refreshQueryPreviews } from "../queryPreviews";
+import { queryPreviews, QueryWidgetRegistry } from "../queryPreviews";
 import { getSettings } from "../settings";
-import { SyncQueueContext } from "../syncQueue";
-import { toggleTaskIfUnchanged } from "../taskToggle";
 import type { TemplateNote } from "../templates";
-import { useVaultDocuments } from "../useVaultDocuments";
-import { freshNoteText, saveVaultDocument, type VaultDocument } from "../vaultDocuments";
 import { getViewPrefs, setViewPref, useViewPrefs } from "../viewPrefs";
 import { noteStem } from "../wikilinks";
 import { AccessoryBar, type AccessoryAction } from "./AccessoryBar";
+import { QueryBlock, QueryVaultDocumentsProvider } from "./QueryBlock";
 import {
   BoldIcon,
   CheckSquareIcon,
@@ -450,24 +447,11 @@ export interface EditorHandle {
 
 const IMAGE_ACCEPT = ATTACHMENT_TYPES.join(",");
 
+export const LIVE_DRAFT_DEBOUNCE_MS = 300;
+
 interface ImageHandlers {
   insert: (view: EditorView, files: readonly File[], pos: number) => void;
   setDropTarget: (active: boolean) => void;
-}
-
-/** Mounted only when the open note has a ` ```query ` block, so normal notes do zero IndexedDB scans. */
-function QueryDocsBridge({
-  enabled,
-  onDocs,
-}: {
-  enabled: boolean;
-  onDocs: (docs: readonly VaultDocument[] | null) => void;
-}) {
-  const docs = useVaultDocuments(enabled);
-  useEffect(() => {
-    onDocs(docs);
-  }, [docs, onDocs]);
-  return null;
 }
 
 export function Editor({
@@ -516,8 +500,6 @@ export function Editor({
   const frontmatterRef = useRef(frontmatter);
   frontmatterRef.current = frontmatter;
   const onChangeRef = useRef(onChange);
-  const onToggleTaskRef = useRef(onToggleTask);
-  onToggleTaskRef.current = onToggleTask;
   const getFullTextRef = useRef(getFullText);
   getFullTextRef.current = getFullText;
   const autoFocusRef = useRef(autoFocus);
@@ -531,32 +513,21 @@ export function Editor({
   const pkm = usePkm();
   const pkmRef = useRef(pkm);
   pkmRef.current = pkm;
-  const queryClient = useContext(QueryClientContext);
-  const queryClientRef = useRef(queryClient);
-  queryClientRef.current = queryClient;
-  const syncQueue = useContext(SyncQueueContext);
-  const syncQueueRef = useRef(syncQueue);
-  syncQueueRef.current = syncQueue;
-  const queryDocsRef = useRef<readonly VaultDocument[] | null>(queryClient ? null : []);
-  const queryOverridesRef = useRef<Map<string, { baseText: string; text: string }>>(new Map());
-  const queryVersionRef = useRef(0);
+  const [queryWidgets] = useState(() => new QueryWidgetRegistry());
+  const slots = useSyncExternalStore(queryWidgets.subscribe, queryWidgets.getSnapshot);
   const [hasQueryBlocks, setHasQueryBlocks] = useState(() => hasQueryFence(text ?? initialText));
-  const bumpQueryWidgets = useCallback(() => {
-    queryVersionRef.current += 1;
-    viewRef.current?.dispatch({
-      effects: refreshQueryPreviews.of(queryVersionRef.current),
-    });
+  const [liveDraft, setLiveDraft] = useState<string | undefined>(() => getFullText?.());
+  const liveDraftTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const scheduleLiveDraft = useCallback(() => {
+    clearTimeout(liveDraftTimerRef.current);
+    liveDraftTimerRef.current = setTimeout(() => {
+      setLiveDraft(getFullTextRef.current?.());
+    }, LIVE_DRAFT_DEBOUNCE_MS);
   }, []);
-  const handleQueryDocs = useCallback(
-    (docs: readonly VaultDocument[] | null) => {
-      if (docs === queryDocsRef.current) {
-        return;
-      }
-      queryDocsRef.current = docs;
-      bumpQueryWidgets();
-    },
-    [bumpQueryWidgets],
-  );
+  const readCurrentNoteText = useCallback(() => getFullTextRef.current?.(), []);
+  const requestQueryMeasure = useCallback(() => {
+    viewRef.current?.requestMeasure();
+  }, []);
   const templatesRef = useRef<readonly TemplateNote[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(0);
@@ -623,65 +594,6 @@ export function Editor({
         return note === undefined ? "" : note.path.join("/");
       },
       getFrontmatter: () => frontmatterRef.current ?? null,
-    };
-
-    const getEffectiveQueryDocs = (): readonly VaultDocument[] | null => {
-      const docs = queryDocsRef.current;
-      if (docs === null) {
-        return null;
-      }
-      const currentFileId = pkmRef.current?.currentFileId ?? null;
-      const liveFullText = getFullTextRef.current?.();
-      return docs.map((doc) => {
-        if (currentFileId !== null && doc.id === currentFileId && liveFullText !== undefined) {
-          return doc.text === liveFullText ? doc : { ...doc, text: liveFullText };
-        }
-        const override = queryOverridesRef.current.get(doc.id);
-        if (override !== undefined && override.baseText === doc.text) {
-          return { ...doc, text: override.text };
-        }
-        return doc;
-      });
-    };
-
-    const querySources: QueryPreviewSources = {
-      getDocs: getEffectiveQueryDocs,
-      getTotalNotes: () => pkmRef.current?.notes.length ?? queryDocsRef.current?.length ?? 0,
-      canOpenNote: () => pkmRef.current !== null,
-      openNote: (id) => pkmRef.current?.openNote(id),
-      canToggleTasks: () => onToggleTaskRef.current !== undefined && syncQueueRef.current !== null,
-      toggleTask: (noteId, task) => {
-        const onToggle = onToggleTaskRef.current;
-        const queue = syncQueueRef.current;
-        const docs = getEffectiveQueryDocs();
-        const rawDocs = queryDocsRef.current;
-        if (onToggle === undefined || queue === null || docs === null || rawDocs === null) {
-          return false;
-        }
-        const current = docs.find((entry) => entry.id === noteId);
-        const original = rawDocs.find((entry) => entry.id === noteId);
-        if (current === undefined || original === undefined) {
-          return false;
-        }
-        const isCurrent = noteId === pkmRef.current?.currentFileId;
-        const fresh = isCurrent ? current.text : freshNoteText(queryClientRef.current, original);
-        const next = toggleTaskIfUnchanged(fresh, task);
-        if (next === null) {
-          if (!isCurrent) {
-            queryOverridesRef.current.set(noteId, { baseText: original.text, text: fresh });
-          }
-          bumpQueryWidgets();
-          return false;
-        }
-        if (isCurrent) {
-          onToggle(next);
-        } else {
-          queryOverridesRef.current.set(noteId, { baseText: original.text, text: next });
-          saveVaultDocument(queue, original, next);
-        }
-        bumpQueryWidgets();
-        return true;
-      },
     };
 
     const images = () => imageHandlersRef.current;
@@ -751,7 +663,7 @@ export function Editor({
         history(),
         imagePlaceholders,
         imagePreviews,
-        queryPreviews(querySources),
+        queryPreviews(queryWidgets),
         imageEvents,
         MARKDOWN_EDITING,
         pkmCompletions(completionSources),
@@ -765,9 +677,12 @@ export function Editor({
           if (update.docChanged) {
             const serialized = update.state.doc.sliceString(0, undefined, separator);
             const found = hasQueryFence(serialized);
-            setHasQueryBlocks((prev) => (prev === found ? prev : found));
             if (!update.transactions.some((tr) => tr.annotation(externalSync) === true)) {
               onChangeRef.current(serialized);
+            }
+            setHasQueryBlocks((prev) => (prev === found ? prev : found));
+            if (found) {
+              scheduleLiveDraft();
             }
           }
         }),
@@ -825,7 +740,31 @@ export function Editor({
       viewRef.current = null;
       view.destroy();
     };
-  }, [editorRef, bumpQueryWidgets]);
+  }, [editorRef, queryWidgets, scheduleLiveDraft]);
+
+  useEffect(() => () => clearTimeout(liveDraftTimerRef.current), []);
+
+  useEffect(() => {
+    if (hasQueryBlocks) {
+      clearTimeout(liveDraftTimerRef.current);
+      setLiveDraft(getFullTextRef.current?.());
+    }
+  }, [hasQueryBlocks]);
+
+  // Refresh the live-draft overlay when frontmatter, text, or active changes outside CodeMirror
+  // (e.g., Visual-mode property edits, external syncs, or re-activation).
+  useEffect(() => {
+    if (!hasQueryBlocks) {
+      return;
+    }
+    scheduleLiveDraft();
+  }, [hasQueryBlocks, frontmatter, text, active, scheduleLiveDraft]);
+
+  useEffect(() => {
+    if (slots.length > 0) {
+      viewRef.current?.requestMeasure();
+    }
+  }, [slots]);
 
   // Hidden → shown: catch up with text edited elsewhere, then focus where the cursor was left.
   useEffect(() => {
@@ -842,15 +781,6 @@ export function Editor({
       view.focus();
     }
   }, [active]);
-
-  const canToggleQueryTasks = onToggleTask !== undefined && syncQueue !== null;
-  const canOpenQueryNote = pkm !== null;
-  useEffect(() => {
-    if (!hasQueryBlocks) {
-      return;
-    }
-    bumpQueryWidgets();
-  }, [hasQueryBlocks, canToggleQueryTasks, canOpenQueryNote, bumpQueryWidgets]);
 
   useEffect(() => {
     viewRef.current?.dispatch({
@@ -1126,8 +1056,23 @@ export function Editor({
         data-drop-target={dropTarget ? "true" : undefined}
         className="min-h-[60vh] flex-1 cursor-text rounded-lg transition-shadow data-[drop-target=true]:bg-blue-50/40 data-[drop-target=true]:ring-2 data-[drop-target=true]:ring-blue-400/60 dark:data-[drop-target=true]:bg-blue-950/20"
       />
-      {hasQueryBlocks && queryClient && (
-        <QueryDocsBridge enabled={active} onDocs={handleQueryDocs} />
+      {hasQueryBlocks && (
+        <QueryVaultDocumentsProvider enabled={active}>
+          {slots.map((slot) =>
+            createPortal(
+              <QueryBlock
+                source={slot.source}
+                live={slot.mode === "live"}
+                currentNoteText={liveDraft}
+                getCurrentNoteText={readCurrentNoteText}
+                onToggleTask={onToggleTask}
+                onContentChange={requestQueryMeasure}
+              />,
+              slot.dom,
+              String(slot.key),
+            ),
+          )}
+        </QueryVaultDocumentsProvider>
       )}
       <AccessoryBar actions={accessoryActions} />
     </div>

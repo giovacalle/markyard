@@ -1,13 +1,27 @@
 import { ensureSyntaxTree } from "@codemirror/language";
+import { EditorSelection } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vite-plus/test";
 import type { DriveNode } from "./api";
 import { Editor } from "./components/Editor";
+import { parseFrontmatter } from "./frontmatter";
 import { type PkmApi, PkmContext } from "./pkm";
 import { SyncQueue, SyncQueueContext } from "./syncQueue";
 import { childrenKey } from "./treeCache";
+
+const readVaultDocumentsSpy = vi.hoisted(() => vi.fn());
+vi.mock("./vaultDocuments", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./vaultDocuments")>();
+  return {
+    ...actual,
+    readVaultDocuments: (...args: Parameters<typeof actual.readVaultDocuments>) => {
+      readVaultDocumentsSpy(...args);
+      return actual.readVaultDocuments(...args);
+    },
+  };
+});
 
 function setupEditorVault(notes: { id: string; name: string; text: string }[], currentId: string) {
   const queryClient = new QueryClient();
@@ -100,27 +114,25 @@ describe("Editor inline query previews integration", () => {
       </QueryClientProvider>,
     );
 
-    const { shadow, view } = getShadowView(getByTestId("editor-host"));
+    const { view } = getShadowView(getByTestId("editor-host"));
     act(() => {
       ensureSyntaxTree(view.state, view.state.doc.length, 5_000);
     });
 
     await waitFor(() => {
-      expect(shadow.querySelector('input[aria-label="Self task"]')).not.toBeNull();
-      expect(shadow.querySelector('input[aria-label="Other task"]')).not.toBeNull();
+      expect(within(view.dom).getByRole("checkbox", { name: "Self task" })).toBeInTheDocument();
+      expect(within(view.dom).getByRole("checkbox", { name: "Other task" })).toBeInTheDocument();
     });
 
     // Toggling a task in the currently open note uses the live unsaved draft (preserving "Unsaved paragraph").
-    const selfCheckbox = shadow.querySelector<HTMLInputElement>('input[aria-label="Self task"]')!;
-    fireEvent.click(selfCheckbox);
+    fireEvent.click(within(view.dom).getByRole("checkbox", { name: "Self task" }));
     expect(onToggleTask).toHaveBeenCalledWith(
       unsavedSelf.replace("- [ ] Self task", "- [x] Self task"),
     );
     expect(enqueueSave).not.toHaveBeenCalled();
 
     // Toggling a task in another note saves through SyncQueue.
-    const otherCheckbox = shadow.querySelector<HTMLInputElement>('input[aria-label="Other task"]')!;
-    fireEvent.click(otherCheckbox);
+    fireEvent.click(within(view.dom).getByRole("checkbox", { name: "Other task" }));
     expect(enqueueSave).toHaveBeenCalledWith(
       "n-other",
       otherText.replace("- [ ] Other task", "- [x] Other task"),
@@ -146,17 +158,15 @@ describe("Editor inline query previews integration", () => {
       </QueryClientProvider>,
     );
 
-    const { shadow, view } = getShadowView(getByTestId("editor-host"));
+    const { view } = getShadowView(getByTestId("editor-host"));
     act(() => {
       ensureSyntaxTree(view.state, view.state.doc.length, 5_000);
     });
 
     await waitFor(() => {
-      const cb = shadow.querySelector<HTMLInputElement>('input[aria-label="Read only task"]');
-      expect(cb).not.toBeNull();
-      expect(cb?.disabled).toBe(true);
+      expect(within(view.dom).getByRole("checkbox", { name: "Read only task" })).toBeDisabled();
     });
-    fireEvent.click(shadow.querySelector<HTMLInputElement>('input[aria-label="Read only task"]')!);
+    fireEvent.click(within(view.dom).getByRole("checkbox", { name: "Read only task" }));
     expect(enqueueSave).not.toHaveBeenCalled();
     unmount();
 
@@ -166,9 +176,7 @@ describe("Editor inline query previews integration", () => {
     act(() => {
       ensureSyntaxTree(standaloneView.view.state, standaloneView.view.state.doc.length, 5_000);
     });
-    expect(standaloneView.shadow.querySelector(".cm-query-empty")?.textContent).toBe(
-      "No matching tasks.",
-    );
+    expect(within(standaloneView.view.dom).getByText("No matching tasks.")).toBeInTheDocument();
   });
 
   it("never toggles a different task after the open note is edited outside the query (stale offset)", async () => {
@@ -199,15 +207,13 @@ describe("Editor inline query previews integration", () => {
       </QueryClientProvider>,
     );
 
-    const { shadow, view } = getShadowView(getByTestId("editor-host"));
+    const { view } = getShadowView(getByTestId("editor-host"));
     act(() => {
       ensureSyntaxTree(view.state, view.state.doc.length, 5_000);
     });
 
     await waitFor(() => {
-      expect(
-        within(shadow as unknown as HTMLElement).getByRole("checkbox", { name: "B" }),
-      ).toBeInTheDocument();
+      expect(within(view.dom).getByRole("checkbox", { name: "B" })).toBeInTheDocument();
     });
 
     // Delete "- [ ] A\n" (8 chars) outside the query block so the widget's cached offsets are stale.
@@ -216,22 +222,19 @@ describe("Editor inline query previews integration", () => {
     });
 
     // Clicking B with the stale offset must write nothing, keep B unchecked, and refresh results.
-    fireEvent.click(within(shadow as unknown as HTMLElement).getByRole("checkbox", { name: "B" }));
+    fireEvent.click(within(view.dom).getByRole("checkbox", { name: "B" }));
     expect(onToggleTask).not.toHaveBeenCalled();
     expect(enqueueSave).not.toHaveBeenCalled();
 
-    const refreshedB = within(shadow as unknown as HTMLElement).getByRole("checkbox", {
-      name: "B",
-    });
+    const refreshedB = within(view.dom).getByRole("checkbox", { name: "B" });
     expect(refreshedB).not.toBeChecked();
-    expect(
-      within(shadow as unknown as HTMLElement).queryByRole("checkbox", { name: "A" }),
-    ).toBeNull();
+    expect(within(view.dom).queryByRole("checkbox", { name: "A" })).toBeNull();
 
-    // After the refresh, clicking B toggles B cleanly.
+    // After the refresh, clicking B toggles B cleanly and immediately shows it checked without waitFor.
     fireEvent.click(refreshedB);
     expect(onToggleTask).toHaveBeenCalledWith("- [x] B\n- [ ] C\n\n```query\ntype: tasks\n```\n");
     expect(enqueueSave).not.toHaveBeenCalled();
+    expect(within(view.dom).getByRole("checkbox", { name: "B" })).toBeChecked();
   });
 
   it("toggles another note from the freshest query cache before the debounced docs reload", async () => {
@@ -261,15 +264,13 @@ describe("Editor inline query previews integration", () => {
       </QueryClientProvider>,
     );
 
-    const { shadow, view } = getShadowView(getByTestId("editor-host"));
+    const { view } = getShadowView(getByTestId("editor-host"));
     act(() => {
       ensureSyntaxTree(view.state, view.state.doc.length, 5_000);
     });
 
     await waitFor(() => {
-      expect(
-        within(shadow as unknown as HTMLElement).getByRole("checkbox", { name: "Y" }),
-      ).toBeInTheDocument();
+      expect(within(view.dom).getByRole("checkbox", { name: "Y" })).toBeInTheDocument();
     });
 
     // Update the cache for n-other (as if another widget or provider just toggled X) before reload.
@@ -280,12 +281,397 @@ describe("Editor inline query previews integration", () => {
       });
     });
 
-    fireEvent.click(within(shadow as unknown as HTMLElement).getByRole("checkbox", { name: "Y" }));
+    fireEvent.click(within(view.dom).getByRole("checkbox", { name: "Y" }));
     expect(enqueueSave).toHaveBeenCalledWith(
       "n-other",
       "- [x] X\n- [x] Y\n",
       "rev-n-other",
       undefined,
     );
+  });
+
+  it("renders the shared QueryBlock inside the editor shadow root", async () => {
+    const doc = "# Self\n\n- [ ] Shared task\n\n```query\ntype: tasks\n```\n";
+    const { queryClient, pkm, syncQueue } = setupEditorVault(
+      [{ id: "n-self", name: "Self.md", text: doc }],
+      "n-self",
+    );
+
+    const { getByTestId } = render(
+      <QueryClientProvider client={queryClient}>
+        <SyncQueueContext.Provider value={syncQueue}>
+          <PkmContext.Provider value={pkm}>
+            <Editor
+              initialText={doc}
+              text={doc}
+              onChange={vi.fn()}
+              onToggleTask={vi.fn()}
+              getFullText={() => doc}
+            />
+          </PkmContext.Provider>
+        </SyncQueueContext.Provider>
+      </QueryClientProvider>,
+    );
+
+    const { shadow, view } = getShadowView(getByTestId("editor-host"));
+    act(() => {
+      ensureSyntaxTree(view.state, view.state.doc.length, 5_000);
+    });
+
+    await waitFor(() => {
+      expect(within(view.dom).getByRole("checkbox", { name: "Shared task" })).toBeInTheDocument();
+    });
+
+    const widget = shadow.querySelector<HTMLElement>(".cm-query-widget")!;
+    expect(within(widget).getByRole("region", { name: "Query results" })).toBeInTheDocument();
+    expect(widget.querySelector('section[data-slot="query-block"]')).not.toBeNull();
+    expect(widget.querySelector('[data-slot="checkbox"]')).not.toBeNull();
+    expect(widget.querySelector('a.wikilink[data-note-id="n-self"]')).not.toBeNull();
+    expect(widget.querySelector(".cm-query-task-item")).toBeNull();
+    expect(widget.querySelector(".cm-query-list")).toBeNull();
+    expect(widget.querySelector('[style]:not([data-slot="checkbox-input"])')).toBeNull();
+
+    // Unfolding into live mode switches the region label to "Query live preview".
+    act(() => {
+      view.dispatch({ selection: EditorSelection.cursor(doc.indexOf("type: tasks")) });
+    });
+    expect(
+      within(view.dom).getByRole("region", { name: "Query live preview" }),
+    ).toBeInTheDocument();
+  });
+
+  it("updates open-note results as the live draft changes in the editor and keeps focus on accepted toggle", async () => {
+    const text = "- [ ] A\n- [ ] B\n\n```query\ntype: tasks\n```\n";
+    const { queryClient, pkm, syncQueue } = setupEditorVault(
+      [{ id: "n-live", name: "Live.md", text }],
+      "n-live",
+    );
+
+    let live = text;
+    const onToggleTask = vi.fn((next: string) => {
+      live = next;
+    });
+
+    const { getByTestId } = render(
+      <QueryClientProvider client={queryClient}>
+        <SyncQueueContext.Provider value={syncQueue}>
+          <PkmContext.Provider value={pkm}>
+            <Editor
+              initialText={text}
+              text={text}
+              onChange={(next) => {
+                live = next;
+              }}
+              onToggleTask={onToggleTask}
+              getFullText={() => live}
+            />
+          </PkmContext.Provider>
+        </SyncQueueContext.Provider>
+      </QueryClientProvider>,
+    );
+
+    const { shadow, view } = getShadowView(getByTestId("editor-host"));
+    act(() => {
+      ensureSyntaxTree(view.state, view.state.doc.length, 5_000);
+    });
+
+    await waitFor(() => {
+      expect(within(view.dom).getByRole("checkbox", { name: "B" })).toBeInTheDocument();
+    });
+
+    // Focus B, click it -> immediately reads checked without waitFor and keeps shadow.activeElement.
+    const checkboxB = within(view.dom).getByRole("checkbox", { name: "B" });
+    checkboxB.focus();
+    expect(shadow.activeElement).toBe(checkboxB);
+    fireEvent.click(checkboxB);
+    expect(within(view.dom).getByRole("checkbox", { name: "B" })).toBeChecked();
+    expect(shadow.activeElement).toBe(checkboxB);
+
+    // Inserting a new task via view.dispatch updates the widget from the live draft.
+    act(() => {
+      view.dispatch({ changes: { from: 0, to: 0, insert: "- [ ] D\n" } });
+    });
+
+    await waitFor(() => {
+      expect(within(view.dom).getByRole("checkbox", { name: "D" })).toBeInTheDocument();
+    });
+  });
+
+  it("updates open-note results when Visual-mode frontmatter changes without a body edit", async () => {
+    const body = '# Plan\n\n```query\ntype: notes\nwhere: status = "done"\n```\n';
+    const draftText = `---\nstatus: draft\n---\n${body}`;
+    const doneText = `---\nstatus: done\n---\n${body}`;
+    const { queryClient, pkm, syncQueue } = setupEditorVault(
+      [{ id: "n-plan", name: "Plan.md", text: draftText }],
+      "n-plan",
+    );
+
+    let live = draftText;
+    const renderEditor = () => (
+      <QueryClientProvider client={queryClient}>
+        <SyncQueueContext.Provider value={syncQueue}>
+          <PkmContext.Provider value={pkm}>
+            <Editor
+              initialText={body}
+              text={body}
+              frontmatter={parseFrontmatter(live)}
+              onChange={vi.fn()}
+              onToggleTask={vi.fn()}
+              getFullText={() => live}
+            />
+          </PkmContext.Provider>
+        </SyncQueueContext.Provider>
+      </QueryClientProvider>
+    );
+
+    const { getByTestId, rerender } = render(renderEditor());
+    const { view } = getShadowView(getByTestId("editor-host"));
+    act(() => {
+      ensureSyntaxTree(view.state, view.state.doc.length, 5_000);
+    });
+
+    await waitFor(() => {
+      expect(within(view.dom).getByText("No matching notes.")).toBeInTheDocument();
+    });
+
+    live = doneText;
+    rerender(renderEditor());
+
+    await waitFor(() => {
+      expect(within(view.dom).getByRole("link", { name: "Plan" })).toBeInTheDocument();
+    });
+  });
+
+  it("shares one vault-documents subscription across widgets, skips scans when hidden, and keeps docs across fence round-trip", async () => {
+    readVaultDocumentsSpy.mockClear();
+    const doc = [
+      "# Dashboard",
+      "",
+      "```query",
+      "type: notes",
+      "```",
+      "",
+      "```query",
+      "type: tasks",
+      "```",
+      "",
+    ].join("\n");
+
+    const { queryClient, pkm, syncQueue } = setupEditorVault(
+      [{ id: "n-dash", name: "Dashboard.md", text: `${doc}\n- [ ] Ship\n` }],
+      "n-dash",
+    );
+
+    // Hidden editor with query blocks makes zero vault scans.
+    const hidden = render(
+      <QueryClientProvider client={queryClient}>
+        <SyncQueueContext.Provider value={syncQueue}>
+          <PkmContext.Provider value={pkm}>
+            <Editor initialText={doc} text={doc} active={false} onChange={vi.fn()} />
+          </PkmContext.Provider>
+        </SyncQueueContext.Provider>
+      </QueryClientProvider>,
+    );
+    const hiddenView = getShadowView(hidden.getByTestId("editor-host"));
+    act(() => {
+      ensureSyntaxTree(hiddenView.view.state, hiddenView.view.state.doc.length, 5_000);
+    });
+    expect(readVaultDocumentsSpy).toHaveBeenCalledTimes(0);
+    hidden.unmount();
+
+    // Two query blocks mount under one provider -> exactly one scan.
+    readVaultDocumentsSpy.mockClear();
+    const multi = render(
+      <QueryClientProvider client={queryClient}>
+        <SyncQueueContext.Provider value={syncQueue}>
+          <PkmContext.Provider value={pkm}>
+            <Editor initialText={doc} text={doc} onChange={vi.fn()} />
+          </PkmContext.Provider>
+        </SyncQueueContext.Provider>
+      </QueryClientProvider>,
+    );
+    const multiView = getShadowView(multi.getByTestId("editor-host"));
+    act(() => {
+      ensureSyntaxTree(multiView.view.state, multiView.view.state.doc.length, 5_000);
+    });
+    await waitFor(() => {
+      expect(
+        within(multiView.view.dom).getAllByRole("link", { name: "Dashboard" }).length,
+      ).toBeGreaterThanOrEqual(2);
+    });
+    expect(readVaultDocumentsSpy).toHaveBeenCalledTimes(1);
+    multi.unmount();
+
+    // Closing-fence round-trip: slot drops to 0 while hasQueryFence stays true, then restores with no re-scan or "Running query…" flash.
+    const singleDoc = "# One\n\n```query\ntype: notes\n```\n";
+    const {
+      queryClient: qc2,
+      pkm: pkm2,
+      syncQueue: sq2,
+    } = setupEditorVault([{ id: "n-one", name: "One.md", text: singleDoc }], "n-one");
+    readVaultDocumentsSpy.mockClear();
+    const rt = render(
+      <QueryClientProvider client={qc2}>
+        <SyncQueueContext.Provider value={sq2}>
+          <PkmContext.Provider value={pkm2}>
+            <Editor initialText={singleDoc} text={singleDoc} onChange={vi.fn()} />
+          </PkmContext.Provider>
+        </SyncQueueContext.Provider>
+      </QueryClientProvider>,
+    );
+    const { shadow, view } = getShadowView(rt.getByTestId("editor-host"));
+    act(() => {
+      ensureSyntaxTree(view.state, view.state.doc.length, 5_000);
+    });
+    await waitFor(() => {
+      expect(within(view.dom).getByRole("link", { name: "One" })).toBeInTheDocument();
+    });
+    expect(readVaultDocumentsSpy).toHaveBeenCalledTimes(1);
+
+    const closeStart = view.state.doc.toString().lastIndexOf("```");
+    act(() => {
+      view.dispatch({
+        changes: { from: closeStart, to: closeStart + 3, insert: "" },
+        selection: EditorSelection.cursor(0),
+      });
+      ensureSyntaxTree(view.state, view.state.doc.length, 5_000);
+    });
+    expect(shadow.querySelector(".cm-query-widget")).toBeNull();
+
+    act(() => {
+      view.dispatch({
+        changes: { from: closeStart, to: closeStart, insert: "```" },
+        selection: EditorSelection.cursor(0),
+      });
+      ensureSyntaxTree(view.state, view.state.doc.length, 5_000);
+    });
+    expect(within(view.dom).queryByText("Running query…")).toBeNull();
+    expect(within(view.dom).getByRole("link", { name: "One" })).toBeInTheDocument();
+    expect(readVaultDocumentsSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("handles links with and without PkmContext, count view, and collapsed alert vs live status error roles", async () => {
+    const notes = [
+      { id: "n-alpha", name: "Alpha.md", text: "---\nstatus: active\n---\n- [ ] One\n- [ ] Two\n" },
+      { id: "n-beta", name: "Beta.md", text: "- [ ] Three\n" },
+    ];
+    const { queryClient, pkm, openNote, syncQueue } = setupEditorVault(notes, "n-alpha");
+
+    const countAndList =
+      "Top\n\n```query\ntype: tasks\nlimit: 1\nview: count\n```\n\n```query\nview: list\n```\n";
+    const { getByTestId, unmount } = render(
+      <QueryClientProvider client={queryClient}>
+        <SyncQueueContext.Provider value={syncQueue}>
+          <PkmContext.Provider value={pkm}>
+            <Editor initialText={countAndList} text={countAndList} onChange={vi.fn()} />
+          </PkmContext.Provider>
+        </SyncQueueContext.Provider>
+      </QueryClientProvider>,
+    );
+    const { view } = getShadowView(getByTestId("editor-host"));
+    act(() => {
+      ensureSyntaxTree(view.state, view.state.doc.length, 5_000);
+    });
+
+    await waitFor(() => {
+      expect(within(view.dom).getByText("3")).toBeInTheDocument();
+      expect(within(view.dom).getByText("matching tasks")).toBeInTheDocument();
+    });
+
+    fireEvent.click(within(view.dom).getByRole("link", { name: "Alpha" }));
+    expect(openNote).toHaveBeenCalledWith("n-alpha");
+    unmount();
+
+    // Without PkmContext, note titles render as plain spans (not links).
+    const noPkm = render(
+      <QueryClientProvider client={queryClient}>
+        <Editor initialText={"Top\n\n```query\nview: list\n```\n"} onChange={vi.fn()} />
+      </QueryClientProvider>,
+    );
+    const noPkmView = getShadowView(noPkm.getByTestId("editor-host"));
+    act(() => {
+      ensureSyntaxTree(noPkmView.view.state, noPkmView.view.state.doc.length, 5_000);
+    });
+    await waitFor(() => {
+      expect(within(noPkmView.view.dom).getByText("Alpha")).toBeInTheDocument();
+    });
+    expect(within(noPkmView.view.dom).queryByRole("link", { name: "Alpha" })).toBeNull();
+    noPkm.unmount();
+
+    // Collapsed parse error uses role="alert"; live parse error uses role="status".
+    const invalid = "Top\n\n```query\nselect: *\n```\n";
+    const errRender = render(
+      <QueryClientProvider client={queryClient}>
+        <Editor initialText={invalid} onChange={vi.fn()} />
+      </QueryClientProvider>,
+    );
+    const errView = getShadowView(errRender.getByTestId("editor-host"));
+    act(() => {
+      ensureSyntaxTree(errView.view.state, errView.view.state.doc.length, 5_000);
+    });
+    expect(within(errView.view.dom).getByRole("alert")).toHaveTextContent('Unknown key "select"');
+
+    act(() => {
+      errView.view.dispatch({ selection: EditorSelection.cursor(invalid.indexOf("select")) });
+    });
+    expect(within(errView.view.dom).queryByRole("alert")).toBeNull();
+    expect(within(errView.view.dom).getByRole("status")).toHaveTextContent('Unknown key "select"');
+  });
+
+  it("reuses both the widget node and QueryBlock section across a vault-docs refresh", async () => {
+    const selfText = "# Self\n\n```query\ntype: tasks\n```\n";
+    const otherText = "- [ ] Initial task\n";
+    const { queryClient, pkm, syncQueue } = setupEditorVault(
+      [
+        { id: "n-self", name: "Self.md", text: selfText },
+        { id: "n-other", name: "Other.md", text: otherText },
+      ],
+      "n-self",
+    );
+
+    const { getByTestId } = render(
+      <QueryClientProvider client={queryClient}>
+        <SyncQueueContext.Provider value={syncQueue}>
+          <PkmContext.Provider value={pkm}>
+            <Editor
+              initialText={selfText}
+              text={selfText}
+              onChange={vi.fn()}
+              onToggleTask={vi.fn()}
+              getFullText={() => selfText}
+            />
+          </PkmContext.Provider>
+        </SyncQueueContext.Provider>
+      </QueryClientProvider>,
+    );
+
+    const { shadow, view } = getShadowView(getByTestId("editor-host"));
+    act(() => {
+      ensureSyntaxTree(view.state, view.state.doc.length, 5_000);
+    });
+
+    await waitFor(() => {
+      expect(within(view.dom).getByRole("checkbox", { name: "Initial task" })).toBeInTheDocument();
+    });
+
+    const widgetBefore = shadow.querySelector<HTMLElement>(".cm-query-widget");
+    const sectionBefore = shadow.querySelector<HTMLElement>('section[data-slot="query-block"]');
+    expect(widgetBefore).not.toBeNull();
+    expect(sectionBefore).not.toBeNull();
+
+    // Trigger a cache update on another note and wait for the debounced 300ms docs reload.
+    act(() => {
+      queryClient.setQueryData(["files", "n-other", "content"], {
+        text: "- [ ] Updated task\n",
+        revision: "rev-n-other-2",
+      });
+    });
+
+    await waitFor(() => {
+      expect(within(view.dom).getByRole("checkbox", { name: "Updated task" })).toBeInTheDocument();
+    });
+
+    expect(shadow.querySelector(".cm-query-widget")).toBe(widgetBefore);
+    expect(shadow.querySelector('section[data-slot="query-block"]')).toBe(sectionBefore);
   });
 });
