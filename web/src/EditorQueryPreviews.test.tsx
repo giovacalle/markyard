@@ -798,4 +798,67 @@ describe("Editor inline query previews integration", () => {
     // Immediately reflects the Preview toggle without waiting for LIVE_DRAFT_DEBOUNCE_MS.
     expect(within(view.dom).getByRole("checkbox", { name: "Toggle me" })).toBeChecked();
   });
+
+  it("keeps the same collapsed error alert DOM node across vault-docs refreshes and edits outside the block", async () => {
+    const selfText = "Top\n\n```query\nselect: *\n```\n\n```query\ntype: tasks\n```\n";
+    const otherText = "- [ ] Initial\n";
+    const { queryClient, pkm, syncQueue } = setupEditorVault(
+      [
+        { id: "n-self", name: "Self.md", text: selfText },
+        { id: "n-other", name: "Other.md", text: otherText },
+      ],
+      "n-self",
+    );
+
+    let live = selfText;
+    const { getByTestId } = render(
+      <QueryClientProvider client={queryClient}>
+        <SyncQueueContext.Provider value={syncQueue}>
+          <PkmContext.Provider value={pkm}>
+            <Editor
+              initialText={selfText}
+              text={selfText}
+              onChange={(next) => {
+                live = next;
+              }}
+              onToggleTask={vi.fn()}
+              getFullText={() => live}
+            />
+          </PkmContext.Provider>
+        </SyncQueueContext.Provider>
+      </QueryClientProvider>,
+    );
+
+    const { view } = getShadowView(getByTestId("editor-host"));
+    act(() => {
+      ensureSyntaxTree(view.state, view.state.doc.length, 5_000);
+    });
+
+    await waitFor(() => {
+      expect(within(view.dom).getByRole("checkbox", { name: "Initial" })).toBeInTheDocument();
+    });
+    const alertBefore = within(view.dom).getByRole("alert");
+    expect(alertBefore).toHaveTextContent('Unknown key "select"');
+
+    // Unrelated vault-docs refresh (300ms reload) must keep the exact same alert DOM node.
+    act(() => {
+      queryClient.setQueryData(["files", "n-other", "content"], {
+        text: "- [ ] Changed\n",
+        revision: "rev-n-other-2",
+      });
+    });
+    await waitFor(() => {
+      expect(within(view.dom).getByRole("checkbox", { name: "Changed" })).toBeInTheDocument();
+    });
+    expect(within(view.dom).getByRole("alert")).toBe(alertBefore);
+
+    // Typing outside the folded error block (and its live-draft refresh) also keeps the same alert node.
+    act(() => {
+      view.dispatch({ changes: { from: 0, to: 0, insert: "- [ ] Typed\n" } });
+    });
+    await waitFor(() => {
+      expect(within(view.dom).getByRole("checkbox", { name: "Typed" })).toBeInTheDocument();
+    });
+    expect(within(view.dom).getByRole("alert")).toBe(alertBefore);
+  });
 });

@@ -1,9 +1,11 @@
+import { ensureSyntaxTree } from "@codemirror/language";
 import { EditorView } from "@codemirror/view";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { setupServer } from "msw/node";
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vite-plus/test";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vite-plus/test";
 import { App } from "./App";
+import { LIVE_DRAFT_DEBOUNCE_MS } from "./components/Editor";
 import { clearLocalCache, writeCachedFile } from "./localCache";
 
 const server = setupServer();
@@ -13,6 +15,7 @@ beforeAll(() => {
 });
 
 afterEach(async () => {
+  vi.useRealTimers();
   server.resetHandlers();
   history.replaceState(null, "", "/");
   window.localStorage.clear();
@@ -548,5 +551,42 @@ describe("Direction A frontmatter editing (PropertiesEditor + DocumentView)", ()
     fireEvent.click(yamlBtn);
 
     expect(getEditorView(editor).state.doc.toString()).toContain("status: final");
+  });
+
+  it("keeps typed frontmatter YAML in the active editor buffer when toggling a task from an inline query widget", async () => {
+    const initial = "- [ ] A\n\n```query\ntype: tasks\n```\n";
+    const saved: string[] = [];
+    setupNote(initial, (body) => saved.push(body));
+    render(<App />);
+
+    const preview = await screen.findByRole("region", { name: "Preview" });
+    await within(preview).findByRole("region", { name: "Query results" });
+    fireEvent.click(within(preview).getByTestId("editor-canvas"));
+    const editor = await screen.findByRole("region", { name: "Editor" });
+    const view = getEditorView(editor);
+
+    act(() => {
+      ensureSyntaxTree(view.state, view.state.doc.length, 5_000);
+    });
+    await waitFor(() => {
+      expect(within(view.dom).getByRole("checkbox", { name: "A" })).toBeInTheDocument();
+    });
+
+    // Type frontmatter YAML at body start while in Visual mode and advance the live-draft debounce
+    // so the inline query widget holds the post-YAML task offsets before the toggle click.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    act(() => {
+      view.dispatch({ changes: { from: 0, to: 0, insert: "---\ntitle: x\n---\n" } });
+    });
+    act(() => {
+      vi.advanceTimersByTime(LIVE_DRAFT_DEBOUNCE_MS);
+    });
+    vi.useRealTimers();
+
+    fireEvent.click(within(view.dom).getByRole("checkbox", { name: "A" }));
+
+    const expected = "---\ntitle: x\n---\n- [x] A\n\n```query\ntype: tasks\n```\n";
+    await waitFor(() => expect(saved).toEqual([expected]));
+    expect(view.state.doc.toString()).toBe(expected);
   });
 });

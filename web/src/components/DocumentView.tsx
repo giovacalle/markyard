@@ -1118,22 +1118,34 @@ function DocumentSession({
 
   const isPreviewRef = useRef(isPreview);
   isPreviewRef.current = isPreview;
+  const editorActiveRef = useRef(editorActive);
+  editorActiveRef.current = editorActive;
   const getFullText = useCallback(() => draftRef.current, []);
 
-  // Preview checkbox toggles (and restored versions) are complete edits: store and sync them
-  // right away, like a save. When toggled while editing (from an inline query preview), record an
-  // undoable editor edit so Cmd/Ctrl+Z reverts it cleanly.
-  const handleToggleTask = useCallback(
-    (nextText: string) => {
+  // Whole-note edits (task toggles, restored revisions, drawer edits): update the draft, sync the
+  // kept-alive editor, and enqueue a save right away. While the editor is active in Visual mode,
+  // keep the pinned `frontmatterRawRef` whenever `nextText` still starts with it so YAML or a
+  // leading newline typed into the body does not get stripped out from under CM6.
+  const applyWholeNoteEdit = useCallback(
+    (nextText: string, undoable: boolean) => {
       setDraft(nextText);
       draftRef.current = nextText;
-      const nextSplit = splitFrontmatter(nextText);
-      frontmatterRawRef.current = nextSplit.frontmatterRaw;
-      const nextEditorText = rawYamlModeRef.current ? nextText : nextSplit.body;
-      if (isPreviewRef.current) {
-        editorHandleRef.current?.syncText(nextEditorText);
+      let nextEditorText: string;
+      if (
+        editorActiveRef.current &&
+        !rawYamlModeRef.current &&
+        nextText.startsWith(frontmatterRawRef.current)
+      ) {
+        nextEditorText = nextText.slice(frontmatterRawRef.current.length);
       } else {
+        const nextSplit = splitFrontmatter(nextText);
+        frontmatterRawRef.current = nextSplit.frontmatterRaw;
+        nextEditorText = rawYamlModeRef.current ? nextText : nextSplit.body;
+      }
+      if (undoable) {
         editorHandleRef.current?.replaceText(nextEditorText);
+      } else {
+        editorHandleRef.current?.syncText(nextEditorText);
       }
       if (blocksNewSaveRef.current || reloadingRef.current) {
         return;
@@ -1143,6 +1155,13 @@ function DocumentSession({
       syncQueue.enqueueSave(fileId, nextText, baseRevisionRef.current, baseTextRef.current);
     },
     [fileId, syncQueue],
+  );
+
+  // Preview checkbox toggles sync non-destructively; toggles while editing (from an inline query
+  // preview) record an undoable editor edit so Cmd/Ctrl+Z reverts them cleanly.
+  const handleToggleTask = useCallback(
+    (nextText: string) => applyWholeNoteEdit(nextText, !isPreviewRef.current),
+    [applyWholeNoteEdit],
   );
 
   const statusText =
@@ -1203,10 +1222,8 @@ function DocumentSession({
   // note's current Drive tag, so a concurrent change on Drive still surfaces as a conflict.
   const handleRestore = (text: string, revision: Revision) => {
     setHistoryOpen(false);
-    const nextSplit = splitFrontmatter(text);
-    frontmatterRawRef.current = nextSplit.frontmatterRaw;
-    editorHandleRef.current?.replaceText(rawYamlModeRef.current ? text : nextSplit.body);
-    handleToggleTask(text);
+    frontmatterRawRef.current = splitFrontmatter(text).frontmatterRaw;
+    applyWholeNoteEdit(text, true);
     toaster(`Restored revision from ${formatRevisionDate(revision.modifiedTime)}`, {
       id: RESTORED_TOAST_ID,
     });
@@ -1217,10 +1234,8 @@ function DocumentSession({
     if (text === draftRef.current) {
       return;
     }
-    const nextSplit = splitFrontmatter(text);
-    frontmatterRawRef.current = nextSplit.frontmatterRaw;
-    editorHandleRef.current?.replaceText(rawYamlModeRef.current ? text : nextSplit.body);
-    handleToggleTask(text);
+    frontmatterRawRef.current = splitFrontmatter(text).frontmatterRaw;
+    applyWholeNoteEdit(text, true);
   };
   const handleEditorChange = useCallback(
     (nextEditorText: string) => {

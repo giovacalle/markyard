@@ -1,11 +1,28 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import type { DriveNode } from "./api";
 import { Preview } from "./components/Preview";
 import { type PkmApi, PkmContext } from "./pkm";
 import { SyncQueue, SyncQueueContext } from "./syncQueue";
 import { childrenKey } from "./treeCache";
+
+const readVaultDocumentsSpy = vi.hoisted(() => vi.fn());
+vi.mock("./vaultDocuments", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./vaultDocuments")>();
+  return {
+    ...actual,
+    readVaultDocuments: (...args: Parameters<typeof actual.readVaultDocuments>) => {
+      const result = actual.readVaultDocuments(...args);
+      readVaultDocumentsSpy(result);
+      return result;
+    },
+  };
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 interface FixtureNote {
   id: string;
@@ -368,6 +385,63 @@ describe("QueryBlock via Preview", () => {
     expect(
       within(regions[1]).getByRole("checkbox", { name: "Ship release @2026-12-01" }),
     ).toBeChecked();
+  });
+
+  it("prunes stale display overrides once docs advance so a remote revert shows the reverted state", async () => {
+    readVaultDocumentsSpy.mockClear();
+    const md = "```query\ntype: tasks\nfrom: Projects\n```\n";
+    const onToggleTask = vi.fn();
+    const { queryClient, enqueueSave } = renderWithVault(md, { onToggleTask });
+    enqueueSave.mockImplementation((fileId, text, revision) => {
+      queryClient.setQueryData(["files", fileId, "content"], { text, revision });
+    });
+
+    const queryRegion = await screen.findByRole("region", { name: "Query results" });
+    const ship = await within(queryRegion).findByRole("checkbox", {
+      name: "Ship release @2026-12-01",
+    });
+    expect(ship).not.toBeChecked();
+    expect(readVaultDocumentsSpy).toHaveBeenCalledTimes(1);
+
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    fireEvent.click(ship);
+    expect(enqueueSave).toHaveBeenCalledTimes(1);
+
+    // Wait for the debounced docs reload that picks up the toggled text (evicting the override).
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+    expect(readVaultDocumentsSpy).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      await readVaultDocumentsSpy.mock.calls[1][0];
+    });
+    expect(
+      within(screen.getByRole("region", { name: "Query results" })).getByRole("checkbox", {
+        name: "Ship release @2026-12-01",
+      }),
+    ).toBeChecked();
+
+    // Simulate a remote revert restoring n-alpha to its exact original text.
+    act(() => {
+      queryClient.setQueryData(["files", "n-alpha", "content"], {
+        text: FIXTURE_NOTES[0].text!,
+        revision: "rev-n-alpha-reverted",
+      });
+    });
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+    expect(readVaultDocumentsSpy).toHaveBeenCalledTimes(3);
+    await act(async () => {
+      await readVaultDocumentsSpy.mock.calls[2][0];
+    });
+    vi.useRealTimers();
+
+    expect(
+      within(screen.getByRole("region", { name: "Query results" })).getByRole("checkbox", {
+        name: "Ship release @2026-12-01",
+      }),
+    ).not.toBeChecked();
   });
 
   it("renders a syntax error alert with raw query source without needing vault providers", () => {
