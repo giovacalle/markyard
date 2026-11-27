@@ -6,17 +6,21 @@ import { MarkdownLink, WikilinkElement, WikilinkSourceContext } from "./Markdown
 
 const REMARK_PLUGINS = [remarkGfm, remarkWikilinks];
 
-/** Phrasing elements kept; anything else (paragraphs, headings, lists, images) is unwrapped. */
-const INLINE_ELEMENTS = ["strong", "em", "del", "code", "a", "br", "wikilink"];
+/** Phrasing elements kept; anything else (the task list wrapper, its checkbox) is unwrapped. */
+const INLINE_ELEMENTS = ["strong", "em", "del", "code", "a", "br", "img", "wikilink"];
 
 const INLINE_COMPONENTS = {
   wikilink: WikilinkElement,
   a: MarkdownLink,
+  img: ({ alt }) => alt ?? null,
 } as Components;
 
+/** Text that could hold inline Markdown; anything else renders as-is without parsing. */
+const MARKUP = /[*_`~[\]<>\\!&]|:\/\/|www\.|\w@/;
+
 /**
- * One line of note text (e.g. a task) rendered as inline Markdown: emphasis, code, links and
- * `[[wikilinks]]` resolved from `sourceId`'s note. Raw HTML is dropped, as in Preview.
+ * A task's text rendered as inline Markdown, as Preview shows it after the checkbox: emphasis,
+ * code, links and `[[wikilinks]]` resolved from `sourceId`'s note. Raw HTML is dropped.
  */
 export const InlineMarkdown = memo(function InlineMarkdown({
   text,
@@ -25,6 +29,10 @@ export const InlineMarkdown = memo(function InlineMarkdown({
   text: string;
   sourceId: string;
 }) {
+  if (!MARKUP.test(text)) {
+    return text;
+  }
+  // Parsed as a task item so a leading `2.`, `-`, `>` or `#` stays text, as in Preview.
   return (
     <WikilinkSourceContext.Provider value={sourceId}>
       <Markdown
@@ -34,7 +42,7 @@ export const InlineMarkdown = memo(function InlineMarkdown({
         unwrapDisallowed
         skipHtml
       >
-        {text}
+        {`- [ ] ${text}`}
       </Markdown>
     </WikilinkSourceContext.Provider>
   );

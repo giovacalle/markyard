@@ -39,7 +39,7 @@ describe("TasksPanel", () => {
         .map((g) =>
           within(g)
             .getAllByRole("checkbox")
-            .map((c) => c.getAttribute("aria-label")),
+            .map((c) => document.getElementById(c.getAttribute("aria-labelledby")!)?.textContent),
         );
     expect(groups()).toEqual([["milk #shop"], ["ship #release @2026-12-01"]]);
     expect(screen.getByText("Pin vault offline to include every note.")).toBeInTheDocument();
@@ -108,6 +108,24 @@ describe("TasksPanel", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: /Groceries/ }));
     expect(onOpenNote).toHaveBeenCalledWith("h");
+  });
+
+  it("renders inline markdown in task text with a plain-text checkbox name", () => {
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <TasksPanel
+          docs={[doc("m", "Todo.md", [], "- [ ] **Close** the `account`\n")]}
+          vaultPinned={false}
+          onToggle={vi.fn()}
+          onOpenNote={vi.fn()}
+        />
+      </QueryClientProvider>,
+    );
+    const checkbox = screen.getByRole("checkbox", { name: "Close the account" });
+    const item = checkbox.closest("li")!;
+    expect(item.querySelector("strong")).toHaveTextContent("Close");
+    expect(item.querySelector("code")).toHaveTextContent("account");
+    expect(item.textContent).not.toMatch(/[*`]/);
   });
 
   it("supports keyboard arrows on the status segmented control and filters root-only notes", async () => {

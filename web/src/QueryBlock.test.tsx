@@ -484,7 +484,13 @@ describe("QueryBlock via Preview", () => {
         folderId: "root",
         path: [],
         modifiedTime: "2026-11-27T10:00:00Z",
-        text: "- [ ] **Close account** with *care*, `rm -rf`, [[Target]] and <b>raw</b>\n",
+        text: [
+          "- [ ] **Close account** with *care*, `rm -rf`, [[Target]] and <b>raw</b>",
+          "- [ ] 2. Call Bob",
+          "- [ ] > quoted",
+          "- [ ] Check ![diagram](x.png)",
+          "",
+        ].join("\n"),
       },
       {
         id: "n-target",
@@ -537,6 +543,15 @@ describe("QueryBlock via Preview", () => {
       const text = container.querySelector<HTMLElement>(".query-block-task-text");
       expect(text).not.toBeNull();
       await expectInlineMarkup(text!, openNote);
+    });
+
+    it("keeps block markers literal and image alt text, as Preview shows them after a checkbox", async () => {
+      renderMarkup("tasks");
+      const region = await screen.findByRole("region", { name: "Query results" });
+      for (const name of ["2. Call Bob", "> quoted", "Check diagram"]) {
+        expect(await within(region).findByRole("checkbox", { name })).toBeInTheDocument();
+      }
+      expect(region.querySelector("img, ol, ul ul, blockquote")).toBeNull();
     });
 
     it("renders inline markdown in the task list view", async () => {
