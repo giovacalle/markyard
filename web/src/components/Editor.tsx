@@ -27,6 +27,7 @@ import { ATTACHMENT_TYPES, uploadAttachment } from "../api";
 import { adoptUserSheet } from "../customCss";
 import type { Frontmatter } from "../frontmatter";
 import { getSettings } from "../settings";
+import { matchCodeLanguage } from "../editorCodeLanguages";
 import { type CompletionSources, pkmCompletions } from "../editorCompletion";
 import { focusMode, typewriterMode } from "../editorModes";
 import { imagePreviews } from "../imagePreviews";
@@ -291,6 +292,33 @@ const MARKDOWN_HIGHLIGHT = HighlightStyle.define([
     tag: [t.meta, t.separator, t.punctuation, t.squareBracket, t.brace],
     color: "var(--cm-yaml-fence, var(--cm-muted, #737373))",
   },
+]);
+
+const CODE_HIGHLIGHT = HighlightStyle.define([
+  { tag: [t.keyword, t.modifier], color: "var(--cm-code-keyword, light-dark(#6d28d9, #c4b5fd))" },
+  {
+    tag: [t.typeName, t.className, t.tagName, t.namespace, t.macroName, t.standard(t.variableName)],
+    color: "var(--cm-code-type, light-dark(#be123c, #fda4af))",
+  },
+  {
+    tag: [t.function(t.variableName), t.function(t.propertyName), t.definition(t.variableName)],
+    color: "var(--cm-code-function, var(--cm-link, #2563eb))",
+  },
+  {
+    tag: [t.attributeName, t.special(t.variableName)],
+    color: "var(--cm-yaml-key, #0369a1)",
+  },
+  {
+    tag: [t.regexp, t.special(t.string), t.inserted],
+    color: "var(--cm-yaml-string, #047857)",
+  },
+  { tag: t.self, color: "var(--cm-yaml-atom, #b45309)" },
+  {
+    tag: [t.operator, t.derefOperator, t.definitionOperator, t.typeOperator, t.controlOperator],
+    color: "var(--cm-quote, #525252)",
+  },
+  { tag: [t.paren, t.angleBracket], color: "var(--cm-yaml-fence, var(--cm-muted, #737373))" },
+  { tag: [t.deleted, t.invalid], color: "var(--cm-code-deleted, light-dark(#b91c1c, #fca5a5))" },
 ]);
 
 const YAML_HIGHLIGHT = HighlightStyle.define(
@@ -589,8 +617,11 @@ export function Editor({
       doc: initialTextRef.current,
       extensions: [
         EDITOR_THEME,
-        yamlFrontmatter({ content: markdown({ base: markdownLanguage }) }),
+        yamlFrontmatter({
+          content: markdown({ base: markdownLanguage, codeLanguages: matchCodeLanguage }),
+        }),
         syntaxHighlighting(MARKDOWN_HIGHLIGHT),
+        syntaxHighlighting(CODE_HIGHLIGHT),
         syntaxHighlighting(YAML_HIGHLIGHT),
         history(),
         imagePlaceholders,
