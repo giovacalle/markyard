@@ -2,7 +2,7 @@
 
 **Your Markdown notes, stored in your Google Drive — fast, offline-first, and self-hosted on a single Cloudflare Worker.**
 
-[Website](https://markyard.giova.dev) · [Features](#features) · [Quick Start](#quick-start-local-development) · [Self-Hosting](#self-hosting-on-cloudflare-workers) · [License](#license)
+[Website](https://markyard.giova.dev) · [Docs](https://markyard.giova.dev/docs) · [Features](#features) · [Quick Start](#quick-start-local-development) · [Self-Hosting](#self-hosting-on-cloudflare-workers) · [License](#license)
 
 Your notes stay plain `.md` files in your own Google Drive folder—editable with Google Drive for desktop, Obsidian, or any editor, with zero vendor lock-in. **Markyard** adds a clean web & mobile PWA on top with conflict-safe saves, offline editing, PKM tools (`[[wikilinks]]`, backlinks, tasks, templates), inline image attachments, Drive version history, rich link previews, and optional Cloudflare D1 state sync.
 
