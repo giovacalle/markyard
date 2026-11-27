@@ -15,12 +15,10 @@ import Markdown, { type Components } from "react-markdown";
 import remarkFrontmatter from "remark-frontmatter";
 import remarkGfm from "remark-gfm";
 import { normalizeFrontmatterFence } from "../frontmatter";
-import { usePkm } from "../pkm";
 import { isExternalHref, safeImageSrc } from "../safeUrl";
 import { CALLOUT_LABELS, type CalloutType, remarkCallouts } from "../remarkCallouts";
 import { remarkWikilinks } from "../remarkWikilinks";
 import { toggleTaskAt } from "../taskToggle";
-import { resolveWikilink } from "../wikilinks";
 import {
   AlertTriangleIcon,
   CheckIcon,
@@ -30,7 +28,8 @@ import {
   MessageAlertIcon,
   OctagonAlertIcon,
 } from "./icons";
-import { BareUrlBookmark, ExternalLink } from "./LinkPreview";
+import { BareUrlBookmark } from "./LinkPreview";
+import { MarkdownLink, WikilinkElement } from "./MarkdownLinks";
 import { hasQueryFence } from "../queryFormat";
 import { QueryBlock, QueryVaultDocumentsProvider } from "./QueryBlock";
 
@@ -163,60 +162,6 @@ function TaskInput({
         }
       }}
     />
-  );
-}
-
-/** A `[[wikilink]]`: opens the note it resolves to, or creates it when it does not exist yet. */
-function Wikilink({
-  target,
-  heading,
-  children,
-}: {
-  target?: string;
-  heading?: string;
-  children?: ReactNode;
-}) {
-  const pkm = usePkm();
-  if (pkm === null) {
-    return <span className="wikilink">{children}</span>;
-  }
-  const linkHeading = heading || undefined;
-  const current = pkm.notes.find((note) => note.id === pkm.currentFileId);
-  const resolved = target ? resolveWikilink(target, pkm.notes, current?.path) : (current ?? null);
-  if (resolved === null) {
-    const stem = (target ?? "").split("/").at(-1)?.trim() ?? "";
-    return (
-      <button
-        type="button"
-        className="wikilink wikilink-unresolved"
-        title={`Create note “${stem}”`}
-        onClick={(event) => {
-          event.stopPropagation();
-          if (stem.length > 0) {
-            pkm.createNote(stem);
-          }
-        }}
-      >
-        {children}
-      </button>
-    );
-  }
-  return (
-    <a
-      href={`/?file=${encodeURIComponent(resolved.id)}`}
-      className="wikilink"
-      data-note-id={resolved.id}
-      onClick={(event) => {
-        event.stopPropagation();
-        if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) {
-          return;
-        }
-        event.preventDefault();
-        pkm.openNote(resolved.id, { heading: linkHeading });
-      }}
-    >
-      {children}
-    </a>
   );
 }
 
@@ -408,15 +353,7 @@ function codeLanguage(code: HastNode): string | undefined {
 }
 
 const MARKDOWN_COMPONENTS = {
-  wikilink: ({
-    node: _node,
-    ...props
-  }: {
-    node?: unknown;
-    target?: string;
-    heading?: string;
-    children?: ReactNode;
-  }) => <Wikilink {...props} />,
+  wikilink: WikilinkElement,
   h1: ({ node: _node, ...props }) => <h3 {...props} />,
   h2: ({ node: _node, ...props }) => <h4 {...props} />,
   h3: ({ node: _node, ...props }) => <h5 {...props} />,
@@ -442,16 +379,7 @@ const MARKDOWN_COMPONENTS = {
     );
   },
   input: TaskInput,
-  a: ({ node: _node, href, children, ...props }) =>
-    isExternalHref(href) ? (
-      <ExternalLink {...props} href={href}>
-        {children}
-      </ExternalLink>
-    ) : (
-      <a {...props} href={href}>
-        {children}
-      </a>
-    ),
+  a: MarkdownLink,
   p: ({ node, children, ...props }) => {
     const url = bareUrlOf(node as HastNode | undefined);
     const paragraph = <p {...props}>{children}</p>;

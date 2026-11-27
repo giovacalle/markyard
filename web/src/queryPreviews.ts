@@ -674,6 +674,27 @@ const QUERY_PREVIEW_THEME = EditorView.theme({
     outline: "2px solid var(--markyard-accent, var(--cm-link, #2563eb))",
     outlineOffset: "2px",
   },
+  ".cm-query-widget .query-block .wikilink-unresolved": {
+    padding: "0",
+    backgroundColor: "transparent",
+    borderBottom: "1px dashed var(--cm-quote, #525252)",
+    borderRadius: "0",
+    color: "var(--cm-quote, #525252)",
+    font: "inherit",
+  },
+  ".cm-query-widget .query-block a:not(.wikilink)": {
+    color: "var(--markyard-accent, var(--cm-link, #2563eb))",
+    textDecoration: "underline",
+    textUnderlineOffset: "2px",
+  },
+  ".cm-query-widget .query-block code": {
+    borderRadius: "0.25rem",
+    backgroundColor: "var(--cm-code-bg, #f5f5f5)",
+    padding: "0.125rem 0.25rem",
+    fontFamily: "var(--markyard-font-mono, var(--default-mono-font-family, monospace))",
+    fontSize: "0.85em",
+    color: "var(--cm-code-fg, #171717)",
+  },
   ".cm-query-widget .query-block .query-block-table-wrap": {
     width: "100%",
     overflowX: "auto",
