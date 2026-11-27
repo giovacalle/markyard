@@ -368,11 +368,11 @@ describe("Editor inline query previews integration", () => {
     });
 
     const table = await waitFor(() => within(view.dom).getByRole("table"));
-    expect(within(table).getAllByRole("columnheader").map((th) => th.textContent)).toEqual([
-      "Project",
-      "State",
-      "Labels",
-    ]);
+    expect(
+      within(table)
+        .getAllByRole("columnheader")
+        .map((th) => th.textContent),
+    ).toEqual(["Project", "State", "Labels"]);
     const [, row] = within(table).getAllByRole("row");
     expect(within(row).getByRole("link", { name: "Alpha" })).toBeInTheDocument();
     expect(within(row).getByText("active")).toBeInTheDocument();

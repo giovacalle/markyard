@@ -226,7 +226,7 @@ describe("parseQuery", () => {
       ok: false,
       error: /Invalid table column/i,
     });
-    expect(parseQuery('view: table("title" as Label)')).toMatchObject({
+    expect(parseQuery('view: table("123bad" as Label)')).toMatchObject({
       ok: false,
       error: /Invalid table column/i,
     });
@@ -286,6 +286,22 @@ describe("parseQuery", () => {
     });
     expect(parseQuery("view: kanban")).toMatchObject({ ok: false, error: /Invalid view/i });
     expect(parseQuery("view: table()")).toMatchObject({ ok: false, error: /at least one column/i });
+    // Quoted field names keep working, with or without an alias.
+    expect(parseQuery(`view: table("title", 'status' as State)`)).toMatchObject({
+      ok: true,
+      query: {
+        view: {
+          kind: "table",
+          columns: [
+            { field: "title", label: "title" },
+            { field: "status", label: "State" },
+          ],
+        },
+      },
+    });
+    // No arbitrary column cap.
+    const many = Array.from({ length: 100 }, (_, n) => `c${n}`).join(", ");
+    expect(parseQuery(`view: table(${many})`).ok).toBe(true);
     expect(parseQuery("view: table(title, )")).toMatchObject({
       ok: false,
       error: /empty column/i,

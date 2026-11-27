@@ -91,7 +91,7 @@ Each line is a `key: value` pair (keys are case-insensitive; blank lines and `#`
 | `where` | Yes | All items | Boolean filter expression (see below) |
 | `sort` | Yes | `modified desc` (`notes`) or `due asc` (`tasks`) | `<field> [asc\|desc]`; missing values always sort last |
 | `limit` | Yes | Unlimited | Positive integer capping the number of displayed results |
-| `view` | Yes | `list` (`notes`) or `tasks` (`tasks`) | Output format: `list`, `table(col1, col2, ...)`, `tasks`, or `count` |
+| `view` | Yes | `list` (`notes`) or `tasks` (`tasks`) | Output format: `list`, `table(col1 [as label], col2, ...)`, `tasks`, or `count` |
 
 ### `where` filter syntax
 
@@ -130,7 +130,7 @@ Expressions support operator precedence **`OR` < `AND` < `NOT` < `(...)`** (keyw
 ### Views
 
 - **`list`**: Compact list of clickable note links with folder subtitles (or task items when `type: tasks`).
-- **`table(col1, col2, ...)`**: Responsive table with the requested columns. A `title` column renders as clickable note links, `tags` renders as pills, `modified` formats as `YYYY-MM-DD`, and missing values display as `—`. Any column can be given a custom display header with case-insensitive `as` using an unquoted word or a single/double-quoted label (commas and spaces are allowed inside quotes)—for example, `view: table(title as "Project", status as Status, modified as "Updated")`. Special cell formatting continues to follow the underlying field name.
+- **`table(col1, col2, ...)`**: Responsive table with the requested columns. A `title` column renders as clickable note links, `tags` renders as pills, `modified` formats as `YYYY-MM-DD`, and missing values display as `—`. Any column can be given a custom display header with case-insensitive `as` using an unquoted word or a single/double-quoted label (commas, spaces, and parentheses are allowed inside quotes; quotes escape like `where` strings: `\"` or `''`)—for example, `view: table(title as "Project", status as Status, modified as "Updated")`. Special cell formatting continues to follow the underlying field name.
 - **`tasks`** (requires `type: tasks`): Interactive checklist with optional `@YYYY-MM-DD` due badges and source note links. Checking or unchecking a task updates the view immediately and saves the change back to the source note through the sync queue (and records an undoable edit when toggling a task inside the active note in Edit mode). If the note changed since the results were drawn, the click writes nothing and the results refresh.
 - **`count`**: Clean numeric summary card showing how many notes or tasks match the query.
 
