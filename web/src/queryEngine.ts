@@ -5,9 +5,14 @@ import { maskInlineCode, noteStem, sourceLines } from "./wikilinks";
 
 export type QueryType = "notes" | "tasks";
 
+export interface TableColumn {
+  field: string;
+  label: string;
+}
+
 export type QueryView =
   | { kind: "list" }
-  | { kind: "table"; columns: string[] }
+  | { kind: "table"; columns: TableColumn[] }
   | { kind: "tasks" }
   | { kind: "count" };
 
@@ -91,6 +96,7 @@ const RESERVED_WORDS = new Set(["and", "or", "not", "contains"]);
 
 const MAX_TOKENS = 512;
 const MAX_EXPR_DEPTH = 32;
+const MAX_TABLE_COLUMNS = 64;
 
 function stripQuotes(raw: string): string {
   const trimmed = raw.trim();
@@ -419,6 +425,253 @@ export function parseWhere(input: string): ParseWhereResult {
   return result;
 }
 
+function readQuotedAlias(
+  input: string,
+  start: number,
+): { ok: true; value: string; nextIndex: number } | { ok: false; error: string } {
+  const quote = input[start];
+  let i = start + 1;
+  let out = "";
+  while (i < input.length) {
+    const ch = input[i];
+    if (quote === '"') {
+      if (ch === "\\" && i + 1 < input.length) {
+        const next = input[i + 1];
+        if (next === '"' || next === "\\") {
+          out += next;
+          i += 2;
+          continue;
+        }
+      }
+      if (ch === '"') {
+        return { ok: true, value: out, nextIndex: i + 1 };
+      }
+    } else {
+      if (ch === "'" && input[i + 1] === "'") {
+        out += "'";
+        i += 2;
+        continue;
+      }
+      if (ch === "\\" && i + 1 < input.length) {
+        const next = input[i + 1];
+        if (next === "'" || next === "\\") {
+          out += next;
+          i += 2;
+          continue;
+        }
+      }
+      if (ch === "'") {
+        return { ok: true, value: out, nextIndex: i + 1 };
+      }
+    }
+    out += ch;
+    i += 1;
+  }
+  return { ok: false, error: "Invalid view: unclosed quote in table(...)." };
+}
+
+function parseTableView(
+  input: string,
+): { ok: true; view: QueryView } | { ok: false; error: string } {
+  const columns: TableColumn[] = [];
+  let i = 1; // skip opening "("
+
+  const skipWs = () => {
+    while (i < input.length && /\s/.test(input[i])) {
+      i += 1;
+    }
+  };
+
+  skipWs();
+  if (i < input.length && input[i] === ")") {
+    i += 1;
+    skipWs();
+    if (i < input.length) {
+      return {
+        ok: false,
+        error: `Invalid view: unexpected trailing content "${input.slice(i)}" after table().`,
+      };
+    }
+    return { ok: false, error: 'Invalid view: "table()" requires at least one column.' };
+  }
+
+  while (i < input.length) {
+    if (columns.length >= MAX_TABLE_COLUMNS) {
+      return {
+        ok: false,
+        error: `Invalid view: table(...) supports at most ${MAX_TABLE_COLUMNS} columns.`,
+      };
+    }
+
+    skipWs();
+    if (i >= input.length) {
+      return { ok: false, error: 'Invalid view: missing closing ")" in table(...).' };
+    }
+    if (input[i] === "," || input[i] === ")") {
+      return { ok: false, error: "Invalid view: empty column name in table(...)." };
+    }
+    if (input[i] === '"' || input[i] === "'") {
+      const quoted = readQuotedAlias(input, i);
+      if (!quoted.ok) {
+        return quoted;
+      }
+      return {
+        ok: false,
+        error: `Invalid table column "${quoted.value}". Field names must be unquoted identifiers.`,
+      };
+    }
+    if (input[i] === "(") {
+      return { ok: false, error: 'Invalid view: unexpected "(" in table(...).' };
+    }
+
+    const fieldStart = i;
+    while (i < input.length && !/[\s,()"']/.test(input[i])) {
+      i += 1;
+    }
+    const field = input.slice(fieldStart, i);
+    if (!IDENTIFIER_RE.test(field)) {
+      return { ok: false, error: `Invalid table column "${field}".` };
+    }
+
+    let label = field;
+    const afterFieldPos = i;
+    skipWs();
+
+    if (i >= input.length) {
+      return { ok: false, error: 'Invalid view: missing closing ")" in table(...).' };
+    }
+
+    const ch = input[i];
+    if (ch !== "," && ch !== ")") {
+      if (i === afterFieldPos) {
+        if (ch === '"' || ch === "'") {
+          const quoted = readQuotedAlias(input, i);
+          if (!quoted.ok) return quoted;
+        }
+        return {
+          ok: false,
+          error: `Invalid view: unexpected "${ch}" after column "${field}" in table(...).`,
+        };
+      }
+      if (ch === '"' || ch === "'") {
+        const quoted = readQuotedAlias(input, i);
+        if (!quoted.ok) return quoted;
+        return {
+          ok: false,
+          error: `Invalid view: expected "as" before alias "${quoted.value}" for column "${field}".`,
+        };
+      }
+      if (ch === "(") {
+        return { ok: false, error: `Invalid view: unexpected "(" after column "${field}".` };
+      }
+
+      const kwStart = i;
+      while (i < input.length && !/[\s,()"']/.test(input[i])) {
+        i += 1;
+      }
+      const kw = input.slice(kwStart, i);
+      if (kw.toLowerCase() !== "as") {
+        return {
+          ok: false,
+          error: `Invalid view: unexpected token "${kw}" after column "${field}". Use "${field} as <label>" to alias a column.`,
+        };
+      }
+
+      const afterAsPos = i;
+      skipWs();
+      if (i >= input.length || input[i] === "," || input[i] === ")") {
+        return {
+          ok: false,
+          error: `Invalid view: missing alias after "${field} as" in table(...).`,
+        };
+      }
+      if (i === afterAsPos) {
+        if (input[i] === '"' || input[i] === "'") {
+          const quoted = readQuotedAlias(input, i);
+          if (!quoted.ok) return quoted;
+        }
+        return {
+          ok: false,
+          error: `Invalid view: expected whitespace after "${field} as" in table(...).`,
+        };
+      }
+
+      if (input[i] === '"' || input[i] === "'") {
+        const quoted = readQuotedAlias(input, i);
+        if (!quoted.ok) {
+          return quoted;
+        }
+        label = quoted.value;
+        i = quoted.nextIndex;
+      } else if (input[i] === "(") {
+        return {
+          ok: false,
+          error: `Invalid view: invalid alias starting with "(" for column "${field}".`,
+        };
+      } else {
+        const aliasStart = i;
+        while (i < input.length && !/[\s,()"']/.test(input[i])) {
+          i += 1;
+        }
+        label = input.slice(aliasStart, i);
+      }
+
+      if (label.trim().length === 0) {
+        return { ok: false, error: `Invalid view: empty alias for column "${field}".` };
+      }
+
+      skipWs();
+      if (i >= input.length) {
+        return { ok: false, error: 'Invalid view: missing closing ")" in table(...).' };
+      }
+      if (input[i] !== "," && input[i] !== ")") {
+        if (input[i] === '"' || input[i] === "'") {
+          const quoted = readQuotedAlias(input, i);
+          if (!quoted.ok) return quoted;
+          return {
+            ok: false,
+            error: `Invalid view: unexpected token "${quoted.value}" after alias "${label}" in table(...).`,
+          };
+        }
+        if (input[i] === "(") {
+          return {
+            ok: false,
+            error: `Invalid view: unexpected "(" after alias "${label}" in table(...).`,
+          };
+        }
+        const extraStart = i;
+        while (i < input.length && !/[\s,()"']/.test(input[i])) {
+          i += 1;
+        }
+        return {
+          ok: false,
+          error: `Invalid view: unexpected token "${input.slice(extraStart, i)}" after alias "${label}" in table(...).`,
+        };
+      }
+    }
+
+    columns.push({ field, label });
+
+    if (input[i] === ",") {
+      i += 1;
+      continue;
+    }
+
+    // input[i] === ")"
+    i += 1;
+    skipWs();
+    if (i < input.length) {
+      return {
+        ok: false,
+        error: `Invalid view: unexpected trailing content "${input.slice(i)}" after table(...).`,
+      };
+    }
+    return { ok: true, view: { kind: "table", columns } };
+  }
+
+  return { ok: false, error: 'Invalid view: missing closing ")" in table(...).' };
+}
+
 function parseView(raw: string): { ok: true; view: QueryView } | { ok: false; error: string } {
   const value = stripQuotes(raw);
   const lower = value.toLowerCase();
@@ -426,24 +679,11 @@ function parseView(raw: string): { ok: true; view: QueryView } | { ok: false; er
   if (lower === "tasks") return { ok: true, view: { kind: "tasks" } };
   if (lower === "count") return { ok: true, view: { kind: "count" } };
 
-  const tableMatch = /^table\s*\((.*)\)$/i.exec(value);
-  if (tableMatch !== null) {
-    const inner = tableMatch[1].trim();
-    if (inner.length === 0) {
-      return { ok: false, error: 'Invalid view: "table()" requires at least one column.' };
+  if (lower.startsWith("table")) {
+    const rest = value.slice(5).trimStart();
+    if (rest.startsWith("(")) {
+      return parseTableView(rest);
     }
-    const columns: string[] = [];
-    for (const part of inner.split(",")) {
-      const col = stripQuotes(part);
-      if (col.length === 0) {
-        return { ok: false, error: "Invalid view: empty column name in table(...)." };
-      }
-      if (!IDENTIFIER_RE.test(col)) {
-        return { ok: false, error: `Invalid table column "${col}".` };
-      }
-      columns.push(col);
-    }
-    return { ok: true, view: { kind: "table", columns } };
   }
 
   return {

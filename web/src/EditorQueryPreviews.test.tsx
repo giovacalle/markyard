@@ -340,6 +340,45 @@ describe("Editor inline query previews integration", () => {
     ).toBeInTheDocument();
   });
 
+  it("renders aliased table headers in the editor widget while cells follow the underlying field", async () => {
+    const doc =
+      '# Self\n\n```query\nwhere: status = "active"\nview: table(title as "Project", status AS State, tags as \'Labels\')\n```\n';
+    const alpha = "---\nstatus: active\ntags: [work]\n---\n\n# Alpha\n";
+    const { queryClient, pkm, syncQueue } = setupEditorVault(
+      [
+        { id: "n-self", name: "Self.md", text: doc },
+        { id: "n-alpha", name: "Alpha.md", text: alpha },
+      ],
+      "n-self",
+    );
+
+    const { getByTestId } = render(
+      <QueryClientProvider client={queryClient}>
+        <SyncQueueContext.Provider value={syncQueue}>
+          <PkmContext.Provider value={pkm}>
+            <Editor initialText={doc} text={doc} onChange={vi.fn()} getFullText={() => doc} />
+          </PkmContext.Provider>
+        </SyncQueueContext.Provider>
+      </QueryClientProvider>,
+    );
+
+    const { view } = getShadowView(getByTestId("editor-host"));
+    act(() => {
+      ensureSyntaxTree(view.state, view.state.doc.length, 5_000);
+    });
+
+    const table = await waitFor(() => within(view.dom).getByRole("table"));
+    expect(within(table).getAllByRole("columnheader").map((th) => th.textContent)).toEqual([
+      "Project",
+      "State",
+      "Labels",
+    ]);
+    const [, row] = within(table).getAllByRole("row");
+    expect(within(row).getByRole("link", { name: "Alpha" })).toBeInTheDocument();
+    expect(within(row).getByText("active")).toBeInTheDocument();
+    expect(within(row).getByText("#work")).toBeInTheDocument();
+  });
+
   it("updates open-note results as the live draft changes in the editor and keeps focus on accepted toggle", async () => {
     const text = "- [ ] A\n- [ ] B\n\n```query\ntype: tasks\n```\n";
     const { queryClient, pkm, syncQueue } = setupEditorVault(

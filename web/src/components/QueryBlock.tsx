@@ -250,8 +250,8 @@ function QueryBlockContent({
             <thead>
               <tr>
                 {result.view.columns.map((col, index) => (
-                  <th key={`${col}:${index}`} scope="col">
-                    {col}
+                  <th key={`${col.field}:${col.label}:${index}`} scope="col">
+                    {col.label}
                   </th>
                 ))}
               </tr>
@@ -261,7 +261,9 @@ function QueryBlockContent({
                 <tr key={row.kind === "task" ? `${row.id}:${row.offset}` : row.id}>
                   {result.view.kind === "table" &&
                     result.view.columns.map((col, index) => (
-                      <td key={`${col}:${index}`}>{renderCellValue(row, col, pkm)}</td>
+                      <td key={`${col.field}:${col.label}:${index}`}>
+                        {renderCellValue(row, col.field, pkm)}
+                      </td>
                     ))}
                 </tr>
               ))}
