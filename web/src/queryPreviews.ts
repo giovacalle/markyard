@@ -319,9 +319,6 @@ const QUERY_PREVIEW_THEME = EditorView.theme({
   ".cm-query-widget-live": {
     marginTop: "0.375rem",
   },
-  ".cm-query-widget-live .query-block": {
-    borderStyle: "dashed",
-  },
   ".cm-query-header": {
     display: "flex",
     alignItems: "center",
@@ -378,6 +375,9 @@ const QUERY_PREVIEW_THEME = EditorView.theme({
     lineHeight: "var(--markyard-line-height, var(--leading-relaxed, 1.625))",
     color: "var(--cm-fg, #171717)",
     whiteSpace: "normal",
+  },
+  ".cm-query-widget.cm-query-widget-live .query-block": {
+    borderStyle: "dashed",
   },
   ".cm-query-widget .query-block-error": {
     display: "flex",

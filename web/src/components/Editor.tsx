@@ -27,6 +27,7 @@ import {
   type RefObject,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   useSyncExternalStore,
@@ -525,6 +526,18 @@ export function Editor({
     }, LIVE_DRAFT_DEBOUNCE_MS);
   }, []);
   const readCurrentNoteText = useCallback(() => getFullTextRef.current?.(), []);
+  const handleToggleTask = useMemo(
+    () =>
+      onToggleTask === undefined
+        ? undefined
+        : (nextText: string) => {
+            clearTimeout(liveDraftTimerRef.current);
+            setLiveDraft(nextText);
+            onToggleTask(nextText);
+            clearTimeout(liveDraftTimerRef.current);
+          },
+    [onToggleTask],
+  );
   const requestQueryMeasure = useCallback(() => {
     viewRef.current?.requestMeasure();
   }, []);
@@ -744,21 +757,14 @@ export function Editor({
 
   useEffect(() => () => clearTimeout(liveDraftTimerRef.current), []);
 
+  // Refresh the live-draft overlay when frontmatter or text changes outside CodeMirror
+  // (e.g., Visual-mode property edits or external syncs) while the editor is active.
   useEffect(() => {
-    if (hasQueryBlocks) {
-      clearTimeout(liveDraftTimerRef.current);
-      setLiveDraft(getFullTextRef.current?.());
-    }
-  }, [hasQueryBlocks]);
-
-  // Refresh the live-draft overlay when frontmatter, text, or active changes outside CodeMirror
-  // (e.g., Visual-mode property edits, external syncs, or re-activation).
-  useEffect(() => {
-    if (!hasQueryBlocks) {
+    if (!hasQueryBlocks || !active) {
       return;
     }
     scheduleLiveDraft();
-  }, [hasQueryBlocks, frontmatter, text, active, scheduleLiveDraft]);
+  }, [hasQueryBlocks, active, frontmatter, text, scheduleLiveDraft]);
 
   useEffect(() => {
     if (slots.length > 0) {
@@ -781,6 +787,15 @@ export function Editor({
       view.focus();
     }
   }, [active]);
+
+  // Flush liveDraft immediately when query widgets become active (closing fence completed or
+  // hidden → shown transition) and cancel pending timers when query blocks disappear or hide.
+  useEffect(() => {
+    clearTimeout(liveDraftTimerRef.current);
+    if (hasQueryBlocks && active) {
+      setLiveDraft(getFullTextRef.current?.());
+    }
+  }, [hasQueryBlocks, active]);
 
   useEffect(() => {
     viewRef.current?.dispatch({
@@ -1065,7 +1080,7 @@ export function Editor({
                 live={slot.mode === "live"}
                 currentNoteText={liveDraft}
                 getCurrentNoteText={readCurrentNoteText}
-                onToggleTask={onToggleTask}
+                onToggleTask={handleToggleTask}
                 onContentChange={requestQueryMeasure}
               />,
               slot.dom,

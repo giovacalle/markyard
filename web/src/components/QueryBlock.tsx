@@ -138,6 +138,36 @@ function QueryBlockContent({
 
   const docsById = useMemo(() => new Map((docs ?? []).map((doc) => [doc.id, doc])), [docs]);
 
+  // Evict display overrides once their source text moves on, so cycling back to an earlier
+  // note text (e.g. toggle off -> toggle on from a sibling query block) cannot resurrect them.
+  useEffect(() => {
+    if (docs === null) {
+      return;
+    }
+    const currentFileId = pkm?.currentFileId ?? null;
+    setOverrides((prev) => {
+      if (prev.size === 0) {
+        return prev;
+      }
+      let changed = false;
+      const next = new Map(prev);
+      for (const [id, override] of prev) {
+        const doc = docsById.get(id);
+        const baseText =
+          doc === undefined
+            ? undefined
+            : currentFileId !== null && id === currentFileId && currentNoteText !== undefined
+              ? currentNoteText
+              : doc.text;
+        if (baseText !== override.baseText) {
+          next.delete(id);
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [docs, docsById, pkm?.currentFileId, currentNoteText]);
+
   const result = useMemo((): QueryResult | null => {
     if (!parsed.ok || effectiveDocs === null) {
       return null;

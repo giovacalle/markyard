@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vite-plus/test";
 import type { DriveNode } from "./api";
-import { Editor } from "./components/Editor";
+import { Editor, type EditorHandle } from "./components/Editor";
 import { parseFrontmatter } from "./frontmatter";
 import { type PkmApi, PkmContext } from "./pkm";
 import { SyncQueue, SyncQueueContext } from "./syncQueue";
@@ -673,5 +673,129 @@ describe("Editor inline query previews integration", () => {
 
     expect(shadow.querySelector(".cm-query-widget")).toBe(widgetBefore);
     expect(shadow.querySelector('section[data-slot="query-block"]')).toBe(sectionBefore);
+  });
+
+  it("flushes liveDraft synchronously on open-note task toggles so sibling widgets update immediately", async () => {
+    const initial = [
+      "- [ ] Open task",
+      "",
+      "```query",
+      "type: tasks",
+      "```",
+      "",
+      "```query",
+      "type: tasks",
+      "where: NOT done",
+      "view: count",
+      "```",
+      "",
+      "```query",
+      "type: tasks",
+      "```",
+      "",
+    ].join("\n");
+
+    const { queryClient, pkm, syncQueue } = setupEditorVault(
+      [{ id: "n-self", name: "Self.md", text: initial }],
+      "n-self",
+    );
+
+    let live = initial;
+    const editorRef: { current: EditorHandle | null } = { current: null };
+    const onToggleTask = vi.fn((next: string) => {
+      live = next;
+      editorRef.current?.replaceText(next);
+    });
+
+    const { getByTestId } = render(
+      <QueryClientProvider client={queryClient}>
+        <SyncQueueContext.Provider value={syncQueue}>
+          <PkmContext.Provider value={pkm}>
+            <Editor
+              initialText={initial}
+              text={initial}
+              editorRef={editorRef}
+              onChange={(next) => {
+                live = next;
+              }}
+              onToggleTask={onToggleTask}
+              getFullText={() => live}
+            />
+          </PkmContext.Provider>
+        </SyncQueueContext.Provider>
+      </QueryClientProvider>,
+    );
+
+    const { shadow, view } = getShadowView(getByTestId("editor-host"));
+    act(() => {
+      ensureSyntaxTree(view.state, view.state.doc.length, 5_000);
+    });
+
+    await waitFor(() => {
+      expect(within(view.dom).getAllByRole("checkbox", { name: "Open task" })).toHaveLength(2);
+      expect(shadow.querySelector(".query-block-count-value")?.textContent).toBe("1");
+    });
+
+    // Toggle in widget 0: sibling count widget and sibling tasks widget must update synchronously (no waitFor).
+    fireEvent.click(within(view.dom).getAllByRole("checkbox", { name: "Open task" })[0]);
+    expect(shadow.querySelector(".query-block-count-value")?.textContent).toBe("0");
+    expect(within(view.dom).getAllByRole("checkbox", { name: "Open task" })[1]).toBeChecked();
+
+    // Toggling back immediately in sibling widget 2 must succeed without hitting the stale-offset guard.
+    fireEvent.click(within(view.dom).getAllByRole("checkbox", { name: "Open task" })[1]);
+    expect(onToggleTask).toHaveBeenCalledTimes(2);
+    expect(onToggleTask).toHaveBeenLastCalledWith(initial);
+    expect(shadow.querySelector(".query-block-count-value")?.textContent).toBe("1");
+    expect(within(view.dom).getAllByRole("checkbox", { name: "Open task" })[0]).not.toBeChecked();
+  });
+
+  it("flushes liveDraft synchronously when a hidden editor becomes active again", async () => {
+    const unchecked = "# Note\n\n- [ ] Toggle me\n\n```query\ntype: tasks\n```\n";
+    const checked = "# Note\n\n- [x] Toggle me\n\n```query\ntype: tasks\n```\n";
+    const { queryClient, pkm, syncQueue } = setupEditorVault(
+      [{ id: "n-self", name: "Note.md", text: unchecked }],
+      "n-self",
+    );
+
+    let live = unchecked;
+    let active = true;
+    const renderEditor = () => (
+      <QueryClientProvider client={queryClient}>
+        <SyncQueueContext.Provider value={syncQueue}>
+          <PkmContext.Provider value={pkm}>
+            <Editor
+              initialText={unchecked}
+              text={live}
+              active={active}
+              onChange={vi.fn()}
+              onToggleTask={vi.fn()}
+              getFullText={() => live}
+            />
+          </PkmContext.Provider>
+        </SyncQueueContext.Provider>
+      </QueryClientProvider>
+    );
+
+    const { getByTestId, rerender } = render(renderEditor());
+    const { view } = getShadowView(getByTestId("editor-host"));
+    act(() => {
+      ensureSyntaxTree(view.state, view.state.doc.length, 5_000);
+    });
+
+    await waitFor(() => {
+      expect(within(view.dom).getByRole("checkbox", { name: "Toggle me" })).not.toBeChecked();
+    });
+
+    // Switch to Preview (hidden editor), toggle the task there, then switch back to Edit.
+    active = false;
+    rerender(renderEditor());
+    live = checked;
+    rerender(renderEditor());
+
+    active = true;
+    rerender(renderEditor());
+
+    // Immediately reflects the Preview toggle without waiting for LIVE_DRAFT_DEBOUNCE_MS.
+    expect(within(view.dom).getByRole("checkbox", { name: "Toggle me" })).toBeChecked();
   });
 });
