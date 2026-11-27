@@ -15,6 +15,7 @@ import {
   ViewPlugin,
   type ViewUpdate,
 } from "@codemirror/view";
+import { type Frontmatter, parseFrontmatter } from "./frontmatter";
 import { expandTemplate, slashCommands, type TemplateNote } from "./templates";
 import type { VaultNoteRef } from "./vaultDocuments";
 import { linkTargetFor, noteStem } from "./wikilinks";
@@ -28,6 +29,10 @@ export interface CompletionSources {
   loadTemplates?: () => Promise<void>;
   /** The current note's stem, for `{{title}}`. */
   getTitle: () => string;
+  /** The current note's folder path below the root (joined by `/`), for `{{folder}}`. */
+  getFolder?: () => string;
+  /** The current note's frontmatter, for `{{fm.<key>}}`; falls back to parsing the editor doc. */
+  getFrontmatter?: () => Frontmatter | null;
   now?: () => Date;
 }
 
@@ -168,9 +173,13 @@ function slashOptions(
       label: `/${command.label}`,
       detail: command.detail,
       apply: (view) => {
+        const frontmatter =
+          sources.getFrontmatter?.() ?? parseFrontmatter(view.state.doc.toString());
         const expanded = expandTemplate(command.template.replace(/\r\n?/g, "\n"), {
           now: sources.now?.() ?? new Date(),
           title: sources.getTitle(),
+          folder: sources.getFolder?.() ?? "",
+          frontmatter,
         });
         view.dispatch({
           changes: { from, to, insert: expanded.text },

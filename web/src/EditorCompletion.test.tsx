@@ -4,9 +4,14 @@ import { act, fireEvent, render } from "@testing-library/react";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { Editor } from "./components/Editor";
 import { detectTrigger } from "./editorCompletion";
+import { type Frontmatter, parseFrontmatter } from "./frontmatter";
 import { type PkmApi, PkmContext } from "./pkm";
 
-function mount(initialText: string, overrides: Partial<PkmApi> = {}) {
+function mount(
+  initialText: string,
+  overrides: Partial<PkmApi> = {},
+  editorProps?: { frontmatter?: Frontmatter | null },
+) {
   const pkm: PkmApi = {
     notes: [
       { id: "a", name: "Alpha.md", path: [], folderId: "root" },
@@ -26,7 +31,11 @@ function mount(initialText: string, overrides: Partial<PkmApi> = {}) {
   const onChange = vi.fn<(text: string) => void>();
   const { getByTestId } = render(
     <PkmContext.Provider value={pkm}>
-      <Editor initialText={initialText} onChange={onChange} />
+      <Editor
+        initialText={initialText}
+        onChange={onChange}
+        frontmatter={editorProps?.frontmatter}
+      />
     </PkmContext.Provider>,
   );
   const shadow = getByTestId("editor-host").shadowRoot;
@@ -138,5 +147,52 @@ describe("Editor / completion", () => {
     press("Enter");
     expect(view.state.doc.toString()).toBe("## Current\n");
     expect(view.state.selection.main.head).toBe("## Current\n".length);
+  });
+
+  it("resolves {{folder}} and {{fm.key}} from unsaved frontmatter in the editor buffer", async () => {
+    const { type, press, view } = mount("---\nowner: Ada\ntags: [q1, roadmap]\n---\n\n", {
+      currentFileId: "p1",
+      loadTemplates: vi.fn(async () => [
+        {
+          id: "t-meta",
+          name: "Status.md",
+          text: "Folder: {{folder}} | Owner: {{fm.owner}} | Tags: {{frontmatter.tags}}",
+        },
+      ]),
+    });
+    act(() => view.dispatch({ selection: { anchor: view.state.doc.length } }));
+    type("/status");
+    await act(async () => {
+      await Promise.resolve();
+    });
+    press("Enter");
+    expect(view.state.doc.toString()).toBe(
+      "---\nowner: Ada\ntags: [q1, roadmap]\n---\n\nFolder: Work | Owner: Ada | Tags: q1, roadmap",
+    );
+  });
+
+  it("resolves {{fm.key}} from the frontmatter prop when body-only visual properties mode is active", async () => {
+    const fm = parseFrontmatter("---\nproject: Apollo\n---\n");
+    const { type, press, view } = mount(
+      "",
+      {
+        notes: [{ id: "nested", name: "Brief.md", path: ["Work", "2026"], folderId: "f-2026" }],
+        currentFileId: "nested",
+        loadTemplates: vi.fn(async () => [
+          {
+            id: "t-brief",
+            name: "Brief.md",
+            text: "{{title}} in {{folder}} ({{fm.project}})",
+          },
+        ]),
+      },
+      { frontmatter: fm },
+    );
+    type("/brief");
+    await act(async () => {
+      await Promise.resolve();
+    });
+    press("Enter");
+    expect(view.state.doc.toString()).toBe("Brief in Work/2026 (Apollo)");
   });
 });

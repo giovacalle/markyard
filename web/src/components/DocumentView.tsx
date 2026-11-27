@@ -280,6 +280,7 @@ export function DocumentView({
   fallbackPath,
   initialMode = "preview",
   autoFocusEditor = false,
+  initialCursor,
   offline = false,
   offlineMessage,
   leadingControl,
@@ -298,6 +299,8 @@ export function DocumentView({
   fallbackPath?: readonly string[];
   initialMode?: DocumentMode;
   autoFocusEditor?: boolean;
+  /** Optional initial caret offset in the full note text (e.g. from a template's `{{cursor}}`). */
+  initialCursor?: number;
   offline?: boolean;
   offlineMessage?: string;
   leadingControl?: ReactNode;
@@ -321,6 +324,7 @@ export function DocumentView({
           fallbackPath={fallbackPath}
           initialMode={initialMode}
           autoFocusEditor={autoFocusEditor}
+          initialCursor={initialCursor}
           offline={offline}
           offlineMessage={offlineMessage}
           leadingControl={leadingControl}
@@ -345,6 +349,7 @@ function DocumentContent({
   fallbackPath,
   initialMode,
   autoFocusEditor,
+  initialCursor,
   offline,
   offlineMessage,
   leadingControl,
@@ -363,6 +368,7 @@ function DocumentContent({
   fallbackPath?: readonly string[];
   initialMode: DocumentMode;
   autoFocusEditor: boolean;
+  initialCursor?: number;
   offline: boolean;
   offlineMessage?: string;
   leadingControl?: ReactNode;
@@ -514,6 +520,7 @@ function DocumentContent({
           remote={data}
           mode={mode}
           autoFocusEditor={autoFocusEditor}
+          initialCursor={initialCursor}
           offline={offline}
           offlineMessage={offlineMessage}
           leadingControl={leadingControl}
@@ -786,6 +793,7 @@ function DocumentSession({
   remote,
   mode,
   autoFocusEditor,
+  initialCursor,
   offline,
   offlineMessage,
   leadingControl,
@@ -805,6 +813,7 @@ function DocumentSession({
   remote: { text: string; revision: string };
   mode: DocumentMode;
   autoFocusEditor: boolean;
+  initialCursor?: number;
   offline: boolean;
   offlineMessage?: string;
   leadingControl?: ReactNode;
@@ -1675,6 +1684,14 @@ function DocumentSession({
                   onUploadingChange={setUploadingImages}
                   editorRef={editorHandleRef}
                   autoFocus={focusOnEnter}
+                  initialCursor={
+                    initialCursor === undefined
+                      ? undefined
+                      : rawYamlMode
+                        ? initialCursor
+                        : Math.max(0, initialCursor - split.bodyStart)
+                  }
+                  frontmatter={frontmatter}
                   aboveEditor={
                     <PropertiesEditor
                       text={draft}

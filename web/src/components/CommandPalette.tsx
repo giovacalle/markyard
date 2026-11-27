@@ -189,6 +189,7 @@ export function CommandPalette({
   onCreateNote,
   onCreateFolder,
   onCreateNamedNote,
+  onNewFromTemplate,
   onOpenTodayNote,
   onOpenTasks,
   onOpenAttachments,
@@ -221,6 +222,8 @@ export function CommandPalette({
   onCreateNote: (folder: FolderTarget) => void;
   onCreateFolder?: (folder: FolderTarget) => void;
   onCreateNamedNote: (folder: FolderTarget, name: string) => void;
+  /** Opens the "New note from template…" picker dialog. */
+  onNewFromTemplate?: () => void;
   onOpenTodayNote: () => void;
   /** Opens the vault-wide Tasks dashboard. */
   onOpenTasks?: () => void;
@@ -244,7 +247,7 @@ export function CommandPalette({
 }) {
   const queryClient = useQueryClient();
   const opsQueue = useOptionalOpsQueue();
-  const { attachmentsFolder, showAttachmentsFolder } = useSettings();
+  const { attachmentsFolder, showAttachmentsFolder, templatesFolder } = useSettings();
   const inputRef = useRef<HTMLInputElement>(null);
   const resultsLabelId = useId();
   const [query, setQuery] = useState("");
@@ -480,6 +483,21 @@ export function CommandPalette({
           onSelect: () => runAndClose(() => onCreateFolder(defaultTargetFolder)),
         });
       }
+    }
+
+    if (rootFolder && onNewFromTemplate) {
+      allCommands.push({
+        id: "cmd:new-from-template",
+        label: "New note from template…",
+        keywords: "create add template boilerplate scaffold file",
+        subtitle: `From ${templatesFolder}`,
+        icon: <FileIcon className="size-4" />,
+        quick: true,
+        onSelect: () => {
+          onClose();
+          window.setTimeout(onNewFromTemplate, 0);
+        },
+      });
     }
 
     if (rootFolder) {
@@ -1231,6 +1249,7 @@ export function CommandPalette({
     queryClient,
     attachmentsFolder,
     showAttachmentsFolder,
+    templatesFolder,
     defaultTargetFolder,
     rootFolder,
     openFileId,
@@ -1257,6 +1276,7 @@ export function CommandPalette({
     onCreateNote,
     onCreateFolder,
     onCreateNamedNote,
+    onNewFromTemplate,
     onOpenTodayNote,
     onOpenTasks,
     onOpenAttachments,

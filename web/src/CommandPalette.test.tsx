@@ -752,4 +752,85 @@ describe("Command Palette (Cmd+K)", () => {
     expect(within(info).getByRole("heading", { name: "moodboard.png" })).toBeInTheDocument();
     expect(within(info).getByText("#Y2K aesthetic")).toBeInTheDocument();
   });
+
+  it("opens 'New note from template…' from Cmd+K, creates note in chosen folder, and places cursor at {{cursor}}", async () => {
+    const posts: { folderId: string; name: string; content: string }[] = [];
+    server.use(
+      http.get("/api/session", () => HttpResponse.json({ email: "owner@example.com" })),
+      http.get("/api/root", () => HttpResponse.json(node("root-id", "Notes", "folder"))),
+      http.get("/api/folders/:id/children", ({ params }) => {
+        if (params.id === "root-id") {
+          return HttpResponse.json({
+            nodes: [
+              node("tpl-dir", "Templates", "folder"),
+              node("proj-dir", "Projects", "folder"),
+              node("a-id", "alpha.md", "markdown"),
+            ],
+          });
+        }
+        if (params.id === "tpl-dir") {
+          return HttpResponse.json({
+            nodes: [node("tpl-spec", "Spec.md", "markdown")],
+          });
+        }
+        return HttpResponse.json({ nodes: [] });
+      }),
+      http.get("/api/vault/index", () =>
+        HttpResponse.json({
+          folders: [
+            { id: "tpl-dir", name: "Templates", parentId: "root-id", modifiedTime: MODIFIED },
+            { id: "proj-dir", name: "Projects", parentId: "root-id", modifiedTime: MODIFIED },
+          ],
+          files: [],
+        }),
+      ),
+      http.get("/api/files/tpl-spec/content", () =>
+        contentResponse("# {{title}}\nFolder: {{folder}}\n\n- {{cursor}}\n\nTail"),
+      ),
+      http.get("/api/search", () => HttpResponse.json({ results: [] })),
+      http.post("/api/folders/:id/files", async ({ params, request }) => {
+        const body = (await request.json()) as { name: string; content: string };
+        posts.push({ folderId: String(params.id), name: body.name, content: body.content });
+        return HttpResponse.json(node("new-spec-id", body.name, "markdown"), {
+          status: 201,
+          headers: { ETag: '"etag-spec"' },
+        });
+      }),
+    );
+
+    render(<App />);
+    await screen.findByRole("treeitem", { name: /alpha\.md/ });
+
+    // Searchable without `>` as well as with `>`.
+    pressCmdK();
+    const palette = await screen.findByRole("dialog", { name: "Command palette" });
+    const paletteInput = within(palette).getByRole("combobox");
+    fireEvent.change(paletteInput, { target: { value: "from template" } });
+    fireEvent.click(within(palette).getByRole("option", { name: /New note from template…/ }));
+
+    const tplDialog = await screen.findByRole("dialog", { name: "New note from template" });
+    const titleInput = await within(tplDialog).findByLabelText("Title");
+    fireEvent.change(titleInput, { target: { value: "Launch Plan" } });
+
+    const projOption = await within(tplDialog).findByRole("option", { name: "Notes / Projects" });
+    fireEvent.click(projOption);
+
+    fireEvent.click(within(tplDialog).getByRole("button", { name: "Create note" }));
+
+    const expectedBody = "# Launch Plan\nFolder: Projects\n\n- \n\nTail";
+    const expectedCursor = expectedBody.indexOf("- ") + 2;
+
+    const editor = await screen.findByRole("region", { name: "Editor" });
+    expect(
+      within(editor).getByRole("heading", { level: 2, name: "Launch Plan.md" }),
+    ).toBeInTheDocument();
+    await vi.waitFor(() => {
+      const view = getEditorView(editor);
+      expect(view.state.doc.toString()).toBe(expectedBody);
+      expect(view.state.selection.main.head).toBe(expectedCursor);
+    });
+    expect(posts).toEqual([
+      { folderId: "proj-dir", name: "Launch Plan.md", content: expectedBody },
+    ]);
+  });
 });

@@ -25,6 +25,7 @@ import { Toolbar, ToolbarButton, ToolbarSeparator } from "@ui-sdk/react/toolbar"
 import { type ReactNode, type RefObject, useEffect, useRef, useState } from "react";
 import { ATTACHMENT_TYPES, uploadAttachment } from "../api";
 import { adoptUserSheet } from "../customCss";
+import type { Frontmatter } from "../frontmatter";
 import { getSettings } from "../settings";
 import { type CompletionSources, pkmCompletions } from "../editorCompletion";
 import { focusMode, typewriterMode } from "../editorModes";
@@ -417,6 +418,8 @@ export function Editor({
   onUploadingChange,
   editorRef,
   autoFocus = false,
+  initialCursor,
+  frontmatter,
   active = true,
   text,
   aboveEditor,
@@ -427,6 +430,10 @@ export function Editor({
   onUploadingChange?: (uploading: boolean) => void;
   editorRef?: RefObject<EditorHandle | null>;
   autoFocus?: boolean;
+  /** Optional initial caret offset inside `initialText` (overrides the autoFocus end-of-doc jump). */
+  initialCursor?: number;
+  /** Parsed frontmatter of the full note (for `/` template `{{fm.<key>}}` lookups in visual mode). */
+  frontmatter?: Frontmatter | null;
   /**
    * Whether the editor is showing. A kept-alive editor stays mounted while hidden, so switching
    * back from Preview is instant; on becoming active it catches up with `text` and takes focus
@@ -441,6 +448,9 @@ export function Editor({
   const hostRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const initialTextRef = useRef(initialText);
+  const initialCursorRef = useRef(initialCursor);
+  const frontmatterRef = useRef(frontmatter);
+  frontmatterRef.current = frontmatter;
   const onChangeRef = useRef(onChange);
   const autoFocusRef = useRef(autoFocus);
   autoFocusRef.current = autoFocus;
@@ -513,6 +523,12 @@ export function Editor({
         const note = current?.notes.find((n) => n.id === current.currentFileId);
         return note === undefined ? "" : noteStem(note.name);
       },
+      getFolder: () => {
+        const current = pkmRef.current;
+        const note = current?.notes.find((n) => n.id === current.currentFileId);
+        return note === undefined ? "" : note.path.join("/");
+      },
+      getFrontmatter: () => frontmatterRef.current ?? null,
     };
 
     const images = () => imageHandlersRef.current;
@@ -630,7 +646,13 @@ export function Editor({
         },
       };
     }
-    if (autoFocusRef.current) {
+    if (initialCursorRef.current !== undefined) {
+      const pos = Math.max(0, Math.min(initialCursorRef.current, view.state.doc.length));
+      view.dispatch({ selection: EditorSelection.cursor(pos) });
+      if (autoFocusRef.current) {
+        view.focus();
+      }
+    } else if (autoFocusRef.current) {
       const end = view.state.doc.length;
       if (end > 0) {
         view.dispatch({ selection: EditorSelection.cursor(end) });

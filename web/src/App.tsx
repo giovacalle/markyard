@@ -48,6 +48,10 @@ import { DeleteFileDialog } from "./components/DeleteFileDialog";
 import { DocumentView, type DocumentHandle, preloadPreview } from "./components/DocumentView";
 import { FileTree } from "./components/FileTree";
 import { MoveDialog } from "./components/MoveDialog";
+import {
+  NewFromTemplateDialog,
+  type NewFromTemplateRequest,
+} from "./components/NewFromTemplateDialog";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { VaultOnboarding, VaultPickerDialog } from "./components/VaultPickerDialog";
 import { SyncInspector } from "./components/SyncInspector";
@@ -115,7 +119,7 @@ import { clearExpandedFolders } from "./treeExpanded";
 import { SyncQueue, SyncQueueContext, useSyncQueue } from "./syncQueue";
 import { useTheme, type ThemePreference } from "./theme";
 import { useVaultSync, useVaultSyncState, VaultSync, VaultSyncContext } from "./vaultSync";
-import { childrenKey, findNode, findNoteByNameInFolder } from "./treeCache";
+import { childrenKey, findNode, findNoteByNameInFolder, knownParentId } from "./treeCache";
 
 type WorkspacePanel = "tasks" | "attachments";
 
@@ -132,6 +136,7 @@ interface CreateNoteInput {
   folder: FolderTarget;
   name?: string;
   content?: string;
+  initialCursor?: number;
   openExistingOnConflict?: boolean;
 }
 
@@ -520,7 +525,12 @@ function SessionContent({
   const [revealRequest, setRevealRequest] = useState(0);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [paletteInitialQuery, setPaletteInitialQuery] = useState("");
-  const [createdFile, setCreatedFile] = useState<{ id: string; name: string } | null>(null);
+  const [newFromTemplateOpen, setNewFromTemplateOpen] = useState(false);
+  const [createdFile, setCreatedFile] = useState<{
+    id: string;
+    name: string;
+    initialCursor?: number;
+  } | null>(null);
   // Folder path of a note opened from a Drive search hit, so the tree can reveal it.
   const [revealHint, setRevealHint] = useState<{ id: string; path: readonly string[] } | null>(
     null,
@@ -578,7 +588,9 @@ function SessionContent({
       opsQueue.onIdRemapped(({ localId, realId, node }) => {
         const stableKey = sessionKeysRef.current.get(localId) ?? localId;
         sessionKeysRef.current.set(realId, stableKey);
-        setCreatedFile((prev) => (prev?.id === localId ? { id: realId, name: node.name } : prev));
+        setCreatedFile((prev) =>
+          prev?.id === localId ? { ...prev, id: realId, name: node.name } : prev,
+        );
         setRevealHint((prev) => (prev?.id === localId ? { ...prev, id: realId } : prev));
         setPendingHeading((prev) =>
           prev?.fileId === localId ? { ...prev, fileId: realId } : prev,
@@ -649,7 +661,7 @@ function SessionContent({
         });
       } else if (op.kind === "rename_file") {
         setCreatedFile((prev) =>
-          prev?.id === op.targetId ? { id: prev.id, name: op.previousName } : prev,
+          prev?.id === op.targetId ? { ...prev, name: op.previousName } : prev,
         );
       }
     };
@@ -799,6 +811,7 @@ function SessionContent({
     setCreatedFile(null);
     setRevealHint(null);
     setPaletteOpen(false);
+    setNewFromTemplateOpen(false);
     await clearVaultCache();
     if (root !== undefined) {
       queryClient.setQueryData<Session>(["session"], (prev) =>
@@ -836,6 +849,7 @@ function SessionContent({
     setCustomCssLoadedNotes([]);
     setPaletteOpen(false);
     setPaletteInitialQuery("");
+    setNewFromTemplateOpen(false);
     setHydrateState({ ready: true, cachedSession: null });
     void clearLocalCache();
   };
@@ -873,9 +887,10 @@ function SessionContent({
       });
       return { folderId: folder.id, ...result };
     },
-    onSuccess: ({ created, node }) => {
+    onSuccess: ({ created, node }, input) => {
+      setOpenPanel(null);
       if (created) {
-        setCreatedFile({ id: node.id, name: node.name });
+        setCreatedFile({ id: node.id, name: node.name, initialCursor: input.initialCursor });
       } else {
         setCreatedFile(null);
       }
@@ -912,6 +927,7 @@ function SessionContent({
       resetSettings();
       setPaletteOpen(false);
       setPaletteInitialQuery("");
+      setNewFromTemplateOpen(false);
       void clearLocalCache();
     }
   }, [isSignedOut, opsQueue, syncQueue, driveChanges, vaultSync]);
@@ -1079,6 +1095,15 @@ function SessionContent({
       createNoteMutation.mutate({ folder, name });
     };
 
+    const handleCreateFromTemplate = async (request: NewFromTemplateRequest) => {
+      await createNoteMutation.mutateAsync({
+        folder: request.folder,
+        name: request.name,
+        content: request.content,
+        initialCursor: request.initialCursor,
+      });
+    };
+
     const handleOpenTodayNote = async () => {
       const root = rootQuery.data;
       if (!root) {
@@ -1120,8 +1145,9 @@ function SessionContent({
       const templates = await readTemplates(queryClient, undefined, settings.templatesFolder).catch(
         () => [],
       );
+      const dailyTemplateFolder = dailyFolderName !== "" ? folder.name : "";
       const content =
-        dailyNoteContent(templates, now, name.replace(/\.md$/i, "")) ??
+        dailyNoteContent(templates, now, name.replace(/\.md$/i, ""), dailyTemplateFolder) ??
         todayNoteInitialContent(now);
       if (createNoteMutation.isPending) {
         return;
@@ -1218,7 +1244,9 @@ function SessionContent({
           (openFileId === createdFile?.id ? createdFile.name : undefined));
     const handleFileRenamed = (updated: DriveNode, renamedFrom?: string) => {
       if (createdFile?.id === updated.id) {
-        setCreatedFile({ id: updated.id, name: updated.name });
+        setCreatedFile((prev) =>
+          prev?.id === updated.id ? { ...prev, name: updated.name } : prev,
+        );
       }
       const prevName = renamedFrom ?? previousName;
       if (prevName !== undefined && prevName !== updated.name) {
@@ -1589,6 +1617,9 @@ function SessionContent({
                 fallbackPath={revealHint?.id === openFileId ? revealHint.path : undefined}
                 initialMode={openFileId === createdFile?.id ? "edit" : settings.defaultMode}
                 autoFocusEditor={openFileId === createdFile?.id}
+                initialCursor={
+                  openFileId === createdFile?.id ? createdFile.initialCursor : undefined
+                }
                 offline={isOffline}
                 offlineMessage={offlineMessage}
                 leadingControl={mainSidebarToggle}
@@ -1658,6 +1689,7 @@ function SessionContent({
             onCreateNote={handleCreateInFolder}
             onCreateFolder={(folder) => setFolderDialog({ mode: "create", parent: folder })}
             onCreateNamedNote={handleCreateNamedNote}
+            onNewFromTemplate={() => setNewFromTemplateOpen(true)}
             onOpenTodayNote={() => void handleOpenTodayNote()}
             onOpenTasks={() => setOpenPanel("tasks")}
             onOpenAttachments={handleOpenAttachments}
@@ -1707,6 +1739,18 @@ function SessionContent({
             node={moveTarget}
             rootId={rootQuery.data?.id}
             onClose={() => setMoveTarget(null)}
+          />
+
+          <NewFromTemplateDialog
+            open={newFromTemplateOpen}
+            rootFolder={rootQuery.data}
+            defaultFolderId={
+              openFileId !== null
+                ? (knownParentId(queryClient, openFileId) ?? rootQuery.data?.id)
+                : rootQuery.data?.id
+            }
+            onClose={() => setNewFromTemplateOpen(false)}
+            onCreate={handleCreateFromTemplate}
           />
 
           <DeleteFolderDialog
