@@ -145,7 +145,14 @@ describe("queryPreviews inline CodeMirror extension", () => {
     expect(checkbox).not.toBeNull();
     expect(checkbox?.disabled).toBe(false);
     checkbox?.click();
-    expect(toggleTask).toHaveBeenCalledWith("n-alpha", expect.any(Number));
+    expect(toggleTask).toHaveBeenCalledWith(
+      "n-alpha",
+      expect.objectContaining({
+        offset: expect.any(Number),
+        text: "Ship v1 @2026-12-01",
+        done: false,
+      }),
+    );
 
     // When toggleTask returns false, checkbox reverts to row.done.
     const viewRevert = mountView(doc, doc.indexOf("where:"), {

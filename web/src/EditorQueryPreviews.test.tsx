@@ -1,7 +1,7 @@
 import { ensureSyntaxTree } from "@codemirror/language";
 import { EditorView } from "@codemirror/view";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, fireEvent, render, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vite-plus/test";
 import type { DriveNode } from "./api";
 import { Editor } from "./components/Editor";
@@ -168,6 +168,124 @@ describe("Editor inline query previews integration", () => {
     });
     expect(standaloneView.shadow.querySelector(".cm-query-empty")?.textContent).toBe(
       "No matching tasks.",
+    );
+  });
+
+  it("never toggles a different task after the open note is edited outside the query (stale offset)", async () => {
+    const text = "- [ ] A\n- [ ] B\n- [ ] C\n\n```query\ntype: tasks\n```\n";
+    const { queryClient, pkm, syncQueue, enqueueSave } = setupEditorVault(
+      [{ id: "n-abc", name: "ABC.md", text }],
+      "n-abc",
+    );
+
+    const onToggleTask = vi.fn();
+    let live = text;
+
+    const { getByTestId } = render(
+      <QueryClientProvider client={queryClient}>
+        <SyncQueueContext.Provider value={syncQueue}>
+          <PkmContext.Provider value={pkm}>
+            <Editor
+              initialText={text}
+              text={text}
+              onChange={(next) => {
+                live = next;
+              }}
+              onToggleTask={onToggleTask}
+              getFullText={() => live}
+            />
+          </PkmContext.Provider>
+        </SyncQueueContext.Provider>
+      </QueryClientProvider>,
+    );
+
+    const { shadow, view } = getShadowView(getByTestId("editor-host"));
+    act(() => {
+      ensureSyntaxTree(view.state, view.state.doc.length, 5_000);
+    });
+
+    await waitFor(() => {
+      expect(
+        within(shadow as unknown as HTMLElement).getByRole("checkbox", { name: "B" }),
+      ).toBeInTheDocument();
+    });
+
+    // Delete "- [ ] A\n" (8 chars) outside the query block so the widget's cached offsets are stale.
+    act(() => {
+      view.dispatch({ changes: { from: 0, to: 8 } });
+    });
+
+    // Clicking B with the stale offset must write nothing, keep B unchecked, and refresh results.
+    fireEvent.click(within(shadow as unknown as HTMLElement).getByRole("checkbox", { name: "B" }));
+    expect(onToggleTask).not.toHaveBeenCalled();
+    expect(enqueueSave).not.toHaveBeenCalled();
+
+    const refreshedB = within(shadow as unknown as HTMLElement).getByRole("checkbox", {
+      name: "B",
+    });
+    expect(refreshedB).not.toBeChecked();
+    expect(
+      within(shadow as unknown as HTMLElement).queryByRole("checkbox", { name: "A" }),
+    ).toBeNull();
+
+    // After the refresh, clicking B toggles B cleanly.
+    fireEvent.click(refreshedB);
+    expect(onToggleTask).toHaveBeenCalledWith("- [x] B\n- [ ] C\n\n```query\ntype: tasks\n```\n");
+    expect(enqueueSave).not.toHaveBeenCalled();
+  });
+
+  it("toggles another note from the freshest query cache before the debounced docs reload", async () => {
+    const selfText = "# Self\n\n```query\ntype: tasks\n```\n";
+    const otherText = "- [ ] X\n- [ ] Y\n";
+    const { queryClient, pkm, syncQueue, enqueueSave } = setupEditorVault(
+      [
+        { id: "n-self", name: "Self.md", text: selfText },
+        { id: "n-other", name: "Other.md", text: otherText },
+      ],
+      "n-self",
+    );
+
+    const { getByTestId } = render(
+      <QueryClientProvider client={queryClient}>
+        <SyncQueueContext.Provider value={syncQueue}>
+          <PkmContext.Provider value={pkm}>
+            <Editor
+              initialText={selfText}
+              text={selfText}
+              onChange={vi.fn()}
+              onToggleTask={vi.fn()}
+              getFullText={() => selfText}
+            />
+          </PkmContext.Provider>
+        </SyncQueueContext.Provider>
+      </QueryClientProvider>,
+    );
+
+    const { shadow, view } = getShadowView(getByTestId("editor-host"));
+    act(() => {
+      ensureSyntaxTree(view.state, view.state.doc.length, 5_000);
+    });
+
+    await waitFor(() => {
+      expect(
+        within(shadow as unknown as HTMLElement).getByRole("checkbox", { name: "Y" }),
+      ).toBeInTheDocument();
+    });
+
+    // Update the cache for n-other (as if another widget or provider just toggled X) before reload.
+    act(() => {
+      queryClient.setQueryData(["files", "n-other", "content"], {
+        text: "- [x] X\n- [ ] Y\n",
+        revision: "rev-n-other",
+      });
+    });
+
+    fireEvent.click(within(shadow as unknown as HTMLElement).getByRole("checkbox", { name: "Y" }));
+    expect(enqueueSave).toHaveBeenCalledWith(
+      "n-other",
+      "- [x] X\n- [x] Y\n",
+      "rev-n-other",
+      undefined,
     );
   });
 });

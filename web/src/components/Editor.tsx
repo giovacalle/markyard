@@ -54,10 +54,10 @@ import { hasQueryFence } from "../queryFormat";
 import { type QueryPreviewSources, queryPreviews, refreshQueryPreviews } from "../queryPreviews";
 import { getSettings } from "../settings";
 import { SyncQueueContext } from "../syncQueue";
-import { toggleTaskAt } from "../taskToggle";
+import { toggleTaskIfUnchanged } from "../taskToggle";
 import type { TemplateNote } from "../templates";
 import { useVaultDocuments } from "../useVaultDocuments";
-import { saveVaultDocument, type VaultDocument } from "../vaultDocuments";
+import { freshNoteText, saveVaultDocument, type VaultDocument } from "../vaultDocuments";
 import { getViewPrefs, setViewPref, useViewPrefs } from "../viewPrefs";
 import { noteStem } from "../wikilinks";
 import { AccessoryBar, type AccessoryAction } from "./AccessoryBar";
@@ -532,6 +532,8 @@ export function Editor({
   const pkmRef = useRef(pkm);
   pkmRef.current = pkm;
   const queryClient = useContext(QueryClientContext);
+  const queryClientRef = useRef(queryClient);
+  queryClientRef.current = queryClient;
   const syncQueue = useContext(SyncQueueContext);
   const syncQueueRef = useRef(syncQueue);
   syncQueueRef.current = syncQueue;
@@ -648,7 +650,7 @@ export function Editor({
       canOpenNote: () => pkmRef.current !== null,
       openNote: (id) => pkmRef.current?.openNote(id),
       canToggleTasks: () => onToggleTaskRef.current !== undefined && syncQueueRef.current !== null,
-      toggleTask: (noteId, offset) => {
+      toggleTask: (noteId, task) => {
         const onToggle = onToggleTaskRef.current;
         const queue = syncQueueRef.current;
         const docs = getEffectiveQueryDocs();
@@ -661,24 +663,23 @@ export function Editor({
         if (current === undefined || original === undefined) {
           return false;
         }
-        const next = toggleTaskAt(current.text, offset);
+        const isCurrent = noteId === pkmRef.current?.currentFileId;
+        const fresh = isCurrent ? current.text : freshNoteText(queryClientRef.current, original);
+        const next = toggleTaskIfUnchanged(fresh, task);
         if (next === null) {
+          if (!isCurrent) {
+            queryOverridesRef.current.set(noteId, { baseText: original.text, text: fresh });
+          }
+          bumpQueryWidgets();
           return false;
         }
-        if (noteId === pkmRef.current?.currentFileId) {
+        if (isCurrent) {
           onToggle(next);
-          queryVersionRef.current += 1;
-          viewRef.current?.dispatch({
-            effects: refreshQueryPreviews.of(queryVersionRef.current),
-          });
         } else {
           queryOverridesRef.current.set(noteId, { baseText: original.text, text: next });
-          saveVaultDocument(queue, current, next);
-          queryVersionRef.current += 1;
-          viewRef.current?.dispatch({
-            effects: refreshQueryPreviews.of(queryVersionRef.current),
-          });
+          saveVaultDocument(queue, original, next);
         }
+        bumpQueryWidgets();
         return true;
       },
     };
@@ -824,7 +825,7 @@ export function Editor({
       viewRef.current = null;
       view.destroy();
     };
-  }, [editorRef]);
+  }, [editorRef, bumpQueryWidgets]);
 
   // Hidden → shown: catch up with text edited elsewhere, then focus where the cursor was left.
   useEffect(() => {

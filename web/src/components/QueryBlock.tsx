@@ -12,9 +12,9 @@ import {
 } from "../queryEngine";
 import { formatModifiedDate, formatQueryCountLabel, formatQueryFooter } from "../queryFormat";
 import { type SyncQueue, SyncQueueContext } from "../syncQueue";
-import { toggleTaskAt } from "../taskToggle";
+import { toggleTaskIfUnchanged } from "../taskToggle";
 import { useVaultDocuments } from "../useVaultDocuments";
-import { saveVaultDocument, type VaultDocument } from "../vaultDocuments";
+import { freshNoteText, saveVaultDocument, type VaultDocument } from "../vaultDocuments";
 import { CheckIcon } from "./icons";
 
 interface TextOverride {
@@ -99,14 +99,17 @@ function QueryBlockContent({
   docs,
   pkm,
   syncQueue,
+  currentNoteText,
   onToggleTask,
 }: {
   source: string;
   docs: readonly VaultDocument[] | null;
   pkm: PkmApi | null;
   syncQueue: SyncQueue | null;
+  currentNoteText?: string;
   onToggleTask?: (nextText: string) => void;
 }) {
+  const queryClient = useContext(QueryClientContext);
   const parsed = useMemo(() => parseQuery(source), [source]);
   const [overrides, setOverrides] = useState<ReadonlyMap<string, TextOverride>>(new Map());
 
@@ -114,20 +117,20 @@ function QueryBlockContent({
     if (docs === null) {
       return null;
     }
+    const currentFileId = pkm?.currentFileId ?? null;
     return docs.map((doc) => {
+      const baseText =
+        currentFileId !== null && doc.id === currentFileId && currentNoteText !== undefined
+          ? currentNoteText
+          : doc.text;
       const override = overrides.get(doc.id);
-      if (override !== undefined && override.baseText === doc.text) {
-        return { ...doc, text: override.text };
-      }
-      return doc;
+      const text =
+        override !== undefined && override.baseText === baseText ? override.text : baseText;
+      return text === doc.text ? doc : { ...doc, text };
     });
-  }, [docs, overrides]);
+  }, [docs, overrides, pkm?.currentFileId, currentNoteText]);
 
   const docsById = useMemo(() => new Map((docs ?? []).map((doc) => [doc.id, doc])), [docs]);
-  const effectiveById = useMemo(
-    () => new Map((effectiveDocs ?? []).map((doc) => [doc.id, doc])),
-    [effectiveDocs],
-  );
 
   const result = useMemo((): QueryResult | null => {
     if (!parsed.ok || effectiveDocs === null) {
@@ -159,24 +162,30 @@ function QueryBlockContent({
 
   const canToggleTasks = onToggleTask !== undefined && syncQueue !== null;
 
-  const toggleTask = (noteId: string, offset: number) => {
+  const toggleTask = (row: TaskQueryRow) => {
     if (!canToggleTasks) {
       return;
     }
-    const original = docsById.get(noteId);
-    const current = effectiveById.get(noteId);
-    if (original === undefined || current === undefined) {
+    const original = docsById.get(row.id);
+    if (original === undefined) {
       return;
     }
-    const next = toggleTaskAt(current.text, offset);
+    const isCurrent = row.id === pkm?.currentFileId;
+    const baseText = isCurrent && currentNoteText !== undefined ? currentNoteText : original.text;
+    const fresh =
+      isCurrent && currentNoteText !== undefined
+        ? currentNoteText
+        : freshNoteText(queryClient, original);
+    const next = toggleTaskIfUnchanged(fresh, row);
     if (next === null) {
+      setOverrides((prev) => new Map(prev).set(row.id, { baseText, text: fresh }));
       return;
     }
-    setOverrides((prev) => new Map(prev).set(noteId, { baseText: original.text, text: next }));
-    if (noteId === pkm?.currentFileId) {
+    setOverrides((prev) => new Map(prev).set(row.id, { baseText, text: next }));
+    if (isCurrent) {
       onToggleTask(next);
     } else {
-      saveVaultDocument(syncQueue, current, next);
+      saveVaultDocument(syncQueue, original, next);
     }
   };
 
@@ -227,7 +236,7 @@ function QueryBlockContent({
                 checked={row.done}
                 disabled={!canToggleTasks}
                 onClick={(event) => event.stopPropagation()}
-                onCheckedChange={() => toggleTask(row.id, row.offset)}
+                onCheckedChange={() => toggleTask(row)}
                 className="query-block-checkbox"
               >
                 <CheckboxIndicator className="query-block-checkbox-indicator">
@@ -313,11 +322,13 @@ function VaultQueryBlock({
   source,
   pkm,
   syncQueue,
+  currentNoteText,
   onToggleTask,
 }: {
   source: string;
   pkm: PkmApi | null;
   syncQueue: SyncQueue | null;
+  currentNoteText?: string;
   onToggleTask?: (nextText: string) => void;
 }) {
   const docs = useVaultDocuments();
@@ -327,6 +338,7 @@ function VaultQueryBlock({
       docs={docs}
       pkm={pkm}
       syncQueue={syncQueue}
+      currentNoteText={currentNoteText}
       onToggleTask={onToggleTask}
     />
   );
@@ -335,9 +347,11 @@ function VaultQueryBlock({
 /** Renders a declarative ` ```query ` fenced code block live against locally cached notes. */
 export function QueryBlock({
   source,
+  currentNoteText,
   onToggleTask,
 }: {
   source: string;
+  currentNoteText?: string;
   onToggleTask?: (nextText: string) => void;
 }) {
   const queryClient = useContext(QueryClientContext);
@@ -352,6 +366,7 @@ export function QueryBlock({
         docs={sharedDocs}
         pkm={pkm}
         syncQueue={syncQueue}
+        currentNoteText={currentNoteText}
         onToggleTask={onToggleTask}
       />
     );
@@ -363,11 +378,18 @@ export function QueryBlock({
         docs={[]}
         pkm={pkm}
         syncQueue={syncQueue}
+        currentNoteText={currentNoteText}
         onToggleTask={onToggleTask}
       />
     );
   }
   return (
-    <VaultQueryBlock source={source} pkm={pkm} syncQueue={syncQueue} onToggleTask={onToggleTask} />
+    <VaultQueryBlock
+      source={source}
+      pkm={pkm}
+      syncQueue={syncQueue}
+      currentNoteText={currentNoteText}
+      onToggleTask={onToggleTask}
+    />
   );
 }

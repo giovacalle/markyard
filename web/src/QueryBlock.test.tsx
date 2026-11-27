@@ -193,10 +193,13 @@ describe("QueryBlock via Preview", () => {
     const onToggleTask = vi.fn();
     const { enqueueSave, openNote, container } = renderWithVault(md, { onToggleTask });
 
-    const checkbox = await screen.findByRole("checkbox", { name: "Ship release @2026-12-01" });
+    const queryRegion = await screen.findByRole("region", { name: "Query results" });
+    const checkbox = await within(queryRegion).findByRole("checkbox", {
+      name: "Ship release @2026-12-01",
+    });
     expect(checkbox).not.toBeChecked();
     expect(checkbox).toHaveAttribute("data-slot", "checkbox");
-    expect(screen.getByText("@2026-12-01")).toBeInTheDocument();
+    expect(within(queryRegion).getByText("@2026-12-01")).toBeInTheDocument();
 
     fireEvent.click(checkbox);
 
@@ -213,38 +216,41 @@ describe("QueryBlock via Preview", () => {
 
     // Since query filters `NOT done`, optimistic update immediately removes the checked-off task.
     await waitFor(() =>
-      expect(screen.queryByRole("checkbox", { name: "Ship release @2026-12-01" })).toBeNull(),
+      expect(
+        within(queryRegion).queryByRole("checkbox", { name: "Ship release @2026-12-01" }),
+      ).toBeNull(),
     );
-    expect(screen.getByRole("checkbox", { name: "Review PR" })).toBeInTheDocument();
+    expect(within(queryRegion).getByRole("checkbox", { name: "Review PR" })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("link", { name: "Beta" }));
+    fireEvent.click(within(queryRegion).getByRole("link", { name: "Beta" }));
     expect(openNote).toHaveBeenCalledWith("n-beta");
     expect(container.querySelector('[style]:not([data-slot="checkbox-input"])')).toBeNull();
   });
 
   it("routes task toggles for the currently open note through onToggleTask and disables checkboxes in read-only mode", async () => {
-    const md = "```query\ntype: tasks\nwhere: NOT done\n```\n";
+    const md = `${FIXTURE_NOTES[0].text!}\n\n\`\`\`query\ntype: tasks\nwhere: NOT done\n\`\`\`\n`;
     const onToggleTask = vi.fn();
     const { enqueueSave, unmount } = renderWithVault(md, {
       onToggleTask,
       currentFileId: "n-alpha",
     });
 
-    const checkbox = await screen.findByRole("checkbox", { name: "Ship release @2026-12-01" });
+    const queryRegion = await screen.findByRole("region", { name: "Query results" });
+    const checkbox = await within(queryRegion).findByRole("checkbox", {
+      name: "Ship release @2026-12-01",
+    });
     fireEvent.click(checkbox);
 
     expect(onToggleTask).toHaveBeenCalledWith(
-      FIXTURE_NOTES[0].text!.replace(
-        "- [ ] Ship release @2026-12-01",
-        "- [x] Ship release @2026-12-01",
-      ),
+      md.replace("- [ ] Ship release @2026-12-01", "- [x] Ship release @2026-12-01"),
     );
     expect(enqueueSave).not.toHaveBeenCalled();
     unmount();
 
     // Read-only mode omits onToggleTask -> checkboxes must be disabled and not mutate notes.
     const readonly = renderWithVault(md);
-    const readonlyCheckbox = await screen.findByRole("checkbox", {
+    const readonlyRegion = await screen.findByRole("region", { name: "Query results" });
+    const readonlyCheckbox = await within(readonlyRegion).findByRole("checkbox", {
       name: "Ship release @2026-12-01",
     });
     expect(readonlyCheckbox).toBeDisabled();
@@ -259,6 +265,109 @@ describe("QueryBlock via Preview", () => {
     expect(await screen.findByText("3")).toBeInTheDocument();
     expect(screen.getByText("matching tasks")).toBeInTheDocument();
     expect(screen.getByText("2 of 3 notes cached")).toBeInTheDocument();
+  });
+
+  it("uses Preview's live open-note text instead of stale vault cache so deleted tasks are not resurrected", async () => {
+    const cachedText = "- [ ] A\n- [ ] B\n- [ ] C\n\n```query\ntype: tasks\n```\n";
+    const liveText = "- [ ] B\n- [ ] C\n\n```query\ntype: tasks\n```\n";
+    const ctx = setupVault([
+      {
+        id: "n-abc",
+        name: "ABC.md",
+        folderId: "root",
+        path: [],
+        modifiedTime: "2026-11-27T10:00:00Z",
+        text: cachedText,
+      },
+    ]);
+    ctx.pkm.currentFileId = "n-abc";
+    const onToggleTask = vi.fn();
+
+    render(
+      <QueryClientProvider client={ctx.queryClient}>
+        <SyncQueueContext.Provider value={ctx.syncQueue}>
+          <PkmContext.Provider value={ctx.pkm}>
+            <Preview text={liveText} onToggleTask={onToggleTask} />
+          </PkmContext.Provider>
+        </SyncQueueContext.Provider>
+      </QueryClientProvider>,
+    );
+
+    const queryRegion = await screen.findByRole("region", { name: "Query results" });
+    const bCheckbox = await within(queryRegion).findByRole("checkbox", { name: "B" });
+    fireEvent.click(bCheckbox);
+
+    expect(onToggleTask).toHaveBeenCalledWith("- [x] B\n- [ ] C\n\n```query\ntype: tasks\n```\n");
+    expect(ctx.enqueueSave).not.toHaveBeenCalled();
+  });
+
+  it("composes sequential toggles across two query blocks via the query cache and preserves focus on accepted toggle", async () => {
+    const md =
+      "```query\ntype: tasks\nfrom: Projects\n```\n\n```query\ntype: tasks\nfrom: Projects\n```\n";
+    const onToggleTask = vi.fn();
+    const { queryClient, enqueueSave } = renderWithVault(md, { onToggleTask });
+    enqueueSave.mockImplementation((fileId, text, revision) => {
+      queryClient.setQueryData(["files", fileId, "content"], { text, revision });
+    });
+
+    const regions = await screen.findAllByRole("region", { name: "Query results" });
+    expect(regions).toHaveLength(2);
+    const ship0 = await within(regions[0]).findByRole("checkbox", {
+      name: "Ship release @2026-12-01",
+    });
+    const draft1 = await within(regions[1]).findByRole("checkbox", { name: "Draft spec" });
+
+    // Focus block 0's checkbox before toggling and confirm focus stays on it after accepted toggle.
+    ship0.focus();
+    expect(document.activeElement).toBe(ship0);
+    fireEvent.click(ship0);
+    expect(document.activeElement).toBe(ship0);
+    expect(ship0).toBeChecked();
+
+    // Toggle a different task in block 1 before the debounced docs reload.
+    fireEvent.click(draft1);
+
+    expect(enqueueSave).toHaveBeenCalledTimes(2);
+    const expectedSecondText = FIXTURE_NOTES[0]
+      .text!.replace("- [ ] Ship release @2026-12-01", "- [x] Ship release @2026-12-01")
+      .replace("- [x] Draft spec", "- [ ] Draft spec");
+    expect(enqueueSave).toHaveBeenNthCalledWith(
+      2,
+      "n-alpha",
+      expectedSecondText,
+      "rev-n-alpha",
+      undefined,
+    );
+  });
+
+  it("rejects a stale toggle on the same task from a second query block and refreshes it from cache", async () => {
+    const md =
+      "```query\ntype: tasks\nfrom: Projects\n```\n\n```query\ntype: tasks\nfrom: Projects\n```\n";
+    const onToggleTask = vi.fn();
+    const { queryClient, enqueueSave } = renderWithVault(md, { onToggleTask });
+    enqueueSave.mockImplementation((fileId, text, revision) => {
+      queryClient.setQueryData(["files", fileId, "content"], { text, revision });
+    });
+
+    const regions = await screen.findAllByRole("region", { name: "Query results" });
+    expect(regions).toHaveLength(2);
+    const ship0 = await within(regions[0]).findByRole("checkbox", {
+      name: "Ship release @2026-12-01",
+    });
+    const ship1 = await within(regions[1]).findByRole("checkbox", {
+      name: "Ship release @2026-12-01",
+    });
+    expect(ship1).not.toBeChecked();
+
+    fireEvent.click(ship0);
+    expect(enqueueSave).toHaveBeenCalledTimes(1);
+
+    // Block 1 still renders "Ship release" as unchecked; clicking it must be rejected and refreshed.
+    fireEvent.click(ship1);
+    expect(enqueueSave).toHaveBeenCalledTimes(1);
+    expect(
+      within(regions[1]).getByRole("checkbox", { name: "Ship release @2026-12-01" }),
+    ).toBeChecked();
   });
 
   it("renders a syntax error alert with raw query source without needing vault providers", () => {

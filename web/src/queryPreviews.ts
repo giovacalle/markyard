@@ -22,6 +22,7 @@ import {
   type TaskQueryRow,
 } from "./queryEngine";
 import { formatModifiedDate, formatQueryCountLabel, formatQueryFooter } from "./queryFormat";
+import type { TaskSnapshot } from "./taskToggle";
 import type { VaultDocument } from "./vaultDocuments";
 
 export interface QueryPreviewSources {
@@ -32,8 +33,8 @@ export interface QueryPreviewSources {
   canOpenNote?: () => boolean;
   /** Returns whether task checkboxes should be enabled (read-only / missing SyncQueue => false). */
   canToggleTasks?: () => boolean;
-  /** Toggles a task; returns false if the toggle did not apply so the checkbox can revert. */
-  toggleTask?: (noteId: string, offset: number) => boolean;
+  /** Toggles a task when unchanged at its offset; returns false if the toggle did not apply so the checkbox can revert. */
+  toggleTask?: (noteId: string, task: TaskSnapshot) => boolean;
 }
 
 export const queryPreviewSources = Facet.define<QueryPreviewSources, QueryPreviewSources | null>({
@@ -276,7 +277,9 @@ function renderWidgetContents(
         event.stopPropagation();
       });
       checkbox.addEventListener("change", () => {
-        const ok = sources?.toggleTask?.(row.id, row.offset) ?? false;
+        const ok =
+          sources?.toggleTask?.(row.id, { offset: row.offset, text: row.text, done: row.done }) ??
+          false;
         if (!ok) {
           checkbox.checked = row.done;
         }

@@ -116,8 +116,8 @@ function hasFence(text: string): boolean {
 }
 
 function PreviewQueryBlock({ source }: { source: string }) {
-  const { onToggleTask } = useContext(PreviewContext);
-  return <QueryBlock source={source} onToggleTask={onToggleTask} />;
+  const { text, onToggleTask } = useContext(PreviewContext);
+  return <QueryBlock source={source} currentNoteText={text} onToggleTask={onToggleTask} />;
 }
 
 function hasMath(text: string): boolean {
