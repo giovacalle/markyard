@@ -205,6 +205,38 @@ describe("QueryBlock via Preview", () => {
     expect(container.querySelector("[style]")).toBeNull();
   });
 
+  it("renders aliased table column headers while preserving title links, tag pills, and formatted dates", async () => {
+    const md =
+      '```query\nfrom: Projects\nsort: priority asc\nview: table(title as "Project", status as Status, tags as \'Labels\', modified as "Updated", owner as "Owner, Lead")\n```\n';
+    const { openNote, container } = renderWithVault(md);
+
+    const table = await screen.findByRole("table");
+    const headers = within(table).getAllByRole("columnheader");
+    expect(headers.map((th) => th.textContent)).toEqual([
+      "Project",
+      "Status",
+      "Labels",
+      "Updated",
+      "Owner, Lead",
+    ]);
+
+    const rows = within(table).getAllByRole("row");
+    expect(rows).toHaveLength(3);
+
+    const firstRow = rows[1];
+    const alphaLink = within(firstRow).getByRole("link", { name: "Alpha" });
+    expect(alphaLink).toBeInTheDocument();
+    expect(within(firstRow).getByText("active")).toBeInTheDocument();
+    expect(within(firstRow).getByText("#work")).toBeInTheDocument();
+    expect(within(firstRow).getByText("#q4")).toBeInTheDocument();
+    expect(within(firstRow).getByText("2026-11-27")).toBeInTheDocument();
+    expect(within(firstRow).getByText("—")).toBeInTheDocument();
+
+    fireEvent.click(alphaLink);
+    expect(openNote).toHaveBeenCalledWith("n-alpha");
+    expect(container.querySelector("[style]")).toBeNull();
+  });
+
   it("renders tasks view with ui-sdk checkboxes and toggles tasks live through SyncQueue", async () => {
     const md = "```query\ntype: tasks\nwhere: NOT done\n```\n";
     const onToggleTask = vi.fn();

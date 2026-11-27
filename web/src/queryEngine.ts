@@ -5,9 +5,14 @@ import { maskInlineCode, noteStem, sourceLines } from "./wikilinks";
 
 export type QueryType = "notes" | "tasks";
 
+export interface TableColumn {
+  field: string;
+  label: string;
+}
+
 export type QueryView =
   | { kind: "list" }
-  | { kind: "table"; columns: string[] }
+  | { kind: "table"; columns: TableColumn[] }
   | { kind: "tasks" }
   | { kind: "count" };
 
@@ -105,6 +110,40 @@ function stripQuotes(raw: string): string {
   return trimmed;
 }
 
+/** Reads a quoted literal starting at `input[start]`; `null` when the quote is never closed. */
+function readStringLiteral(input: string, start: number): { value: string; end: number } | null {
+  const quote = input[start];
+  let i = start + 1;
+  let out = "";
+  while (i < input.length) {
+    const cur = input[i];
+    if (quote === '"' && cur === "\\" && i + 1 < input.length) {
+      const next = input[i + 1];
+      if (next === "n") out += "\n";
+      else if (next === "t") out += "\t";
+      else out += next;
+      i += 2;
+      continue;
+    }
+    if (quote === "'" && cur === "'" && input[i + 1] === "'") {
+      out += "'";
+      i += 2;
+      continue;
+    }
+    if (quote === "'" && cur === "\\" && i + 1 < input.length) {
+      out += input[i + 1];
+      i += 2;
+      continue;
+    }
+    if (cur === quote) {
+      return { value: out, end: i + 1 };
+    }
+    out += cur;
+    i += 1;
+  }
+  return null;
+}
+
 type Token =
   | { kind: "lparen"; pos: number }
   | { kind: "rparen"; pos: number }
@@ -164,43 +203,12 @@ function tokenizeWhere(input: string): TokenizeResult {
       continue;
     }
     if (ch === '"' || ch === "'") {
-      const start = i;
-      const quote = ch;
-      i += 1;
-      let out = "";
-      let closed = false;
-      while (i < input.length) {
-        const cur = input[i];
-        if (quote === '"' && cur === "\\" && i + 1 < input.length) {
-          const next = input[i + 1];
-          if (next === "n") out += "\n";
-          else if (next === "t") out += "\t";
-          else out += next;
-          i += 2;
-          continue;
-        }
-        if (quote === "'" && cur === "'" && input[i + 1] === "'") {
-          out += "'";
-          i += 2;
-          continue;
-        }
-        if (quote === "'" && cur === "\\" && i + 1 < input.length) {
-          out += input[i + 1];
-          i += 2;
-          continue;
-        }
-        if (cur === quote) {
-          closed = true;
-          i += 1;
-          break;
-        }
-        out += cur;
-        i += 1;
+      const literal = readStringLiteral(input, i);
+      if (literal === null) {
+        return { ok: false, error: `Unterminated string literal at position ${i + 1}.` };
       }
-      if (!closed) {
-        return { ok: false, error: `Unterminated string literal at position ${start + 1}.` };
-      }
-      tokens.push({ kind: "string", value: out, pos: start });
+      tokens.push({ kind: "string", value: literal.value, pos: i });
+      i = literal.end;
       continue;
     }
     if (ch === "#") {
@@ -419,6 +427,96 @@ export function parseWhere(input: string): ParseWhereResult {
   return result;
 }
 
+type TableViewResult = { ok: true; view: QueryView } | { ok: false; error: string };
+type ColumnPart = { value: string; quoted: boolean };
+
+/** Validates one `field [as label]` column of `table(...)`. */
+function parseTableColumn(
+  parts: ColumnPart[],
+): { ok: true; column: TableColumn } | { ok: false; error: string } {
+  const [field, as, alias, extra] = parts;
+  if (field === undefined) {
+    return { ok: false, error: "Invalid view: empty column name in table(...)." };
+  }
+  if (!IDENTIFIER_RE.test(field.value)) {
+    return { ok: false, error: `Invalid table column "${field.value}".` };
+  }
+  if (as === undefined) {
+    return { ok: true, column: { field: field.value, label: field.value } };
+  }
+  if (as.quoted) {
+    return {
+      ok: false,
+      error: `Invalid view: expected "as" before alias "${as.value}" for column "${field.value}".`,
+    };
+  }
+  if (as.value.toLowerCase() !== "as") {
+    return {
+      ok: false,
+      error: `Invalid view: unexpected token "${as.value}" after column "${field.value}". Use "${field.value} as <label>" to alias a column.`,
+    };
+  }
+  if (alias === undefined) {
+    return { ok: false, error: `Invalid view: missing alias after "${field.value} as".` };
+  }
+  if (alias.value.trim().length === 0) {
+    return { ok: false, error: `Invalid view: empty alias for column "${field.value}".` };
+  }
+  if (extra !== undefined) {
+    return {
+      ok: false,
+      error: `Invalid view: unexpected token "${extra.value}" after alias "${alias.value}".`,
+    };
+  }
+  return { ok: true, column: { field: field.value, label: alias.value } };
+}
+
+/** Parses `(col [as label], ...)` after the `table` keyword; quoted parts may contain `,` and `)`. */
+function parseTableView(input: string): TableViewResult {
+  const columns: TableColumn[] = [];
+  let parts: ColumnPart[] = [];
+  let i = 1; // skip "("
+  for (;;) {
+    while (i < input.length && /\s/.test(input[i])) i += 1;
+    if (i >= input.length) {
+      return { ok: false, error: 'Invalid view: missing closing ")" in table(...).' };
+    }
+    const ch = input[i];
+    if (ch === "," || ch === ")") {
+      i += 1;
+      if (ch === ")" && columns.length === 0 && parts.length === 0) {
+        return { ok: false, error: 'Invalid view: "table()" requires at least one column.' };
+      }
+      const column = parseTableColumn(parts);
+      if (!column.ok) return column;
+      columns.push(column.column);
+      parts = [];
+      if (ch === ")") break;
+    } else if (ch === '"' || ch === "'") {
+      const literal = readStringLiteral(input, i);
+      if (literal === null) {
+        return { ok: false, error: "Invalid view: unclosed quote in table(...)." };
+      }
+      parts.push({ value: literal.value, quoted: true });
+      i = literal.end;
+    } else if (ch === "(") {
+      return { ok: false, error: 'Invalid view: unexpected "(" in table(...).' };
+    } else {
+      const start = i;
+      while (i < input.length && !/[\s,()"']/.test(input[i])) i += 1;
+      parts.push({ value: input.slice(start, i), quoted: false });
+    }
+  }
+  const trailing = input.slice(i).trim();
+  if (trailing.length > 0) {
+    return {
+      ok: false,
+      error: `Invalid view: unexpected trailing content "${trailing}" after table(...).`,
+    };
+  }
+  return { ok: true, view: { kind: "table", columns } };
+}
+
 function parseView(raw: string): { ok: true; view: QueryView } | { ok: false; error: string } {
   const value = stripQuotes(raw);
   const lower = value.toLowerCase();
@@ -426,24 +524,11 @@ function parseView(raw: string): { ok: true; view: QueryView } | { ok: false; er
   if (lower === "tasks") return { ok: true, view: { kind: "tasks" } };
   if (lower === "count") return { ok: true, view: { kind: "count" } };
 
-  const tableMatch = /^table\s*\((.*)\)$/i.exec(value);
-  if (tableMatch !== null) {
-    const inner = tableMatch[1].trim();
-    if (inner.length === 0) {
-      return { ok: false, error: 'Invalid view: "table()" requires at least one column.' };
+  if (lower.startsWith("table")) {
+    const rest = value.slice(5).trimStart();
+    if (rest.startsWith("(")) {
+      return parseTableView(rest);
     }
-    const columns: string[] = [];
-    for (const part of inner.split(",")) {
-      const col = stripQuotes(part);
-      if (col.length === 0) {
-        return { ok: false, error: "Invalid view: empty column name in table(...)." };
-      }
-      if (!IDENTIFIER_RE.test(col)) {
-        return { ok: false, error: `Invalid table column "${col}".` };
-      }
-      columns.push(col);
-    }
-    return { ok: true, view: { kind: "table", columns } };
   }
 
   return {

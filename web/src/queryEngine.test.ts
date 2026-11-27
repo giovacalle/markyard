@@ -138,7 +138,129 @@ describe("parseQuery", () => {
     expect(res.query.limit).toBe(5);
     expect(res.query.view).toEqual({
       kind: "table",
-      columns: ["title", "status", "priority", "tags"],
+      columns: [
+        { field: "title", label: "title" },
+        { field: "status", label: "status" },
+        { field: "priority", label: "priority" },
+        { field: "tags", label: "tags" },
+      ],
+    });
+  });
+
+  it("parses table column aliases with double quotes, single quotes, unquoted tokens, commas, and escapes", () => {
+    const res = parseQuery(
+      [
+        'view: table(title as "Name, Full", status AS Status, tags as \'Note Labels\', modified As "Last Updated")',
+      ].join("\n"),
+    );
+    expect(res).toEqual({
+      ok: true,
+      query: {
+        type: "notes",
+        from: undefined,
+        where: undefined,
+        sort: undefined,
+        limit: undefined,
+        view: {
+          kind: "table",
+          columns: [
+            { field: "title", label: "Name, Full" },
+            { field: "status", label: "Status" },
+            { field: "tags", label: "Note Labels" },
+            { field: "modified", label: "Last Updated" },
+          ],
+        },
+      },
+    });
+
+    const escaped = parseQuery(
+      `view: table(title as "Say \\"Hi\\" \\\\ (All)", owner as 'It\\'s \\\\ Team', status as 'Don''t Stop', priority)`,
+    );
+    expect(escaped.ok).toBe(true);
+    if (!escaped.ok) return;
+    expect(escaped.query.view).toEqual({
+      kind: "table",
+      columns: [
+        { field: "title", label: 'Say "Hi" \\ (All)' },
+        { field: "owner", label: "It's \\ Team" },
+        { field: "status", label: "Don't Stop" },
+        { field: "priority", label: "priority" },
+      ],
+    });
+  });
+
+  it("rejects malformed table column aliases with clear diagnostics", () => {
+    expect(parseQuery('view: table(modified as "Updated)')).toMatchObject({
+      ok: false,
+      error: /unclosed quote/i,
+    });
+    expect(parseQuery("view: table(modified as 'Updated)")).toMatchObject({
+      ok: false,
+      error: /unclosed quote/i,
+    });
+    expect(parseQuery('view: table(modified as "Updated')).toMatchObject({
+      ok: false,
+      error: /unclosed quote/i,
+    });
+    expect(parseQuery("view: table(modified as)")).toMatchObject({
+      ok: false,
+      error: /missing alias/i,
+    });
+    expect(parseQuery("view: table(modified as, status)")).toMatchObject({
+      ok: false,
+      error: /missing alias/i,
+    });
+    expect(parseQuery('view: table(modified as "")')).toMatchObject({
+      ok: false,
+      error: /empty alias/i,
+    });
+    expect(parseQuery('view: table(modified as "   ")')).toMatchObject({
+      ok: false,
+      error: /empty alias/i,
+    });
+    expect(parseQuery("view: table(modified as '')")).toMatchObject({
+      ok: false,
+      error: /empty alias/i,
+    });
+    expect(parseQuery("view: table(123bad as Label)")).toMatchObject({
+      ok: false,
+      error: /Invalid table column/i,
+    });
+    expect(parseQuery('view: table("123bad" as Label)')).toMatchObject({
+      ok: false,
+      error: /Invalid table column/i,
+    });
+    expect(parseQuery("view: table(modified as Updated extra)")).toMatchObject({
+      ok: false,
+      error: /unexpected token/i,
+    });
+    expect(parseQuery('view: table(modified as "Updated" extra)')).toMatchObject({
+      ok: false,
+      error: /unexpected token/i,
+    });
+    expect(parseQuery("view: table(modified Updated)")).toMatchObject({
+      ok: false,
+      error: /unexpected token/i,
+    });
+    expect(parseQuery('view: table(modified "Updated")')).toMatchObject({
+      ok: false,
+      error: /expected "as"/i,
+    });
+    expect(parseQuery("view: table(, title)")).toMatchObject({
+      ok: false,
+      error: /empty column/i,
+    });
+    expect(parseQuery("view: table(title, , status)")).toMatchObject({
+      ok: false,
+      error: /empty column/i,
+    });
+    expect(parseQuery("view: table(title, status")).toMatchObject({
+      ok: false,
+      error: /missing closing/i,
+    });
+    expect(parseQuery("view: table(title) extra")).toMatchObject({
+      ok: false,
+      error: /unexpected trailing content/i,
     });
   });
 
@@ -164,6 +286,22 @@ describe("parseQuery", () => {
     });
     expect(parseQuery("view: kanban")).toMatchObject({ ok: false, error: /Invalid view/i });
     expect(parseQuery("view: table()")).toMatchObject({ ok: false, error: /at least one column/i });
+    // Quoted field names keep working, with or without an alias.
+    expect(parseQuery(`view: table("title", 'status' as State)`)).toMatchObject({
+      ok: true,
+      query: {
+        view: {
+          kind: "table",
+          columns: [
+            { field: "title", label: "title" },
+            { field: "status", label: "State" },
+          ],
+        },
+      },
+    });
+    // No arbitrary column cap.
+    const many = Array.from({ length: 100 }, (_, n) => `c${n}`).join(", ");
+    expect(parseQuery(`view: table(${many})`).ok).toBe(true);
     expect(parseQuery("view: table(title, )")).toMatchObject({
       ok: false,
       error: /empty column/i,
