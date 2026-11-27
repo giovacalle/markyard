@@ -168,6 +168,7 @@ function OpenNewFromTemplateDialog({
   const { attachmentsFolder, showAttachmentsFolder, templatesFolder } = useSettings();
   const titleId = useId();
   const folderSearchId = useId();
+  const errorId = useId();
   const titleInputRef = useRef<HTMLInputElement>(null);
 
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
@@ -291,7 +292,7 @@ function OpenNewFromTemplateDialog({
       }}
     >
       <DialogBackdrop className="fixed inset-0 z-40 bg-neutral-950/50 backdrop-blur-[1px]" />
-      <DialogContent className="fixed top-[12%] left-1/2 z-50 w-[min(30rem,calc(100vw-2rem))] -translate-x-1/2 rounded-xl border border-neutral-200 bg-white p-6 text-neutral-900 shadow-xl outline-none dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-100">
+      <DialogContent className="fixed top-[12%] left-1/2 z-50 max-h-[calc(100dvh-2rem)] w-[min(30rem,calc(100vw-2rem))] -translate-x-1/2 overflow-y-auto rounded-xl border border-neutral-200 bg-white p-6 text-neutral-900 shadow-xl outline-none dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-100">
         <div className="space-y-1">
           <DialogTitle className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
             New note from template
@@ -395,6 +396,7 @@ function OpenNewFromTemplateDialog({
                 value={title}
                 disabled={mutation.isPending}
                 aria-invalid={validationError !== null}
+                aria-describedby={errorMessage !== null ? errorId : undefined}
                 placeholder="e.g. Weekly Sync"
                 onChange={(event) => {
                   setTitle(event.target.value);
@@ -431,6 +433,15 @@ function OpenNewFromTemplateDialog({
                 value={folderQuery}
                 disabled={mutation.isPending}
                 placeholder="Filter folders…"
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    const first = filteredFolders[0];
+                    if (first !== undefined) {
+                      setSelectedFolderId(first.id);
+                    }
+                  }
+                }}
                 onChange={(event) => {
                   setFolderQuery(event.target.value);
                   if (mutation.isError) {
@@ -479,7 +490,7 @@ function OpenNewFromTemplateDialog({
             </div>
 
             {errorMessage !== null && (
-              <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+              <p id={errorId} role="alert" className="text-sm text-red-600 dark:text-red-400">
                 {errorMessage}
               </p>
             )}

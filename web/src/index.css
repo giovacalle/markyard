@@ -35,6 +35,10 @@
   --cm-yaml-atom: #b45309;
   --cm-yaml-comment: #737373;
   --cm-yaml-fence: #a1a1a1;
+  --cm-code-keyword: #6d28d9;
+  --cm-code-type: #be123c;
+  --cm-code-function: #2563eb;
+  --cm-code-deleted: #b91c1c;
   --reveal-flash-bg: #bfdbfe;
 }
 
@@ -58,6 +62,10 @@
   --cm-yaml-atom: #ffd230;
   --cm-yaml-comment: #a1a1a1;
   --cm-yaml-fence: #737373;
+  --cm-code-keyword: #c4b5fd;
+  --cm-code-type: #fda4af;
+  --cm-code-function: #60a5fa;
+  --cm-code-deleted: #fca5a5;
   --reveal-flash-bg: rgba(59, 130, 246, 0.35);
 }
 

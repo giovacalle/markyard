@@ -3,6 +3,7 @@ import { parseFrontmatter } from "./frontmatter";
 import {
   BUILTIN_SLASH_COMMANDS,
   dailyNoteContent,
+  dailyNoteTemplate,
   expandTemplate,
   isTemplatesFolder,
   slashCommands,
@@ -213,6 +214,19 @@ describe("dailyNoteContent", () => {
     expect(dailyNoteContent(templates, now, "2026-11-21", "Daily")).toBe(
       "# 2026-11-21 (Daily)\r\n\r\n- [ ] plan 09:05\r\n",
     );
+    expect(dailyNoteTemplate(templates, now, "2026-11-21", "Daily")).toEqual({
+      text: "# 2026-11-21 (Daily)\r\n\r\n- [ ] plan 09:05\r\n",
+      cursor: "# 2026-11-21 (Daily)\r\n\r\n".length,
+    });
     expect(dailyNoteContent([{ id: "m", name: "Meeting.md", text: "x" }], now, "t")).toBeNull();
+  });
+
+  it("handles huge date offsets and unclosed braces safely in linear time", () => {
+    const now = new Date(2026, 10, 21, 9, 5);
+    expect(expandTemplate("{{date+999999999999999d}}", { now, title: "t" }).text).toBe(
+      "{{date+999999999999999d}}",
+    );
+    const unclosed = `{{${" ".repeat(4000)}unclosed`;
+    expect(expandTemplate(unclosed, { now, title: "t" }).text).toBe(unclosed);
   });
 });

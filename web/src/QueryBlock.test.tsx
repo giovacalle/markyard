@@ -127,13 +127,22 @@ const FIXTURE_NOTES: FixtureNote[] = [
   },
 ];
 
-function renderWithVault(markdown: string) {
+function renderWithVault(
+  markdown: string,
+  options?: {
+    onToggleTask?: (nextText: string) => void;
+    currentFileId?: string | null;
+  },
+) {
   const ctx = setupVault(FIXTURE_NOTES, FIXTURE_FOLDERS);
+  if (options?.currentFileId !== undefined) {
+    ctx.pkm.currentFileId = options.currentFileId;
+  }
   const view = render(
     <QueryClientProvider client={ctx.queryClient}>
       <SyncQueueContext.Provider value={ctx.syncQueue}>
         <PkmContext.Provider value={ctx.pkm}>
-          <Preview text={markdown} />
+          <Preview text={markdown} onToggleTask={options?.onToggleTask} />
         </PkmContext.Provider>
       </SyncQueueContext.Provider>
     </QueryClientProvider>,
@@ -181,7 +190,8 @@ describe("QueryBlock via Preview", () => {
 
   it("renders tasks view with ui-sdk checkboxes and toggles tasks live through SyncQueue", async () => {
     const md = "```query\ntype: tasks\nwhere: NOT done\n```\n";
-    const { enqueueSave, openNote, container } = renderWithVault(md);
+    const onToggleTask = vi.fn();
+    const { enqueueSave, openNote, container } = renderWithVault(md, { onToggleTask });
 
     const checkbox = await screen.findByRole("checkbox", { name: "Ship release @2026-12-01" });
     expect(checkbox).not.toBeChecked();
@@ -199,6 +209,7 @@ describe("QueryBlock via Preview", () => {
       "rev-n-alpha",
       undefined,
     );
+    expect(onToggleTask).not.toHaveBeenCalled();
 
     // Since query filters `NOT done`, optimistic update immediately removes the checked-off task.
     await waitFor(() =>
@@ -211,13 +222,43 @@ describe("QueryBlock via Preview", () => {
     expect(container.querySelector('[style]:not([data-slot="checkbox-input"])')).toBeNull();
   });
 
-  it("renders count view as a clean KPI card", async () => {
-    const md = "```query\ntype: tasks\nview: count\n```\n";
+  it("routes task toggles for the currently open note through onToggleTask and disables checkboxes in read-only mode", async () => {
+    const md = "```query\ntype: tasks\nwhere: NOT done\n```\n";
+    const onToggleTask = vi.fn();
+    const { enqueueSave, unmount } = renderWithVault(md, {
+      onToggleTask,
+      currentFileId: "n-alpha",
+    });
+
+    const checkbox = await screen.findByRole("checkbox", { name: "Ship release @2026-12-01" });
+    fireEvent.click(checkbox);
+
+    expect(onToggleTask).toHaveBeenCalledWith(
+      FIXTURE_NOTES[0].text!.replace(
+        "- [ ] Ship release @2026-12-01",
+        "- [x] Ship release @2026-12-01",
+      ),
+    );
+    expect(enqueueSave).not.toHaveBeenCalled();
+    unmount();
+
+    // Read-only mode omits onToggleTask -> checkboxes must be disabled and not mutate notes.
+    const readonly = renderWithVault(md);
+    const readonlyCheckbox = await screen.findByRole("checkbox", {
+      name: "Ship release @2026-12-01",
+    });
+    expect(readonlyCheckbox).toBeDisabled();
+    fireEvent.click(readonlyCheckbox);
+    expect(readonly.enqueueSave).not.toHaveBeenCalled();
+  });
+
+  it("renders count view with totalMatched even when limit is set", async () => {
+    const md = "```query\ntype: tasks\nlimit: 1\nview: count\n```\n";
     renderWithVault(md);
 
     expect(await screen.findByText("3")).toBeInTheDocument();
     expect(screen.getByText("matching tasks")).toBeInTheDocument();
-    expect(screen.getByText("3 results · 2 of 3 notes cached")).toBeInTheDocument();
+    expect(screen.getByText("2 of 3 notes cached")).toBeInTheDocument();
   });
 
   it("renders a syntax error alert with raw query source without needing vault providers", () => {

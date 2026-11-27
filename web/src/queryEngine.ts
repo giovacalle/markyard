@@ -323,6 +323,9 @@ export function parseWhere(input: string): ParseWhereResult {
     if (rel !== null) {
       const sign = rel[1] === "-" ? -1 : 1;
       const amount = rel[2] === undefined ? 0 : Number.parseInt(rel[2], 10);
+      if (!Number.isSafeInteger(amount) || amount > 100_000) {
+        return { ok: false, error: `Relative date offset "${tok.value}" is out of range.` };
+      }
       const unit = (rel[3]?.toLowerCase() ?? "d") as "d" | "w" | "m";
       return { ok: true, value: { kind: "relativeDate", offset: sign * amount, unit } };
     }
@@ -695,6 +698,9 @@ function evalCompare(
       : String(literal.value);
 
   if (fieldValue === undefined) {
+    if (op === "=") {
+      return isEmptyLiteral(literal);
+    }
     if (op === "!=") {
       return !isEmptyLiteral(literal);
     }

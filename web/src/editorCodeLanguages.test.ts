@@ -81,12 +81,22 @@ describe("matchCodeLanguage", () => {
     expect(desc?.name).toBe(expectedName);
   });
 
-  it.each(["", "   ", "text", "plaintext", "txt", "mermaid", "unknown-language-xyz"])(
-    "returns null for plain text or unknown info %j",
-    (info) => {
-      expect(matchCodeLanguage(info)).toBeNull();
-    },
-  );
+  it.each([
+    "",
+    "   ",
+    "text",
+    "plaintext",
+    "txt",
+    "context",
+    "mermaid",
+    "constructor",
+    "toString",
+    "valueOf",
+    "__proto__",
+    "unknown-language-xyz",
+  ])("returns null for plain text, prototype keys, or unknown info %j", (info) => {
+    expect(matchCodeLanguage(info)).toBeNull();
+  });
 });
 
 describe("lazy fenced code block parsing", () => {

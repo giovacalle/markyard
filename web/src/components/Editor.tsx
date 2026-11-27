@@ -295,10 +295,10 @@ const MARKDOWN_HIGHLIGHT = HighlightStyle.define([
 ]);
 
 const CODE_HIGHLIGHT = HighlightStyle.define([
-  { tag: [t.keyword, t.modifier], color: "var(--cm-code-keyword, light-dark(#6d28d9, #c4b5fd))" },
+  { tag: [t.keyword, t.modifier], color: "var(--cm-code-keyword, #6d28d9)" },
   {
     tag: [t.typeName, t.className, t.tagName, t.namespace, t.macroName, t.standard(t.variableName)],
-    color: "var(--cm-code-type, light-dark(#be123c, #fda4af))",
+    color: "var(--cm-code-type, #be123c)",
   },
   {
     tag: [t.function(t.variableName), t.function(t.propertyName), t.definition(t.variableName)],
@@ -318,7 +318,7 @@ const CODE_HIGHLIGHT = HighlightStyle.define([
     color: "var(--cm-quote, #525252)",
   },
   { tag: [t.paren, t.angleBracket], color: "var(--cm-yaml-fence, var(--cm-muted, #737373))" },
-  { tag: [t.deleted, t.invalid], color: "var(--cm-code-deleted, light-dark(#b91c1c, #fca5a5))" },
+  { tag: [t.deleted, t.invalid], color: "var(--cm-code-deleted, #b91c1c)" },
 ]);
 
 const YAML_HIGHLIGHT = HighlightStyle.define(

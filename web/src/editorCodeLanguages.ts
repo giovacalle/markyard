@@ -27,22 +27,16 @@ export const CODE_LANGUAGES: readonly LanguageDescription[] = [
  * Common fence info shorthands whose short forms live only in `extensions` (not
  * `alias`) inside `@codemirror/language-data`.
  */
-const LANGUAGE_ALIASES: Readonly<Record<string, string>> = {
-  console: "shell",
-  docker: "dockerfile",
-  golang: "go",
-  jsonc: "json",
-  md: "markdown",
-  py: "python",
-  rs: "rust",
-  shellscript: "shell",
-};
-
-/**
- * Plain-text fence labels that must not fuzzy-match unrelated grammars (for example,
- * `"text"` and `"plaintext"` contain `"tex"`, which would otherwise match LaTeX).
- */
-const PLAIN_TEXT_INFO = new Set(["none", "plain", "plaintext", "text", "txt"]);
+const LANGUAGE_ALIASES: ReadonlyMap<string, string> = new Map([
+  ["console", "shell"],
+  ["docker", "dockerfile"],
+  ["golang", "go"],
+  ["jsonc", "json"],
+  ["md", "markdown"],
+  ["py", "python"],
+  ["rs", "rust"],
+  ["shellscript", "shell"],
+]);
 
 /**
  * Resolves a Markdown fenced code info string (such as `"ts"`, `"python"`, or
@@ -54,9 +48,6 @@ export function matchCodeLanguage(info: string): LanguageDescription | null {
     return null;
   }
   const lower = token.toLowerCase();
-  if (PLAIN_TEXT_INFO.has(lower)) {
-    return null;
-  }
-  const normalized = LANGUAGE_ALIASES[lower] ?? lower;
-  return LanguageDescription.matchLanguageName(CODE_LANGUAGES, normalized, true);
+  const normalized = LANGUAGE_ALIASES.get(lower) ?? lower;
+  return LanguageDescription.matchLanguageName(CODE_LANGUAGES, normalized, false);
 }

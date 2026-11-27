@@ -4,13 +4,13 @@ Markyard supports reusable Markdown templates with dynamic placeholders and live
 
 ## Templates
 
-Create plain `.md` files inside your vault's `Templates/` folder (configurable in **Settings → PKM → Templates folder**). Templates are ordinary Google Drive Markdown files, so they sync across devices and remain portable.
+Create plain `.md` files inside your vault's `Templates/` folder (configurable in **Settings → Vault → Templates folder**). Templates are ordinary Google Drive Markdown files, so they sync across devices and remain portable.
 
 ### Using templates
 
 - **Slash menu (`/`)**: Type `/` at the start of a line or after whitespace in the editor to insert built-in blocks (`/today`, `/time`, `/task`, `/callout`, `/table`, `/code`, `/divider`) or any note from your `Templates/` folder.
-- **Command palette (`Cmd+K`)**: Run **New note from template…** to pick a template and create a new note in the current folder (or vault root) with all placeholders expanded automatically.
-- **Daily notes (`Templates/Daily.md`)**: When a note named `Daily.md` exists in your `Templates/` folder, opening today's daily note uses it as the initial body for a newly created daily note.
+- **Command palette (`Cmd+K`)**: Run **New note from template…** to pick a template, enter a title, and choose any destination folder (defaulting to the current folder or vault root) with all placeholders expanded automatically.
+- **Daily notes (`Templates/Daily.md`)**: When a note named `Daily.md` exists in your `Templates/` folder, opening today's daily note uses it as the initial body for a newly created daily note (placing the editor caret at `{{cursor}}` when present).
 
 ### Template tokens
 
@@ -23,7 +23,7 @@ All placeholders are case-sensitive inside `{{ ... }}` (surrounding whitespace i
 | `{{datetime}}` | Local date and time (`YYYY-MM-DD HH:mm`) |
 | `{{weekday}}` | Full weekday name (e.g. `Friday`) |
 | `{{week}}` | ISO 8601 week number (`YYYY-Www`, e.g. `2026-W48`) |
-| `{{month}}` | Full month name (e.g. `November`) |
+| `{{month}}` | ISO month (`YYYY-MM`, e.g. `2026-11`; use `{{date:MMMM}}` for the full month name) |
 | `{{date+Nd}}`, `{{date-Nd}}` | Date offset by `N` days (`d`), weeks (`w`), months (`m`), or years (`y`) — e.g. `{{date+1d}}`, `{{date-1w}}`, `{{date+1m}}`, `{{date-1y}}` |
 | `{{date:FORMAT}}` | Custom formatted date (also combinable with offsets: `{{date+7d:MMM D, YYYY}}`) |
 | `{{title}}` | Current note's filename without `.md` |

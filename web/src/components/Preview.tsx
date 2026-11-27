@@ -31,7 +31,7 @@ import {
   OctagonAlertIcon,
 } from "./icons";
 import { BareUrlBookmark, ExternalLink } from "./LinkPreview";
-import { QueryBlock } from "./QueryBlock";
+import { QueryBlock, QueryVaultDocumentsProvider } from "./QueryBlock";
 
 type PluginList = NonNullable<ComponentPropsWithoutRef<typeof Markdown>["remarkPlugins"]>;
 
@@ -112,6 +112,15 @@ function stripCode(text: string): string {
 
 function hasFence(text: string): boolean {
   return /^[ \t]{0,3}(`{3,}|~{3,})/m.test(text);
+}
+
+function hasQueryFence(text: string): boolean {
+  return /^[ \t]{0,3}(?:`{3,}|~{3,})[ \t]*query(?:\s|$)/im.test(text);
+}
+
+function PreviewQueryBlock({ source }: { source: string }) {
+  const { onToggleTask } = useContext(PreviewContext);
+  return <QueryBlock source={source} onToggleTask={onToggleTask} />;
 }
 
 function hasMath(text: string): boolean {
@@ -477,7 +486,7 @@ const MARKDOWN_COMPONENTS = {
       return <MermaidBlock source={raw} />;
     }
     if (language === "query") {
-      return <QueryBlock source={raw} />;
+      return <PreviewQueryBlock source={raw} />;
     }
     return (
       <CodeBlock language={language} code={raw}>
@@ -527,18 +536,27 @@ export function Preview({
     [math, highlight],
   );
 
+  const hasQueries = useMemo(() => hasQueryFence(markdown), [markdown]);
+  const rendered = (
+    <div className="markdown-preview">
+      <Markdown
+        components={MARKDOWN_COMPONENTS}
+        remarkPlugins={remarkPlugins}
+        rehypePlugins={rehypePlugins}
+        skipHtml
+      >
+        {markdown}
+      </Markdown>
+    </div>
+  );
+
   return (
     <PreviewContext.Provider value={context}>
-      <div className="markdown-preview">
-        <Markdown
-          components={MARKDOWN_COMPONENTS}
-          remarkPlugins={remarkPlugins}
-          rehypePlugins={rehypePlugins}
-          skipHtml
-        >
-          {markdown}
-        </Markdown>
-      </div>
+      {hasQueries ? (
+        <QueryVaultDocumentsProvider>{rendered}</QueryVaultDocumentsProvider>
+      ) : (
+        rendered
+      )}
     </PreviewContext.Provider>
   );
 }

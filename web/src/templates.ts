@@ -15,7 +15,8 @@ export interface TemplateContext {
   frontmatter?: Frontmatter | string | null;
 }
 
-const PLACEHOLDER = /\{\{\s*([^{}]+?)\s*\}\}/g;
+const PLACEHOLDER = /\{\{([^{}]+)\}\}/g;
+const MAX_DATE_OFFSET = 100_000;
 const DATE_EXPR = /^date(?:([+-])(\d+)([dwmyDWMY]))?(?::(.+))?$/;
 const FRONTMATTER_EXPR = /^(?:fm|frontmatter)\.(.+)$/;
 const FORMAT_TOKEN = /YYYY|YY|MMMM|MMM|MM|M|DD|D|dddd|ddd|HH|mm|WW/g;
@@ -185,7 +186,10 @@ export function expandTemplate(
   let text = "";
   let last = 0;
   for (const match of template.matchAll(PLACEHOLDER)) {
-    const expr = match[1];
+    const expr = match[1].trim();
+    if (expr.length === 0) {
+      continue;
+    }
     let replacement: string | null = null;
     let isCursor = false;
 
@@ -210,18 +214,26 @@ export function expandTemplate(
       const dateMatch = DATE_EXPR.exec(expr);
       if (dateMatch !== null) {
         const [, sign, rawAmount, rawUnit, format] = dateMatch;
-        const targetDate =
-          sign !== undefined && rawAmount !== undefined && rawUnit !== undefined
-            ? addDateOffset(
-                context.now,
-                (sign === "-" ? -1 : 1) * Number(rawAmount),
-                rawUnit.toLowerCase() as "d" | "w" | "m" | "y",
-              )
-            : context.now;
-        replacement =
-          format !== undefined
-            ? formatDatePattern(targetDate, format)
-            : formatLocalDate(targetDate);
+        let targetDate: Date | null = context.now;
+        if (sign !== undefined && rawAmount !== undefined && rawUnit !== undefined) {
+          const amount = Number(rawAmount);
+          if (!Number.isSafeInteger(amount) || amount > MAX_DATE_OFFSET) {
+            targetDate = null;
+          } else {
+            const candidate = addDateOffset(
+              context.now,
+              (sign === "-" ? -1 : 1) * amount,
+              rawUnit.toLowerCase() as "d" | "w" | "m" | "y",
+            );
+            targetDate = Number.isNaN(candidate.getTime()) ? null : candidate;
+          }
+        }
+        if (targetDate !== null) {
+          replacement =
+            format !== undefined
+              ? formatDatePattern(targetDate, format)
+              : formatLocalDate(targetDate);
+        }
       } else {
         const fmMatch = FRONTMATTER_EXPR.exec(expr);
         if (fmMatch !== null) {
@@ -306,8 +318,21 @@ export function isTemplatesFolder(path: readonly string[], folderName = "Templat
 }
 
 /**
+ * Expands a vault `Templates/Daily.md` for today's note (returning both `text` and `cursor`),
+ * or `null` when there is none.
+ */
+export function dailyNoteTemplate(
+  templates: readonly TemplateNote[],
+  now: Date,
+  title: string,
+  folder = "",
+): { text: string; cursor: number } | null {
+  const daily = templates.find((template) => template.name.toLowerCase() === "daily.md");
+  return daily === undefined ? null : expandTemplate(daily.text, { now, title, folder });
+}
+
+/**
  * The initial body of today's note from a vault `Templates/Daily.md`, or null when there is none.
- * `{{cursor}}` is dropped (the note opens with the caret at its end).
  */
 export function dailyNoteContent(
   templates: readonly TemplateNote[],
@@ -315,6 +340,5 @@ export function dailyNoteContent(
   title: string,
   folder = "",
 ): string | null {
-  const daily = templates.find((template) => template.name.toLowerCase() === "daily.md");
-  return daily === undefined ? null : expandTemplate(daily.text, { now, title, folder }).text;
+  return dailyNoteTemplate(templates, now, title, folder)?.text ?? null;
 }

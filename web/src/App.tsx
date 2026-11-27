@@ -83,7 +83,7 @@ import {
 } from "./driveChanges";
 import { findHeading, updateLinksAfterRename } from "./linkIndex";
 import { type PkmApi, PkmContext } from "./pkm";
-import { dailyNoteContent } from "./templates";
+import { dailyNoteTemplate } from "./templates";
 import { readTemplates, useVaultNotes } from "./vaultDocuments";
 import { moveErrorMessage, useMoveNode } from "./moveItem";
 import {
@@ -1146,13 +1146,23 @@ function SessionContent({
         () => [],
       );
       const dailyTemplateFolder = dailyFolderName !== "" ? folder.name : "";
-      const content =
-        dailyNoteContent(templates, now, name.replace(/\.md$/i, ""), dailyTemplateFolder) ??
-        todayNoteInitialContent(now);
+      const dailyExpanded = dailyNoteTemplate(
+        templates,
+        now,
+        name.replace(/\.md$/i, ""),
+        dailyTemplateFolder,
+      );
+      const content = dailyExpanded?.text ?? todayNoteInitialContent(now);
       if (createNoteMutation.isPending) {
         return;
       }
-      createNoteMutation.mutate({ folder, name, content, openExistingOnConflict: true });
+      createNoteMutation.mutate({
+        folder,
+        name,
+        content,
+        initialCursor: dailyExpanded?.cursor,
+        openExistingOnConflict: true,
+      });
     };
 
     // Creates `<stem>.md` beside the open note (the root when its folder is unknown) and opens it,

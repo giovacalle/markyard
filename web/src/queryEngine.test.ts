@@ -370,4 +370,17 @@ describe("executeQuery (tasks)", () => {
     expect(res.totalMatched).toBe(6);
     expect(res.rows).toHaveLength(3);
   });
+
+  it("rejects out-of-range relative date offsets and keeps missing-field equality consistent", () => {
+    const huge = parseQuery("where: due <= today+9999999999d");
+    expect(huge.ok).toBe(false);
+
+    const eqEmpty = parseQuery('where: status = ""');
+    const neqEmpty = parseQuery('where: status != ""');
+    expect(eqEmpty.ok && neqEmpty.ok).toBe(true);
+    if (!eqEmpty.ok || !neqEmpty.ok) return;
+    const eqRes = executeQuery(eqEmpty.query, SAMPLE_DOCS, NOW);
+    const neqRes = executeQuery(neqEmpty.query, SAMPLE_DOCS, NOW);
+    expect(eqRes.rows.length + neqRes.rows.length).toBe(SAMPLE_DOCS.length);
+  });
 });
