@@ -4,6 +4,8 @@ status: superseded by 0003
 
 # The BFF runs on Cloudflare Workers with `workers-rs`, deployed with Alchemy
 
+> Superseded by [ADR 0003](0003-bff-on-cloudflare-workers-with-effect-v4.md). Cloudflare is no longer the only host: [ADR 0005](0005-second-host-node-24-in-docker.md) adds a Node 24 container.
+
 The BFF needs a host that serves the web app and `/api/` on one origin and keeps no session storage. Spike B (#3, 2026-11-16) built a throwaway Rust Worker, deployed it to the user's Cloudflare account (Workers Paid plan), measured it and deleted it. Nothing blocked, so the host is Cloudflare Workers with the `worker` crate, and every deploy goes through Alchemy. The VM fallback was not needed.
 
 ## Worker layout

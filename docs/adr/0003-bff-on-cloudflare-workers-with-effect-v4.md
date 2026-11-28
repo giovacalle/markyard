@@ -5,7 +5,7 @@ supersedes: 0001
 
 # The BFF runs on Cloudflare Workers in TypeScript with Effect v4
 
-Supersedes [ADR 0001](0001-bff-on-cloudflare-workers-with-workers-rs.md). The host stays the same: one Cloudflare Worker serves the web app as static assets and runs first for `/api/*`, deployed with Alchemy. What changes is the language of the BFF: the Rust crates `core/` and `worker/` are replaced by the TypeScript workspace package `bff/`, written with `effect@4.1.4`, following a benchmarked spike on local and production Cloudflare Workers.
+Supersedes [ADR 0001](0001-bff-on-cloudflare-workers-with-workers-rs.md). Since [ADR 0005](0005-second-host-node-24-in-docker.md), Cloudflare Workers is one of two hosts; this record covers the Cloudflare one. The host stays the same: one Cloudflare Worker serves the web app as static assets and runs first for `/api/*`, deployed with Alchemy. What changes is the language of the BFF: the Rust crates `core/` and `worker/` are replaced by the TypeScript workspace package `bff/`, written with `effect@4.1.4`, following a benchmarked spike on local and production Cloudflare Workers.
 
 ## Why
 
