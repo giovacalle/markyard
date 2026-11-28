@@ -11,7 +11,6 @@ import { runMatrix, runSmoke } from "./smoke.mjs";
 
 const testDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(testDir, "..");
-const realHeadersFile = resolve(repoRoot, "web/public/_headers");
 const defaultFixtureFile = resolve(testDir, "mock-api.fixture.json");
 const rootPackageJson = resolve(repoRoot, "package.json");
 
@@ -64,7 +63,6 @@ describe("smoke runner", () => {
     const defaultFixture = JSON.parse(readFileSync(defaultFixtureFile, "utf8"));
     const inner = createMockServer({
       distDir,
-      headersFile: realHeadersFile,
       fixture: loadFixture(defaultFixture),
     });
     const innerHandler = inner.listeners("request")[0];
@@ -88,7 +86,7 @@ describe("smoke runner", () => {
 
     try {
       await assert.rejects(
-        () => runMatrix(wrapperBaseUrl, { headersFile: realHeadersFile, out: capture.out }),
+        () => runMatrix(wrapperBaseUrl, { out: capture.out }),
         /\bsession\b/i,
       );
       assert.match(capture.text(), /FAIL session:/);

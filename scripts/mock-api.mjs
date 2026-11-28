@@ -1,7 +1,10 @@
 import { readFileSync, realpathSync, statSync } from "node:fs";
 import { createServer } from "node:http";
-import { dirname, extname, isAbsolute, relative, resolve } from "node:path";
+import { dirname, resolve } from "node:path";
+import { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
+
+import { createStaticHandler } from "../host-node/static-host.mjs";
 
 const scriptPath = fileURLToPath(import.meta.url);
 const scriptDir = dirname(scriptPath);
@@ -9,76 +12,8 @@ const repoRoot = resolve(scriptDir, "..");
 
 const DEFAULT_PORT = 4173;
 const DEFAULT_DIST_DIR = resolve(repoRoot, "web/dist");
-const DEFAULT_HEADERS_FILE = resolve(repoRoot, "web/public/_headers");
 const DEFAULT_FIXTURE_FILE = resolve(scriptDir, "mock-api.fixture.json");
 const CSP_REPORT_PATH = "/__mock/csp-reports";
-
-const MIME_TYPES = new Map([
-  [".html", "text/html; charset=utf-8"],
-  [".js", "text/javascript; charset=utf-8"],
-  [".mjs", "text/javascript; charset=utf-8"],
-  [".css", "text/css; charset=utf-8"],
-  [".svg", "image/svg+xml"],
-  [".png", "image/png"],
-  [".webmanifest", "application/manifest+json; charset=utf-8"],
-  [".json", "application/json; charset=utf-8"],
-  [".woff2", "font/woff2"],
-  [".woff", "font/woff"],
-  [".ttf", "font/ttf"],
-  [".ico", "image/x-icon"],
-  [".txt", "text/plain; charset=utf-8"],
-]);
-
-/**
- * Parses Cloudflare `_headers` rules: a URL pattern line followed by indented `Name: value` lines.
- * @param {string} text
- * @returns {Array<{ pattern: string, headers: Array<[string, string]> }>}
- */
-export function parseHeaders(text) {
-  const rules = [];
-  let current = null;
-  for (const rawLine of text.split(/\r?\n/)) {
-    const trimmed = rawLine.trim();
-    if (trimmed.length === 0 || trimmed.startsWith("#")) continue;
-    if (/^\s/.test(rawLine)) {
-      if (!current) continue;
-      const colon = trimmed.indexOf(":");
-      if (colon <= 0) continue;
-      const name = trimmed.slice(0, colon).trim();
-      const value = trimmed.slice(colon + 1).trim();
-      if (name.length > 0) current.headers.push([name, value]);
-    } else {
-      current = { pattern: trimmed, headers: [] };
-      rules.push(current);
-    }
-  }
-  return rules;
-}
-
-function patternMatches(pattern, pathname) {
-  if (pattern === pathname) return true;
-  if (pattern.endsWith("/*")) {
-    const prefix = pattern.slice(0, -1); // includes trailing "/"
-    return pathname === pattern.slice(0, -2) || pathname.startsWith(prefix);
-  }
-  return false;
-}
-
-/**
- * Collects headers from every `_headers` rule matching `pathname`.
- * @param {Array<{ pattern: string, headers: Array<[string, string]> }>} rules
- * @param {string} pathname
- * @returns {Array<[string, string]>}
- */
-export function headersFor(rules, pathname) {
-  const matched = [];
-  for (const rule of rules) {
-    if (patternMatches(rule.pattern, pathname)) {
-      matched.push(...rule.headers);
-    }
-  }
-  return matched;
-}
 
 function isRegularFile(filePath) {
   try {
@@ -88,75 +23,45 @@ function isRegularFile(filePath) {
   }
 }
 
-function contentTypeFor(filePath) {
-  return MIME_TYPES.get(extname(filePath).toLowerCase()) ?? "application/octet-stream";
+function sendText(res, status, text, extraHeaders = {}) {
+  res.writeHead(status, { "Content-Type": "text/plain; charset=utf-8", ...extraHeaders });
+  res.end(text);
 }
 
-function serveStatic(req, res, pathname, distDir, headerRules) {
-  if (req.method !== "GET" && req.method !== "HEAD") {
-    res.writeHead(405, { "Content-Type": "text/plain; charset=utf-8" });
-    res.end("Method Not Allowed");
-    return;
-  }
-
-  let decoded;
-  try {
-    decoded = decodeURIComponent(pathname);
-  } catch {
-    res.writeHead(400, { "Content-Type": "text/plain; charset=utf-8" });
-    res.end("Bad Request");
-    return;
-  }
-  if (decoded.includes("\0")) {
-    res.writeHead(400, { "Content-Type": "text/plain; charset=utf-8" });
-    res.end("Bad Request");
-    return;
-  }
-
-  const resolvedDist = realpathSync(resolve(distDir));
-  const candidate = resolve(resolvedDist, `.${decoded.startsWith("/") ? decoded : `/${decoded}`}`);
-  const rel = relative(resolvedDist, candidate);
-  if (rel.startsWith("..") || isAbsolute(rel)) {
-    res.writeHead(403, { "Content-Type": "text/plain; charset=utf-8" });
-    res.end("Forbidden");
-    return;
-  }
-
-  let filePath = resolve(resolvedDist, "index.html");
-  if (isRegularFile(candidate)) {
-    const realCandidate = realpathSync(candidate);
-    const realRel = relative(resolvedDist, realCandidate);
-    if (realRel.startsWith("..") || isAbsolute(realRel)) {
-      res.writeHead(403, { "Content-Type": "text/plain; charset=utf-8" });
-      res.end("Forbidden");
-      return;
-    }
-    filePath = realCandidate;
-  }
-  if (!isRegularFile(filePath)) {
-    res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
-    res.end("Not Found");
-    return;
-  }
-
-  const body = readFileSync(filePath);
-  for (const [name, value] of headersFor(headerRules, pathname)) {
-    res.setHeader(name, value);
-    if (name.toLowerCase() === "content-security-policy") {
-      res.setHeader(
-        "Content-Security-Policy-Report-Only",
-        `${value}; report-uri ${CSP_REPORT_PATH}`,
-      );
-    }
-  }
-  res.setHeader("Content-Type", contentTypeFor(filePath));
-  res.setHeader("Content-Length", String(body.byteLength));
-  res.writeHead(200);
-  if (req.method === "HEAD") {
+/** Writes a Web `Response` to a Node `ServerResponse`, streaming the body. */
+async function sendWebResponse(res, response, method) {
+  const headers = {};
+  for (const [name, value] of response.headers) headers[name] = value;
+  res.writeHead(response.status, headers);
+  if (response.body === null || method === "HEAD") {
+    await response.body?.cancel();
     res.end();
-  } else {
-    res.end(body);
+    return;
   }
+  Readable.fromWeb(response.body).pipe(res);
+}
+
+async function serveStatic(req, res, staticHandler) {
+  const method = req.method ?? "GET";
+  const headers = new Headers();
+  for (const [name, value] of Object.entries(req.headers)) {
+    if (typeof value === "string") headers.set(name, value);
+  }
+  const request = new Request(`http://mock.invalid${req.url ?? "/"}`, { method, headers });
+  const response = await staticHandler(request);
+  if (response === undefined) {
+    if (method !== "GET" && method !== "HEAD") {
+      sendText(res, 405, "Method Not Allowed");
+    } else {
+      sendText(res, 404, "Not Found");
+    }
+    return;
+  }
+  const csp = response.headers.get("content-security-policy");
+  if (csp !== null) {
+    response.headers.set("content-security-policy-report-only", `${csp}; report-uri ${CSP_REPORT_PATH}`);
+  }
+  await sendWebResponse(res, response, method);
 }
 
 const DEFAULT_SESSION = { email: "fixture@example.com", name: "Fixture User" };
@@ -540,11 +445,10 @@ async function handleCspReports(req, res, reports, log) {
 
 export function createMockServer({
   distDir = DEFAULT_DIST_DIR,
-  headersFile = DEFAULT_HEADERS_FILE,
   fixture,
   log = () => {},
 } = {}) {
-  const headerRules = parseHeaders(readFileSync(headersFile, "utf8"));
+  const staticHandler = createStaticHandler({ distDir });
   const vault = fixture ?? loadFixture({ files: {} });
   const cspReports = [];
   return createServer((req, res) => {
@@ -574,7 +478,10 @@ export function createMockServer({
       });
       return;
     }
-    serveStatic(req, res, rawPathname, distDir, headerRules);
+    void serveStatic(req, res, staticHandler).catch(() => {
+      if (!res.headersSent) sendText(res, 500, "Internal Server Error");
+      else res.destroy();
+    });
   });
 }
 

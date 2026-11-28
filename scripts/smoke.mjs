@@ -1,17 +1,16 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { readFileSync } from "node:fs";
 import { request as httpRequest } from "node:http";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { headersFor, isMainEntry, parseHeaders } from "./mock-api.mjs";
+import { SECURITY_HEADERS } from "../host-node/static-host.mjs";
+import { isMainEntry } from "./mock-api.mjs";
 
 const scriptPath = fileURLToPath(import.meta.url);
 const scriptDir = dirname(scriptPath);
 const repoRoot = resolve(scriptDir, "..");
 
-const DEFAULT_HEADERS_FILE = resolve(repoRoot, "web/public/_headers");
 const MOCK_API_SCRIPT = resolve(scriptDir, "mock-api.mjs");
 const CSP_REPORT_PATH = "/__mock/csp-reports";
 const STRONG_ETAG_PATTERN = /^"[A-Za-z0-9+/=_-]{1,200}"$/;
@@ -152,7 +151,7 @@ function startMockApi({ distDir, fixtureFile } = {}) {
 
 export async function runMatrix(
   baseUrl,
-  { headersFile = DEFAULT_HEADERS_FILE, out = process.stderr } = {},
+  { out = process.stderr } = {},
 ) {
   let rootId;
   let markdownFileId;
@@ -166,15 +165,11 @@ export async function runMatrix(
         const res = await fetch(`${baseUrl}/`);
         assert.equal(res.status, 200, `expected 200, got ${res.status}`);
         await res.text();
-        const expectedHeaders = headersFor(parseHeaders(readFileSync(headersFile, "utf8")), "/");
         let expectedCsp = null;
-        for (const [name, value] of expectedHeaders) {
-          assert.equal(res.headers.get(name.toLowerCase()), value, `header ${name} mismatch`);
-          if (name.toLowerCase() === "content-security-policy") {
-            expectedCsp = value;
-          }
+        for (const [name, value] of SECURITY_HEADERS) {
+          assert.equal(res.headers.get(name), value, `header ${name} mismatch`);
+          if (name === "content-security-policy") expectedCsp = value;
         }
-        assert.ok(expectedCsp, "Content-Security-Policy header must exist in _headers");
         assert.equal(
           res.headers.get("content-security-policy-report-only"),
           `${expectedCsp}; report-uri ${CSP_REPORT_PATH}`,
@@ -293,7 +288,10 @@ export async function runMatrix(
     [
       "traversal",
       async () => {
-        const rawRes = await rawGet(baseUrl, "/%2e%2e/package.json");
+        // `%2e%2e` is a dot segment the URL parser removes; `%2f` survives parsing and must be refused.
+        const dotRes = await rawGet(baseUrl, "/%2e%2e/package.json");
+        assert.doesNotMatch(dotRes.body, /"name":\s*"markyard"/, "dot-segment traversal leaked a file");
+        const rawRes = await rawGet(baseUrl, "/..%2fpackage.json");
         assert.equal(rawRes.status, 403, `expected 403 for path traversal, got ${rawRes.status}`);
       },
     ],
