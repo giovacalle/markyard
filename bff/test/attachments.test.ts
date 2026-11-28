@@ -455,6 +455,8 @@ describe("POST /api/attachments", () => {
     const upload = uploadCall(inner);
     const boundary = boundaryOf(upload);
     expect(boundary).toMatch(/^markyard-7f3c9a1e5b2d4086-[0-9a-f]{32}$/);
+    // Without workerd's `FixedLengthStream`, the exact multipart length is set by hand (#44).
+    expect(upload.headers.get("content-length")).toBe(String(upload.body.length));
     expect(upload.body).toEqual(
       multipart(
         boundary,

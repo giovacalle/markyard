@@ -6,17 +6,24 @@ interface FixedLengthStreamConstructor {
 }
 
 /**
- * Pipes `body` through a Workers `FixedLengthStream(length)`, so `fetch` sends a
- * `Content-Length` instead of chunked encoding. Outside workerd (tests) the stream is returned
- * as is.
+ * `RequestInit` for a streamed upload of exactly `length` bytes, sent with a `Content-Length`
+ * rather than chunked encoding. On workerd the body is piped through a `FixedLengthStream`;
+ * elsewhere (Node 24) the header is set by hand, which `fetch` honours on a `duplex: "half"`
+ * stream and enforces (a length mismatch fails the request). The body is never collected.
  */
-export const fixedLength = (
-  body: ReadableStream<Uint8Array>,
+export const fixedLengthInit = (
+  init: {
+    readonly method: string;
+    readonly headers: Readonly<Record<string, string>>;
+    readonly body: ReadableStream<Uint8Array>;
+  },
   length: number,
-): ReadableStream<Uint8Array> => {
+): RequestInit => {
   const FixedLengthStream = (globalThis as { FixedLengthStream?: FixedLengthStreamConstructor })
     .FixedLengthStream;
-  return FixedLengthStream === undefined ? body : body.pipeThrough(new FixedLengthStream(length));
+  return FixedLengthStream === undefined
+    ? streamInit({ ...init, headers: { ...init.headers, "content-length": String(length) } })
+    : streamInit({ ...init, body: init.body.pipeThrough(new FixedLengthStream(length)) });
 };
 
 /**
