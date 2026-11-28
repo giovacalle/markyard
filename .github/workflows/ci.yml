@@ -25,3 +25,34 @@ jobs:
       - run: pnpm build
       - run: pnpm check:bff
       - run: pnpm test:bff
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.1.1
+      - run: pnpm install --frozen-lockfile
+      - run: docker build -t markyard:ci .
+      - name: Start the container
+        run: |
+          docker run -d --name markyard -p 8080:8080 \
+            -e PUBLIC_ORIGIN=http://localhost:8080 \
+            -e ALLOWED_EMAILS=ci@example.com \
+            -e GOOGLE_CLIENT_ID=ci-client-id \
+            -e GOOGLE_CLIENT_SECRET=ci-client-secret \
+            -e COOKIE_KEYS="1:$(openssl rand -hex 32)" \
+            markyard:ci
+          for _ in $(seq 30); do
+            curl -fsS http://localhost:8080/api/health && exit 0
+            sleep 1
+          done
+          docker logs markyard
+          exit 1
+      - run: pnpm smoke --target http://localhost:8080
+      - if: always()
+        run: docker logs markyard || true; docker stop markyard || true

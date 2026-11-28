@@ -18,7 +18,7 @@
     "test:web": "pnpm --dir web test",
     "check:bff": "pnpm --dir bff check",
     "test:bff": "pnpm --dir bff test",
-    "test:scripts": "node --test host-node/static-host.test.mjs scripts/check-csp-source.test.mjs scripts/check-test-timeouts.test.mjs scripts/mock-api.test.mjs scripts/smoke.test.mjs"
+    "test:scripts": "node --test host-node/static-host.test.mjs host-node/host.test.mjs scripts/check-csp-source.test.mjs scripts/check-test-timeouts.test.mjs scripts/mock-api.test.mjs scripts/smoke.test.mjs"
   },
   "devDependencies": {
     "@alchemy.run/cloudflare": "2.0.0-beta.87",
