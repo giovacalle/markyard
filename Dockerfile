@@ -31,7 +31,7 @@ COPY --from=deps /app/host-node/node_modules host-node/node_modules
 COPY package.json ./
 COPY bff/package.json bff/
 COPY bff/src bff/src
-COPY host-node/package.json host-node/host.mjs host-node/server.mjs host-node/static-host.mjs host-node/
+COPY host-node/package.json host-node/host.mjs host-node/server.mjs host-node/ssrf-guard.mjs host-node/static-host.mjs host-node/
 COPY --from=build /app/web/dist web/dist
 USER node
 EXPOSE 8080

@@ -3,6 +3,7 @@
 
 import { makeFetch } from "../bff/src/http/app.ts";
 import { systemEntropy } from "../bff/src/infrastructure/entropy.ts";
+import { createGuardedFetch } from "./ssrf-guard.mjs";
 import { createStaticHandler } from "./static-host.mjs";
 
 /** The variables the BFF reads, with the same names as the Cloudflare Worker bindings. */
@@ -40,7 +41,7 @@ const isApiPath = (pathname) => pathname === "/api" || pathname.startsWith("/api
  */
 export const createHost = ({ distDir, env, fetch: upstreamFetch, entropy, google }) => {
   const bff = makeFetch({
-    fetch: upstreamFetch ?? ((request) => fetch(request)),
+    fetch: upstreamFetch ?? createGuardedFetch(),
     entropy: entropy ?? systemEntropy,
     google,
   });
