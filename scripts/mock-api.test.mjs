@@ -7,7 +7,7 @@ import { dirname, join, resolve } from "node:path";
 import { after, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { createMockServer, headersFor, loadFixture, parseHeaders } from "./mock-api.mjs";
+import { createMockServer, loadFixture } from "./mock-api.mjs";
 
 const testDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(testDir, "..");
@@ -15,6 +15,25 @@ const realHeadersFile = resolve(repoRoot, "web/public/_headers");
 const mockApiScript = resolve(testDir, "mock-api.mjs");
 const defaultFixtureFile = resolve(testDir, "mock-api.fixture.json");
 const rootPackageJson = resolve(repoRoot, "package.json");
+
+/** A browser navigation; `fetch` always sends `Sec-Fetch-Mode: cors`, so this uses `node:http`. */
+function navigate(url) {
+  return new Promise((resolveReq, rejectReq) => {
+    const req = httpRequest(url, { headers: { "sec-fetch-mode": "navigate" } }, (res) => {
+      const chunks = [];
+      res.on("data", (chunk) => chunks.push(chunk));
+      res.on("end", () => {
+        const headers = new Headers();
+        for (const [name, value] of Object.entries(res.headers)) {
+          if (typeof value === "string") headers.set(name, value);
+        }
+        resolveReq(new Response(Buffer.concat(chunks), { status: res.statusCode, headers }));
+      });
+    });
+    req.on("error", rejectReq);
+    req.end();
+  });
+}
 
 function expectedCspFromHeadersFile() {
   const raw = readFileSync(realHeadersFile, "utf8");
@@ -56,37 +75,6 @@ async function startServer(options) {
   };
 }
 
-describe("parseHeaders and headersFor", () => {
-  it("parses Cloudflare _headers rules with splats and exact paths", () => {
-    const rules = parseHeaders(`
-# comment
-/*
-  Content-Security-Policy: default-src 'self'
-  X-Content-Type-Options: nosniff
-
-/assets/*
-  Cache-Control: public, max-age=31536000
-
-/exact
-  X-Exact: yes
-`);
-    assert.deepEqual(headersFor(rules, "/"), [
-      ["Content-Security-Policy", "default-src 'self'"],
-      ["X-Content-Type-Options", "nosniff"],
-    ]);
-    assert.deepEqual(headersFor(rules, "/assets/app.js"), [
-      ["Content-Security-Policy", "default-src 'self'"],
-      ["X-Content-Type-Options", "nosniff"],
-      ["Cache-Control", "public, max-age=31536000"],
-    ]);
-    assert.deepEqual(headersFor(rules, "/exact"), [
-      ["Content-Security-Policy", "default-src 'self'"],
-      ["X-Content-Type-Options", "nosniff"],
-      ["X-Exact", "yes"],
-    ]);
-  });
-});
-
 describe("static serving and CSP headers", () => {
   const { parent, dir: distDir } = makeTempDist();
   let running;
@@ -97,11 +85,11 @@ describe("static serving and CSP headers", () => {
   });
 
   it("serves index.html with the CSP from web/public/_headers on / and SPA fallback", async () => {
-    running = await startServer({ distDir, headersFile: realHeadersFile });
+    running = await startServer({ distDir });
     const expectedCsp = expectedCspFromHeadersFile();
 
     for (const path of ["/", "/some/deep/route"]) {
-      const res = await fetch(`${running.baseUrl}${path}`);
+      const res = await navigate(`${running.baseUrl}${path}`);
       assert.equal(res.status, 200);
       assert.equal(res.headers.get("content-security-policy"), expectedCsp);
       assert.equal(res.headers.get("x-content-type-options"), "nosniff");
@@ -141,7 +129,7 @@ describe("static serving and CSP headers", () => {
         {
           hostname: "127.0.0.1",
           port: address.port,
-          path: "/%2e%2e/secret.txt",
+          path: "/..%2fsecret.txt",
           method: "GET",
         },
         (res) => {
@@ -179,14 +167,13 @@ describe("CSP violation reports", () => {
   it("sends Content-Security-Policy-Report-Only on static responses and omits it on /api/*", async () => {
     running = await startServer({
       distDir,
-      headersFile: realHeadersFile,
       log: (line) => logs.push(line),
     });
     const expectedCsp = expectedCspFromHeadersFile();
     const expectedReportOnly = `${expectedCsp}; report-uri /__mock/csp-reports`;
 
     for (const path of ["/", "/some/deep/route", "/assets/app.js"]) {
-      const res = await fetch(`${running.baseUrl}${path}`);
+      const res = await navigate(`${running.baseUrl}${path}`);
       assert.equal(res.status, 200, `expected 200 for ${path}`);
       assert.equal(res.headers.get("content-security-policy"), expectedCsp);
       assert.equal(res.headers.get("content-security-policy-report-only"), expectedReportOnly);
@@ -316,7 +303,7 @@ describe("session, root, and folder children endpoints", () => {
   });
 
   it("returns session JSON without static _headers CSP", async () => {
-    running = await startServer({ distDir, headersFile: realHeadersFile, fixture });
+    running = await startServer({ distDir, fixture });
     const res = await fetch(`${running.baseUrl}/api/session`);
     assert.equal(res.status, 200);
     assert.equal(res.headers.get("content-security-policy"), null);
@@ -397,7 +384,7 @@ describe("file content GET and PUT with ETag and If-Match", () => {
   });
 
   it("GET returns UTF-8 content and strong quoted ETag, and 404 for unknown/non-markdown", async () => {
-    running = await startServer({ distDir, headersFile: realHeadersFile, fixture });
+    running = await startServer({ distDir, fixture });
     const rootNodes = (
       await (await fetch(`${running.baseUrl}/api/folders/fixture-root/children`)).json()
     ).nodes;
@@ -515,7 +502,7 @@ describe("changes feed and vault index", () => {
   });
 
   it("records PUT updates in the changes feed and validates pageToken shapes", async () => {
-    running = await startServer({ distDir, headersFile: realHeadersFile, fixture });
+    running = await startServer({ distDir, fixture });
 
     const tokenRes = await fetch(`${running.baseUrl}/api/changes/start-token`);
     assert.equal(tokenRes.status, 200);
@@ -702,7 +689,7 @@ describe("default fixture, 501 routes, CLI, and package.json", () => {
   });
 
   it("answers 501 not_implemented for unmocked /api/* routes", async () => {
-    const running = await startServer({ distDir, headersFile: realHeadersFile });
+    const running = await startServer({ distDir });
     try {
       for (const [method, path] of [
         ["GET", "/api/search?q=hello"],
