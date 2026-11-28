@@ -622,17 +622,40 @@ describe("save", () => {
 
   it("save_with_content_length_streams_the_request_body_to_drive", async () => {
     const payload = new Uint8Array(200_000).map((_, i) => i % 251);
-    const google = fake([["PUT", `${UPLOAD_URL}doc-1`, json(200, { etag: NEW_ETAG })]]);
+    const chunk = 4096;
+    let pulled = 0;
+    let offset = 0;
+    const source = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (offset >= payload.length) return controller.close();
+        pulled++;
+        controller.enqueue(payload.slice(offset, offset + chunk));
+        offset += chunk;
+      },
+    });
+    const inner = fake([["PUT", `${UPLOAD_URL}doc-1`, json(200, { etag: NEW_ETAG })]]);
+    const outgoing: Array<{ contentLength: string | null; pulled: number }> = [];
+    const google = {
+      fetch: (req: Request) => {
+        outgoing.push({ contentLength: req.headers.get("content-length"), pulled });
+        return inner.fetch(req);
+      },
+    } as unknown as FakeGoogle;
     const res = await send(
       request("PUT", "/api/files/doc-1/content", {
         cookie: await fresh(),
         headers: { "if-match": ETAG, "content-length": String(payload.length) },
-        body: streamOf(payload, 4096),
+        body: source,
       }),
       { google },
     );
     expect(res.status).toBe(204);
-    expect(google.calls[0]!.body).toEqual(payload);
+    // Without workerd's `FixedLengthStream`, the inbound length is set by hand (#44), and the
+    // body is still a stream: when Drive is asked, it has barely been read.
+    expect(outgoing).toHaveLength(1);
+    expect(outgoing[0]!.contentLength).toBe(String(payload.length));
+    expect(outgoing[0]!.pulled).toBeLessThan(payload.length / chunk / 2);
+    expect(inner.calls[0]!.body).toEqual(payload);
   });
 });
 

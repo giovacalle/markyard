@@ -58,7 +58,7 @@ import {
   type Revision,
   type RevisionMeta,
 } from "../domain/revisions.ts";
-import { fixedLength, framed, streamInit } from "./streams.ts";
+import { fixedLengthInit, framed } from "./streams.ts";
 
 /** Seconds to wait when Drive rate-limits without saying for how long. */
 export const DEFAULT_RETRY_AFTER = 5;
@@ -591,8 +591,8 @@ export type UploadBody =
   | { readonly stream: ReadableStream<Uint8Array>; readonly length: number };
 
 /**
- * Conditional Drive v2 media upload; returns the new etag. A stream body is piped through a
- * `FixedLengthStream(length)` so Drive gets a `Content-Length` (ADR 0003 constraint 1).
+ * Conditional Drive v2 media upload; returns the new etag. A stream body is sent with an exact
+ * `Content-Length` (`fixedLengthInit`, ADR 0003 constraint 1).
  */
 export const upload = (
   accessToken: string,
@@ -613,7 +613,7 @@ export const upload = (
         ? new Request(url, { method: "PUT", headers, body: body as BufferSource })
         : new Request(
             url,
-            streamInit({ method: "PUT", headers, body: fixedLength(body.stream, body.length) }),
+            fixedLengthInit({ method: "PUT", headers, body: body.stream }, body.length),
           );
     const res = yield* send(request);
     if (res.status === 412) return yield* Effect.fail(conflict());
@@ -625,8 +625,8 @@ export const upload = (
 /**
  * Drive v3 multipart `files.create` of an image into `folderId`. Bytes in memory get a boundary
  * that occurs nowhere in them; a raw stream (which cannot be scanned) gets a random 128-bit one,
- * and is framed by the multipart head and tail chunk by chunk, then piped through a
- * `FixedLengthStream` of the exact total length (ADR 0003 constraint 1).
+ * and is framed by the multipart head and tail chunk by chunk, then sent with the exact total
+ * `Content-Length` (`fixedLengthInit`, ADR 0003 constraint 1).
  */
 export const uploadImage = (
   accessToken: string,
@@ -662,14 +662,10 @@ export const uploadImage = (
           })
         : new Request(
             url,
-            streamInit({
-              method: "POST",
-              headers,
-              body: fixedLength(
-                framed(head, body.stream, tail),
-                head.length + body.length + tail.length,
-              ),
-            }),
+            fixedLengthInit(
+              { method: "POST", headers, body: framed(head, body.stream, tail) },
+              head.length + body.length + tail.length,
+            ),
           );
     return yield* call(request, decodeCreatedBlob);
   });

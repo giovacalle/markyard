@@ -1,7 +1,7 @@
 // `GET` and `PUT /api/files/{id}/content` (port of Rust `files::content` / `files::save`).
 // File bytes stay raw Web streams (ADR 0003 constraint 1): the download answers with Drive's
 // unread body stream, and the upload passes the request's body stream (with its
-// `Content-Length`) to `drive-client.upload`, which pipes it through a `FixedLengthStream`.
+// `Content-Length`) to `drive-client.upload`, which sends it with that exact `Content-Length`.
 // A refreshed cookie and `Retry-After` go through `ResponseSink`; failures through `handleErrors`.
 
 import * as Effect from "effect/Effect";
