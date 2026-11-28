@@ -1,0 +1,11 @@
+{
+  "name": "@markyard/host-node",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs"
+  },
+  "dependencies": {
+    "srvx": "1.0.8"
+  }
+}

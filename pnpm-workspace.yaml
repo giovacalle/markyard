@@ -1,6 +1,7 @@
 packages:
   - "web"
   - "bff"
+  - "host-node"
 
 allowBuilds:
   workerd: true

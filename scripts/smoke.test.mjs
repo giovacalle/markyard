@@ -7,7 +7,9 @@ import { after, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { createMockServer, loadFixture } from "./mock-api.mjs";
-import { runMatrix, runSmoke } from "./smoke.mjs";
+import { testEnv } from "../bff/test/support/harness.ts";
+import { startServer } from "../host-node/server.mjs";
+import { main, runHostMatrix, runMatrix, runSmoke } from "./smoke.mjs";
 
 const testDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(testDir, "..");
@@ -148,5 +150,34 @@ describe("smoke runner", () => {
     const pkg = JSON.parse(readFileSync(rootPackageJson, "utf8"));
     assert.equal(pkg.scripts.smoke, "node scripts/smoke.mjs");
     assert.match(pkg.scripts["test:scripts"], /(^| )scripts\/smoke\.test\.mjs( |$)/);
+  });
+
+  it("t6: runs the host matrix against the Node host", async () => {
+    const hostDist = join(parent, "host-dist");
+    mkdirSync(join(hostDist, "assets"), { recursive: true });
+    writeFileSync(
+      join(hostDist, "index.html"),
+      '<!doctype html><html><head><script type="module" src="/assets/app-1.js"></script></head></html>',
+    );
+    writeFileSync(join(hostDist, "assets/app-1.js"), "console.log(1)");
+    writeFileSync(join(hostDist, "_headers"), "/*\n  X-Test: 1\n");
+    const server = await startServer({
+      source: { ...testEnv(), DIST_DIR: hostDist, PORT: "0", HOST: "127.0.0.1" },
+      log: () => {},
+    });
+    const capture = makeMemoryOut();
+    try {
+      await runHostMatrix(server.url.replace(/\/$/, ""), { out: capture.out });
+      assert.match(capture.text(), /ok traversal/);
+      assert.doesNotMatch(capture.text(), /FAIL/);
+    } finally {
+      await server.close(true);
+    }
+  });
+
+  it("t7: main rejects a malformed --target with usage and exit code 2", async () => {
+    const capture = makeMemoryOut();
+    assert.equal(await main(["--target", "not-a-url"], capture.out), 2);
+    assert.match(capture.text(), /usage:/);
   });
 });

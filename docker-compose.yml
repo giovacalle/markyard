@@ -1,0 +1,12 @@
+# Markyard on Node 24: `cp .env.docker.example .env.docker`, fill it in, then `docker compose up --build`.
+services:
+  markyard:
+    build: .
+    image: markyard:local
+    env_file: .env.docker
+    ports:
+      - "${MARKYARD_PORT:-8080}:8080"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped

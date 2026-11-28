@@ -17,7 +17,8 @@ const STRONG_ETAG_PATTERN = /^"[A-Za-z0-9+/=_-]{1,200}"$/;
 const STARTUP_TIMEOUT_MS = 10_000;
 const SHUTDOWN_TIMEOUT_MS = 5_000;
 
-function rawGet(baseUrl, path) {
+/** A GET whose path and headers reach the server unchanged (`fetch` normalizes both). */
+function rawGet(baseUrl, path, headers = {}) {
   const url = new URL(baseUrl);
   return new Promise((resolveReq, rejectReq) => {
     const req = httpRequest(
@@ -26,6 +27,8 @@ function rawGet(baseUrl, path) {
         port: Number(url.port),
         path,
         method: "GET",
+        headers,
+        agent: false,
       },
       (res) => {
         const chunks = [];
@@ -33,6 +36,7 @@ function rawGet(baseUrl, path) {
         res.on("end", () =>
           resolveReq({
             status: res.statusCode,
+            headers: res.headers,
             body: Buffer.concat(chunks).toString("utf8"),
           }),
         );
@@ -305,6 +309,10 @@ export async function runMatrix(
     ],
   ];
 
+  await runSteps(steps, out);
+}
+
+async function runSteps(steps, out) {
   for (const [name, fn] of steps) {
     try {
       await fn();
@@ -315,6 +323,131 @@ export async function runMatrix(
       throw new Error(`${name}: ${message}`, { cause: err });
     }
   }
+}
+
+function assertSecurityHeaders(headers) {
+  const get = (name) => (headers instanceof Headers ? headers.get(name) : headers[name]);
+  for (const [name, value] of SECURITY_HEADERS) {
+    assert.equal(get(name), value, `header ${name} mismatch`);
+  }
+}
+
+/**
+ * The signed-out matrix for a real host (the Node host or its container): no fixture vault, so
+ * it checks static parity and the BFF answers that need no Google account.
+ */
+export async function runHostMatrix(baseUrl, { out = process.stderr } = {}) {
+  let indexEtag;
+  let assetPath;
+
+  const steps = [
+    [
+      "static",
+      async () => {
+        const res = await fetch(`${baseUrl}/`);
+        assert.equal(res.status, 200, `expected 200, got ${res.status}`);
+        assert.match(res.headers.get("content-type") ?? "", /^text\/html\b/);
+        assertSecurityHeaders(res.headers);
+        assert.equal(res.headers.get("cache-control"), "public, max-age=0, must-revalidate");
+        indexEtag = res.headers.get("etag");
+        assert.ok(indexEtag, "index.html must carry an ETag");
+        const html = await res.text();
+        assetPath = html.match(/(?:src|href)="(\/assets\/[^"]+\.js)"/)?.[1];
+        assert.ok(assetPath, "index.html must reference a hashed /assets/*.js file");
+      },
+    ],
+    [
+      "revalidate",
+      async () => {
+        const res = await fetch(`${baseUrl}/`, { headers: { "if-none-match": indexEtag } });
+        assert.equal(res.status, 304, `expected 304, got ${res.status}`);
+        assertSecurityHeaders(res.headers);
+      },
+    ],
+    [
+      "asset",
+      async () => {
+        const res = await fetch(`${baseUrl}${assetPath}`);
+        assert.equal(res.status, 200, `expected 200 for ${assetPath}, got ${res.status}`);
+        assert.match(res.headers.get("content-type") ?? "", /^text\/javascript\b/);
+        assert.equal(res.headers.get("cache-control"), "public, max-age=31536000, immutable");
+        assertSecurityHeaders(res.headers);
+        await res.arrayBuffer();
+      },
+    ],
+    [
+      "spa",
+      async () => {
+        const nav = await rawGet(baseUrl, "/some/deep/route", { "sec-fetch-mode": "navigate" });
+        assert.equal(nav.status, 200, `expected 200 for a navigation, got ${nav.status}`);
+        assert.match(nav.headers["content-type"] ?? "", /^text\/html\b/);
+        assertSecurityHeaders(nav.headers);
+        const res = await fetch(`${baseUrl}/some/deep/route`);
+        assert.equal(res.status, 404, `expected 404 for a non-navigation miss, got ${res.status}`);
+        assert.deepEqual(await res.json(), { code: "not_found", message: "Not found" });
+      },
+    ],
+    [
+      "headers-file",
+      async () => {
+        const res = await fetch(`${baseUrl}/_headers`);
+        assert.equal(res.status, 404, `expected _headers to be hidden, got ${res.status}`);
+        await res.text();
+      },
+    ],
+    [
+      "health",
+      async () => {
+        const res = await fetch(`${baseUrl}/api/health`);
+        assert.equal(res.status, 200, `expected 200, got ${res.status}`);
+        assertSecurityHeaders(res.headers);
+        assert.equal(res.headers.get("cache-control"), "no-store, no-transform");
+        await res.json();
+      },
+    ],
+    [
+      "session",
+      async () => {
+        const res = await fetch(`${baseUrl}/api/session`);
+        assert.equal(res.status, 401, `expected 401 signed out, got ${res.status}`);
+        await res.text();
+      },
+    ],
+    [
+      "login",
+      async () => {
+        const res = await fetch(`${baseUrl}/api/auth/login`, { redirect: "manual" });
+        assert.equal(res.status, 302, `expected 302, got ${res.status}`);
+        const location = new URL(res.headers.get("location") ?? "");
+        assert.equal(location.origin, "https://accounts.google.com");
+        assert.equal(location.searchParams.get("code_challenge_method"), "S256");
+        assert.match(location.searchParams.get("redirect_uri") ?? "", /\/api\/auth\/callback$/);
+        assert.ok(
+          res.headers.getSetCookie().some((c) => c.startsWith("__Host-")),
+          "login must set a __Host- state cookie",
+        );
+      },
+    ],
+    [
+      "csrf",
+      async () => {
+        const res = await fetch(`${baseUrl}/api/auth/logout`, { method: "POST" });
+        assert.equal(res.status, 403, `expected 403 without Origin, got ${res.status}`);
+        await res.text();
+      },
+    ],
+    [
+      "traversal",
+      async () => {
+        const dotRes = await rawGet(baseUrl, "/%2e%2e/package.json");
+        assert.doesNotMatch(dotRes.body, /"name":\s*"markyard"/, "dot-segment traversal leaked a file");
+        const rawRes = await rawGet(baseUrl, "/..%2fpackage.json");
+        assert.equal(rawRes.status, 403, `expected 403 for path traversal, got ${rawRes.status}`);
+      },
+    ],
+  ];
+
+  await runSteps(steps, out);
 }
 
 export async function runSmoke({
@@ -352,6 +485,21 @@ export async function runSmoke({
   }
 }
 
+/** `pnpm smoke` runs the mock matrix; `pnpm smoke --target <url>` checks a running host. */
+export async function main(argv, out = process.stderr) {
+  if (argv.length === 0) return (await runSmoke({ out })).exitCode;
+  if (argv.length !== 2 || argv[0] !== "--target" || !/^https?:\/\/[^/]+$/.test(argv[1])) {
+    out.write("usage: smoke.mjs [--target http://host:port]\n");
+    return 2;
+  }
+  try {
+    await runHostMatrix(argv[1], { out });
+    return 0;
+  } catch {
+    return 1;
+  }
+}
+
 if (isMainEntry(scriptPath)) {
-  process.exitCode = (await runSmoke()).exitCode;
+  process.exitCode = await main(process.argv.slice(2));
 }
