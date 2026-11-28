@@ -6,6 +6,7 @@
     "start": "node server.mjs"
   },
   "dependencies": {
-    "srvx": "1.0.8"
+    "srvx": "1.0.8",
+    "undici": "7.30.1"
   }
 }
