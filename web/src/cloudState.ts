@@ -36,7 +36,7 @@ import {
 } from "./settings";
 import { getViewPrefs, setViewPref, subscribeViewPrefs, type ViewPrefKey } from "./viewPrefs";
 
-// Optional multi-device sync of UI preferences through `/api/state` (D1 on the BFF). Runs only
+// Optional multi-device sync of UI preferences through `/api/state` (D1 or SQLite behind the BFF). Runs only
 // while `session.cloudSync` is true; otherwise nothing here touches the network. Best-effort:
 // every failure is swallowed, and preferences keep working locally.
 //

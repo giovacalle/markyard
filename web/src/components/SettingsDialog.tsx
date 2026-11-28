@@ -500,7 +500,7 @@ function SettingsBody({
             aria-hidden="true"
             className={`size-1.5 rounded-full ${cloudSync === true ? "bg-emerald-500" : "bg-neutral-400"}`}
           />
-          {cloudSync === true ? "Active (Cloudflare D1)" : "Local only"}
+          {cloudSync === true ? "Active" : "Local only"}
         </span>
       </div>
       {onPinVaultChange && (

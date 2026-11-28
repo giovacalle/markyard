@@ -16,10 +16,11 @@ export const BFF_ENV_NAMES = Object.freeze([
 
 /**
  * The BFF `env`, built once. `makeFetch` caches config and imported keys per `env` object, so the
- * host must pass this same object to every request.
+ * host must pass this same object to every request. `bindings` adds non-string bindings
+ * (`STATE_DB`).
  */
-export const bffEnvFrom = (source) => {
-  const env = {};
+export const bffEnvFrom = (source, bindings = {}) => {
+  const env = { ...bindings };
   for (const name of BFF_ENV_NAMES) {
     if (typeof source[name] === "string") env[name] = source[name];
   }

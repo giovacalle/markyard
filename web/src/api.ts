@@ -5,7 +5,7 @@ export interface Session {
   email: string;
   /** Google display name, when the account has one. */
   name?: string;
-  /** `true` only when the BFF has its optional D1 database bound (`/api/state` works). */
+  /** `true` only when the BFF has its optional state database bound (`/api/state` works). */
   cloudSync?: boolean;
   /** `true` when this account has no vault folder yet: the app shows the folder picker. */
   needsVaultSetup?: boolean;

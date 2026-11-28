@@ -19,7 +19,12 @@ export interface D1DatabaseLike {
   prepare(query: string): D1PreparedStatementLike;
 }
 
-const CREATE_TABLE =
+/**
+ * The one schema of the state table, run by every backend before its first query (D1 on
+ * Cloudflare, `node:sqlite` on the Node host). `bff/migrations/0001_user_state.sql` must be the
+ * same statement; `test/state-schema.test.ts` fails when they drift.
+ */
+export const CREATE_TABLE =
   "CREATE TABLE IF NOT EXISTS user_state (email TEXT PRIMARY KEY, state_json TEXT NOT NULL, updated_at INTEGER NOT NULL)";
 const SELECT_ROW = "SELECT state_json, updated_at FROM user_state WHERE email = ?1";
 /** A write wins only when it is not older than the stored one, so devices converge. */
@@ -44,7 +49,7 @@ export const disabledStateStore: StateStoreService = {
 const isD1 = (u: unknown): u is D1DatabaseLike =>
   typeof u === "object" && u !== null && typeof (u as D1DatabaseLike).prepare === "function";
 
-/** The D1 store when `env.STATE_DB` is a D1 binding, else the disabled one. */
+/** The D1 store when `env.STATE_DB` is a D1 binding (or the Node host's SQLite adapter), else the disabled one. */
 export const stateStoreFromEnv = (env: Readonly<Record<string, unknown>>): StateStoreService => {
   const binding = env["STATE_DB"];
   return isD1(binding) ? makeD1StateStore(binding) : disabledStateStore;

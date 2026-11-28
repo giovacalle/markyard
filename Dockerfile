@@ -31,8 +31,10 @@ COPY --from=deps /app/host-node/node_modules host-node/node_modules
 COPY package.json ./
 COPY bff/package.json bff/
 COPY bff/src bff/src
-COPY host-node/package.json host-node/host.mjs host-node/server.mjs host-node/static-host.mjs host-node/
+COPY host-node/package.json host-node/host.mjs host-node/server.mjs host-node/sqlite-d1.mjs host-node/static-host.mjs host-node/
 COPY --from=build /app/web/dist web/dist
+# Optional state sync: set STATE_DB_FILE=/data/markyard.db and mount a volume on /data.
+RUN mkdir /data && chown node:node /data
 USER node
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s \
