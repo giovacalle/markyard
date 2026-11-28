@@ -1,5 +1,6 @@
 // Entry point of the Node 24 host: `node host-node/server.mjs`. Config comes from environment
-// variables with the Cloudflare binding names (see `.env.example`), plus PORT, HOST and DIST_DIR.
+// variables with the Cloudflare binding names (see `.env.docker.example`), plus PORT, HOST,
+// DIST_DIR and STATE_DB_FILE (a SQLite file for optional state sync; unset stays stateless).
 
 import { statSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -8,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { serve } from "srvx";
 
 import { bffEnvFrom, createHost, withAccessLog } from "./host.mjs";
+import { openSqliteD1 } from "./sqlite-d1.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_DIST_DIR = resolve(here, "../web/dist");
@@ -29,7 +31,9 @@ export const startServer = async ({ source = process.env, log = console.log, ...
   if (!statSync(resolve(distDir, "index.html"), { throwIfNoEntry: false })?.isFile()) {
     throw new Error(`${distDir}/index.html is missing; run "pnpm build" first`);
   }
-  const handler = createHost({ distDir, env: bffEnvFrom(source), ...deps });
+  const state = source.STATE_DB_FILE ? openSqliteD1(resolve(source.STATE_DB_FILE)) : undefined;
+  const env = bffEnvFrom(source, state ? { STATE_DB: state.d1 } : {});
+  const handler = createHost({ distDir, env, ...deps });
   const server = serve({
     fetch: withAccessLog(handler, log),
     port: parsePort(source.PORT),
@@ -38,6 +42,16 @@ export const startServer = async ({ source = process.env, log = console.log, ...
     gracefulShutdown: false,
   });
   await server.ready();
+  if (state) {
+    const close = server.close.bind(server);
+    server.close = async (...args) => {
+      try {
+        await close(...args);
+      } finally {
+        if (state.db.isOpen) state.db.close();
+      }
+    };
+  }
   return server;
 };
 
@@ -49,7 +63,9 @@ const main = async () => {
     console.error(`markyard: ${error instanceof Error ? error.message : String(error)}`);
     process.exit(1);
   }
-  console.log(`markyard listening on ${server.url}`);
+  console.log(
+    `markyard listening on ${server.url} (state sync ${process.env.STATE_DB_FILE ? "on" : "off"})`,
+  );
 
   let stopping = false;
   const shutdown = (signal) => {

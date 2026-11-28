@@ -6,7 +6,13 @@ services:
     env_file: .env.docker
     ports:
       - "${MARKYARD_PORT:-8080}:8080"
+    # Optional state sync: STATE_DB_FILE=/data/markyard.db in .env.docker keeps it in this volume.
+    volumes:
+      - markyard-data:/data
     read_only: true
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     restart: unless-stopped
+
+volumes:
+  markyard-data:

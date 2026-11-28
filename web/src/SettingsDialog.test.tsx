@@ -447,7 +447,7 @@ describe("Settings dialog", () => {
     await screen.findByRole("treeitem", { name: /a\.md/ });
     let dialog = await openSettingsFromAccount();
     showSection(dialog, "Sync & Storage");
-    expect(within(dialog).getByTestId("settings-cloud-sync")).toHaveTextContent("Local only");
+    expect(within(dialog).getByTestId("settings-cloud-sync")).toHaveTextContent(/^Local only$/);
     unmount();
 
     server.resetHandlers();
@@ -464,9 +464,8 @@ describe("Settings dialog", () => {
     await screen.findByRole("treeitem", { name: /a\.md/ });
     dialog = await openSettingsFromAccount();
     showSection(dialog, "Sync & Storage");
-    expect(within(dialog).getByTestId("settings-cloud-sync")).toHaveTextContent(
-      "Active (Cloudflare D1)",
-    );
+    // Whatever the backend (D1 on Cloudflare, SQLite on the Node host), the copy names none.
+    expect(within(dialog).getByTestId("settings-cloud-sync")).toHaveTextContent(/^Active$/);
   });
 
   it("clears the local cache after confirming and reloads the tree from Drive", async () => {
